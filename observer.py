@@ -195,19 +195,35 @@ def sort_records(records: list[dict[str, object]]) -> list[dict[str, object]]:
     )
 
 
-def build_action_line(item: dict[str, object]) -> str:
+def action_type_for_item(item: dict[str, object]) -> str:
     exceptions = item["exceptions"]
-    ticket_reference = item["ticket_reference"]
 
     if "estimate_stalled" in exceptions:
-        return f"Follow up on estimate for {ticket_reference}"
+        return "estimate_stalled"
     if "overdue_follow_up" in exceptions:
-        return f"Call customer for {ticket_reference}"
+        return "overdue_follow_up"
     if "dvi_missing_incomplete" in exceptions:
-        return f"Complete DVI for {ticket_reference}"
+        return "dvi_missing_incomplete"
     if "waiting_on_parts" in exceptions:
-        return f"Check parts ETA for {ticket_reference}"
+        return "waiting_on_parts"
     if "status_mismatch" in exceptions:
+        return "status_mismatch"
+    return "review"
+
+
+def build_action_line(item: dict[str, object]) -> str:
+    action_type = action_type_for_item(item)
+    ticket_reference = item["ticket_reference"]
+
+    if action_type == "estimate_stalled":
+        return f"Follow up on estimate — waiting approval for {ticket_reference}"
+    if action_type == "overdue_follow_up":
+        return f"Call customer — overdue follow-up for {ticket_reference}"
+    if action_type == "dvi_missing_incomplete":
+        return f"Complete DVI — missing photos/notes for {ticket_reference}"
+    if action_type == "waiting_on_parts":
+        return f"Check parts ETA — possible delay for {ticket_reference}"
+    if action_type == "status_mismatch":
         return f"Fix status mismatch for {ticket_reference}"
     return f"Review {ticket_reference}"
 
@@ -234,10 +250,16 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
         item for item in monitored_items if item["priority"] in {"high", "medium"}
     ]
 
-    top_actions = [
-        build_action_line(item)
-        for item in monitored_items[:3]
-    ]
+    top_actions = []
+    seen_action_types: set[str] = set()
+    for item in monitored_items:
+        action_type = action_type_for_item(item)
+        if action_type in seen_action_types:
+            continue
+        top_actions.append(build_action_line(item))
+        seen_action_types.add(action_type)
+        if len(top_actions) == 3:
+            break
 
     follow_up_tasks = []
     for item in monitored_items:
@@ -331,9 +353,3 @@ def print_summary(summary: dict[str, object]) -> None:
 
 def main() -> None:
     items = sample_items()
-    summary = summarize_items(items)
-    print_summary(summary)
-
-
-if __name__ == "__main__":
-    main()
