@@ -353,3 +353,9 @@ def print_summary(summary: dict[str, object]) -> None:
 
 def main() -> None:
     items = sample_items()
+    summary = summarize_items(items)
+    print_summary(summary)
+
+
+if __name__ == "__main__":
+    main()
