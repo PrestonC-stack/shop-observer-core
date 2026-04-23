@@ -198,16 +198,16 @@ def sort_records(records: list[dict[str, object]]) -> list[dict[str, object]]:
 def action_type_for_item(item: dict[str, object]) -> str:
     exceptions = item["exceptions"]
 
-    if "estimate_stalled" in exceptions:
-        return "estimate_stalled"
-    if "overdue_follow_up" in exceptions:
-        return "overdue_follow_up"
     if "dvi_missing_incomplete" in exceptions:
         return "dvi_missing_incomplete"
-    if "waiting_on_parts" in exceptions:
-        return "waiting_on_parts"
     if "status_mismatch" in exceptions:
         return "status_mismatch"
+    if "estimate_stalled" in exceptions:
+        return "estimate_stalled"
+    if "waiting_on_parts" in exceptions:
+        return "waiting_on_parts"
+    if "overdue_follow_up" in exceptions:
+        return "overdue_follow_up"
     return "review"
 
 
@@ -216,13 +216,13 @@ def build_action_line(item: dict[str, object]) -> str:
     ticket_reference = item["ticket_reference"]
 
     if action_type == "estimate_stalled":
-        return f"Follow up on estimate — waiting approval for {ticket_reference}"
+        return f"Follow up on estimate â€” waiting approval for {ticket_reference}"
     if action_type == "overdue_follow_up":
-        return f"Call customer — overdue follow-up for {ticket_reference}"
+        return f"Call customer â€” overdue follow-up for {ticket_reference}"
     if action_type == "dvi_missing_incomplete":
-        return f"Complete DVI — missing photos/notes for {ticket_reference}"
+        return f"Complete DVI â€” missing photos/notes for {ticket_reference}"
     if action_type == "waiting_on_parts":
-        return f"Check parts ETA — possible delay for {ticket_reference}"
+        return f"Check parts ETA â€” possible delay for {ticket_reference}"
     if action_type == "status_mismatch":
         return f"Fix status mismatch for {ticket_reference}"
     return f"Review {ticket_reference}"
@@ -359,3 +359,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+PS C:\CALLAHAN\AI Workspace\AI-WORKSPACE\AI-TOOLS\Hermes-Runtime\modules>
