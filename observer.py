@@ -195,6 +195,23 @@ def sort_records(records: list[dict[str, object]]) -> list[dict[str, object]]:
     )
 
 
+def build_action_line(item: dict[str, object]) -> str:
+    exceptions = item["exceptions"]
+    ticket_reference = item["ticket_reference"]
+
+    if "estimate_stalled" in exceptions:
+        return f"Follow up on estimate for {ticket_reference}"
+    if "overdue_follow_up" in exceptions:
+        return f"Call customer for {ticket_reference}"
+    if "dvi_missing_incomplete" in exceptions:
+        return f"Complete DVI for {ticket_reference}"
+    if "waiting_on_parts" in exceptions:
+        return f"Check parts ETA for {ticket_reference}"
+    if "status_mismatch" in exceptions:
+        return f"Fix status mismatch for {ticket_reference}"
+    return f"Review {ticket_reference}"
+
+
 def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
     monitored_items = [build_item_record(item) for item in items]
     monitored_items = sort_records(monitored_items)
@@ -215,6 +232,11 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
 
     critical_items = [
         item for item in monitored_items if item["priority"] in {"high", "medium"}
+    ]
+
+    top_actions = [
+        build_action_line(item)
+        for item in monitored_items[:3]
     ]
 
     follow_up_tasks = []
@@ -238,6 +260,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
         "total_items": len(items),
         "counts_by_exception": counts_by_exception,
         "counts_by_priority": counts_by_priority,
+        "top_actions": top_actions,
         "critical_items": critical_items,
         "follow_up_tasks": follow_up_tasks,
         "items": monitored_items,
@@ -248,6 +271,14 @@ def print_summary(summary: dict[str, object]) -> None:
     print("SHOP ACTIVITY SUMMARY")
     print(f"Generated at: {summary['generated_at']}")
     print(f"Total items: {summary['total_items']}")
+    print()
+
+    print("TOP 3 ACTIONS RIGHT NOW")
+    if summary["top_actions"]:
+        for action in summary["top_actions"]:
+            print(f"- {action}")
+    else:
+        print("- none")
     print()
 
     print("Counts by exception:")
