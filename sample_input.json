@@ -1,0 +1,44 @@
+[
+  {
+    "item_id": "ITEM-101",
+    "location": "Country Club",
+    "advisor_name": "Drew",
+    "ticket_reference": "RO-2201",
+    "current_status": "waiting_on_parts",
+    "last_update_at": "2026-04-22T08:10:00",
+    "has_parts_hold": true,
+    "dvi_complete": true,
+    "estimate_complete": true,
+    "status_mismatch": false,
+    "follow_up_needed": false,
+    "notes": "Front brake parts are still on order."
+  },
+  {
+    "item_id": "ITEM-102",
+    "location": "Apache",
+    "advisor_name": "Bob",
+    "ticket_reference": "RO-2202",
+    "current_status": "inspection_complete",
+    "last_update_at": "2026-04-22T07:00:00",
+    "has_parts_hold": false,
+    "dvi_complete": false,
+    "estimate_complete": true,
+    "status_mismatch": false,
+    "follow_up_needed": false,
+    "notes": "Inspection is missing photo support."
+  },
+  {
+    "item_id": "ITEM-103",
+    "location": "Mobile",
+    "advisor_name": "Drew",
+    "ticket_reference": "RO-2203",
+    "current_status": "estimate_pending",
+    "last_update_at": "2026-04-21T15:00:00",
+    "has_parts_hold": false,
+    "dvi_complete": true,
+    "estimate_complete": false,
+    "status_mismatch": false,
+    "follow_up_needed": true,
+    "notes": "Customer is waiting for an estimate update."
+  }
+]
