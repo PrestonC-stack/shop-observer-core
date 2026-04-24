@@ -239,6 +239,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
     }
     counts_by_priority = {"high": 0, "medium": 0, "low": 0}
     by_advisor: dict[str, dict[str, int]] = {}
+    by_location: dict[str, dict[str, int]] = {}
 
     for item in monitored_items:
         for exception in item["exceptions"]:
@@ -257,6 +258,26 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
         for exception in item["exceptions"]:
             if exception in by_advisor[advisor_name]:
                 by_advisor[advisor_name][exception] += 1
+
+        location = item["location"]
+        if location not in by_location:
+            by_location[location] = {
+                "total_items": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "estimate_stalled": 0,
+                "overdue_follow_up": 0,
+                "dvi_missing_incomplete": 0,
+                "waiting_on_parts": 0,
+                "status_mismatch": 0,
+            }
+
+        by_location[location]["total_items"] += 1
+        by_location[location][item["priority"]] += 1
+        for exception in item["exceptions"]:
+            if exception in by_location[location]:
+                by_location[location][exception] += 1
 
     critical_items = [
         item for item in monitored_items if item["priority"] in {"high", "medium"}
@@ -290,6 +311,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
         "counts_by_priority": counts_by_priority,
         "top_actions": top_actions,
         "by_advisor": by_advisor,
+        "by_location": by_location,
         "critical_items": critical_items,
         "follow_up_tasks": follow_up_tasks,
         "items": monitored_items,
@@ -322,6 +344,28 @@ def print_summary(summary: dict[str, object]) -> None:
                 print(f"- {advisor_name}")
                 for line in visible_counts:
                     print(f"  {line}")
+    else:
+        print("- none")
+    print()
+
+    print("BY LOCATION")
+    if summary["by_location"]:
+        for location, counts in summary["by_location"].items():
+            print(f"{location}:")
+            print(f"- total items: {counts['total_items']}")
+            print(f"- high: {counts['high']}")
+            print(f"- medium: {counts['medium']}")
+            print(f"- low: {counts['low']}")
+            if counts["estimate_stalled"] > 0:
+                print(f"- stalled estimates: {counts['estimate_stalled']}")
+            if counts["overdue_follow_up"] > 0:
+                print(f"- overdue follow-ups: {counts['overdue_follow_up']}")
+            if counts["dvi_missing_incomplete"] > 0:
+                print(f"- dvi issues: {counts['dvi_missing_incomplete']}")
+            if counts["waiting_on_parts"] > 0:
+                print(f"- waiting on parts: {counts['waiting_on_parts']}")
+            if counts["status_mismatch"] > 0:
+                print(f"- status mismatches: {counts['status_mismatch']}")
     else:
         print("- none")
     print()
