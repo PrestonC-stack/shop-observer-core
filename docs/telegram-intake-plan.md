@@ -52,7 +52,27 @@ Primary future use:
 
 This stage should require extra review because screenshots and photos are more error-prone than structured text.
 
-Screenshot/photo intake should remain review-first before any automatic snapshot write behavior is trusted.
+Screenshot/photo intake should be treated as draft intake only.
+
+Extracted data must be reviewed before updating `current_shop_snapshot.json`.
+
+Screenshot/photo intake should never overwrite live data automatically.
+
+Parsed visual intake should first be written into an `inputs/intake_drafts/` folder concept for review, not directly into the live snapshot path.
+
+Recommended draft flow:
+
+- receive screenshot or photo in Telegram
+- extract structured draft ticket data
+- assign a confidence level
+- save draft output for review
+- ask for confirmation or corrected pasted text before any live snapshot update
+
+Confidence levels should be defined as:
+
+- high confidence: can suggest direct update
+- medium confidence: ask confirmation
+- low confidence: ask user to paste text instead
 
 ## Required Telegram Message Formats
 
@@ -162,11 +182,19 @@ Target write behavior for a later implementation:
 
 If validation fails, the bot should not write the snapshot file.
 
+For screenshot/photo intake later:
+
+- parse extracted content into draft JSON first
+- save draft output under an `inputs/intake_drafts/` folder concept
+- require human review before promoting draft data into `inputs/current_shop_snapshot.json`
+- block automatic overwrite of live snapshot data from visual intake alone
+
 ## Safety Rules
 
 - No credentials in Telegram.
 - No destructive actions.
 - No direct Tekmetric or Autoflow login yet.
+- No automatic overwrite of live data from screenshot or photo intake.
 - No execution of shell commands from Telegram input.
 - No direct editing outside the approved snapshot file path.
 - No silent acceptance of malformed ticket data.
@@ -183,4 +211,6 @@ Telegram should be treated as a convenience intake channel, not a trusted system
 4. Add controlled writing to `inputs/current_shop_snapshot.json` only after validation passes.
 5. Add Stage 1 outbound alerts for observer summaries and priority items.
 6. Add test cases for valid tickets, invalid tickets, partial tickets, and mixed multi-ticket messages.
-7. Defer screenshot and photo intake until text intake is stable and reviewable.
+7. Add an `inputs/intake_drafts/` review path for screenshot and photo parsing later.
+8. Add confidence scoring for visual intake with high, medium, and low confidence handling.
+9. Defer screenshot and photo intake until text intake is stable and reviewable.
