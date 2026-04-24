@@ -226,24 +226,28 @@ def build_action_line(item: dict[str, object]) -> str:
     return f"Review {ticket_reference}"
 
 
-def build_executive_summary(summary: dict[str, object]) -> list[str]:
+def build_executive_summary(
+    by_location: dict[str, dict[str, int]], top_actions: list[str]
+) -> list[str]:
     lines: list[str] = []
 
     highest_location = None
-    highest_count = 0
-    for location, counts in summary["by_location"].items():
-        if counts["high"] > highest_count:
-            highest_count = counts["high"]
+    highest_high_count = -1
+    for location, counts in by_location.items():
+        if counts["high"] > highest_high_count:
+            highest_high_count = counts["high"]
             highest_location = location
 
-    if highest_location and highest_count > 0:
+    if highest_location is not None and highest_high_count > 0:
         lines.append(
-            f"Highest high-priority load: {highest_location} with {highest_count} high-priority item(s)."
+            f"Highest high-priority load: {highest_location} with {highest_high_count} high-priority item(s)."
         )
+    else:
+        lines.append("No high-priority items are currently flagged.")
 
     dvi_locations = [
         location
-        for location, counts in summary["by_location"].items()
+        for location, counts in by_location.items()
         if counts["dvi_missing_incomplete"] > 0
     ]
     if dvi_locations:
@@ -251,17 +255,16 @@ def build_executive_summary(summary: dict[str, object]) -> list[str]:
 
     stalled_locations = [
         location
-        for location, counts in summary["by_location"].items()
+        for location, counts in by_location.items()
         if counts["estimate_stalled"] > 0
     ]
     if stalled_locations:
         lines.append(f"Stalled estimates are present in: {', '.join(stalled_locations)}.")
 
-    if summary["top_actions"]:
-        lines.append(f"Main focus right now: {summary['top_actions'][0]}.")
-
-    if not lines:
-        lines.append("No major issues detected. Focus on standard ticket flow and updates.")
+    if top_actions:
+        lines.append(f"Main focus right now: {top_actions[0]}.")
+    else:
+        lines.append("Main focus right now: review current ticket flow and exceptions.")
 
     return lines[:5]
 
@@ -327,6 +330,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
         build_action_line(item)
         for item in monitored_items[:3]
     ]
+    executive_summary = build_executive_summary(by_location, top_actions)
 
     follow_up_tasks = []
     for item in monitored_items:
@@ -344,11 +348,12 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
                 }
             )
 
-    summary = {
+    return {
         "generated_at": NOW.isoformat(),
         "total_items": len(items),
         "counts_by_exception": counts_by_exception,
         "counts_by_priority": counts_by_priority,
+        "executive_summary": executive_summary,
         "top_actions": top_actions,
         "by_advisor": by_advisor,
         "by_location": by_location,
@@ -356,8 +361,6 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
         "follow_up_tasks": follow_up_tasks,
         "items": monitored_items,
     }
-    summary["executive_summary"] = build_executive_summary(summary)
-    return summary
 
 
 def print_summary(summary: dict[str, object]) -> None:
