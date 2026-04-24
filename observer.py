@@ -10,7 +10,9 @@ from pathlib import Path
 
 NOW = datetime.now()
 PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
-INPUT_FILE = Path(__file__).resolve().parent / "inputs" / "sample_input.json"
+INPUTS_DIR = Path(__file__).resolve().parent / "inputs"
+CURRENT_SHOP_SNAPSHOT_FILE = INPUTS_DIR / "current_shop_snapshot.json"
+INPUT_FILE = INPUTS_DIR / "sample_input.json"
 OUTPUTS_DIR = Path(__file__).resolve().parent / "outputs"
 HISTORY_DIR = OUTPUTS_DIR / "history"
 
@@ -87,11 +89,8 @@ def fallback_sample_items() -> list[MonitoredItem]:
     ]
 
 
-def sample_items() -> list[MonitoredItem]:
-    if not INPUT_FILE.exists():
-        return fallback_sample_items()
-
-    with INPUT_FILE.open("r", encoding="utf-8") as handle:
+def load_items_from_json(input_path: Path) -> list[MonitoredItem]:
+    with input_path.open("r", encoding="utf-8") as handle:
         raw_items = json.load(handle)
 
     return [
@@ -111,6 +110,14 @@ def sample_items() -> list[MonitoredItem]:
         )
         for item in raw_items
     ]
+
+
+def sample_items() -> list[MonitoredItem]:
+    if CURRENT_SHOP_SNAPSHOT_FILE.exists():
+        return load_items_from_json(CURRENT_SHOP_SNAPSHOT_FILE)
+    if INPUT_FILE.exists():
+        return load_items_from_json(INPUT_FILE)
+    return fallback_sample_items()
 
 
 def age_hours(item: MonitoredItem) -> float:
