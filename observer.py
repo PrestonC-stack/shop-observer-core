@@ -195,36 +195,20 @@ def sort_records(records: list[dict[str, object]]) -> list[dict[str, object]]:
     )
 
 
-def action_type_for_item(item: dict[str, object]) -> str:
-    exceptions = item["exceptions"]
-
-    if "dvi_missing_incomplete" in exceptions:
-        return "dvi_missing_incomplete"
-    if "status_mismatch" in exceptions:
-        return "status_mismatch"
-    if "estimate_stalled" in exceptions:
-        return "estimate_stalled"
-    if "waiting_on_parts" in exceptions:
-        return "waiting_on_parts"
-    if "overdue_follow_up" in exceptions:
-        return "overdue_follow_up"
-    return "review"
-
-
 def build_action_line(item: dict[str, object]) -> str:
-    action_type = action_type_for_item(item)
+    exceptions = item["exceptions"]
     ticket_reference = item["ticket_reference"]
 
-    if action_type == "estimate_stalled":
-        return f"Follow up on estimate â€” waiting approval for {ticket_reference}"
-    if action_type == "overdue_follow_up":
-        return f"Call customer â€” overdue follow-up for {ticket_reference}"
-    if action_type == "dvi_missing_incomplete":
-        return f"Complete DVI â€” missing photos/notes for {ticket_reference}"
-    if action_type == "waiting_on_parts":
-        return f"Check parts ETA â€” possible delay for {ticket_reference}"
-    if action_type == "status_mismatch":
+    if "dvi_missing_incomplete" in exceptions:
+        return f"Complete DVI - missing photos/notes for {ticket_reference}"
+    if "status_mismatch" in exceptions:
         return f"Fix status mismatch for {ticket_reference}"
+    if "estimate_stalled" in exceptions:
+        return f"Follow up on estimate - waiting approval for {ticket_reference}"
+    if "waiting_on_parts" in exceptions:
+        return f"Check parts ETA - possible delay for {ticket_reference}"
+    if "overdue_follow_up" in exceptions:
+        return f"Call customer - overdue follow-up for {ticket_reference}"
     return f"Review {ticket_reference}"
 
 
@@ -240,26 +224,34 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
         "overdue_follow_up": 0,
     }
     counts_by_priority = {"high": 0, "medium": 0, "low": 0}
+    by_advisor: dict[str, dict[str, int]] = {}
 
     for item in monitored_items:
         for exception in item["exceptions"]:
             counts_by_exception[exception] += 1
         counts_by_priority[item["priority"]] += 1
 
+        advisor_name = item["advisor_name"]
+        if advisor_name not in by_advisor:
+            by_advisor[advisor_name] = {
+                "estimate_stalled": 0,
+                "overdue_follow_up": 0,
+                "dvi_missing_incomplete": 0,
+                "waiting_on_parts": 0,
+                "status_mismatch": 0,
+            }
+        for exception in item["exceptions"]:
+            if exception in by_advisor[advisor_name]:
+                by_advisor[advisor_name][exception] += 1
+
     critical_items = [
         item for item in monitored_items if item["priority"] in {"high", "medium"}
     ]
 
-    top_actions = []
-    seen_action_types: set[str] = set()
-    for item in monitored_items:
-        action_type = action_type_for_item(item)
-        if action_type in seen_action_types:
-            continue
-        top_actions.append(build_action_line(item))
-        seen_action_types.add(action_type)
-        if len(top_actions) == 3:
-            break
+    top_actions = [
+        build_action_line(item)
+        for item in monitored_items[:3]
+    ]
 
     follow_up_tasks = []
     for item in monitored_items:
@@ -283,6 +275,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
         "counts_by_exception": counts_by_exception,
         "counts_by_priority": counts_by_priority,
         "top_actions": top_actions,
+        "by_advisor": by_advisor,
         "critical_items": critical_items,
         "follow_up_tasks": follow_up_tasks,
         "items": monitored_items,
@@ -299,6 +292,22 @@ def print_summary(summary: dict[str, object]) -> None:
     if summary["top_actions"]:
         for action in summary["top_actions"]:
             print(f"- {action}")
+    else:
+        print("- none")
+    print()
+
+    print("BY ADVISOR")
+    if summary["by_advisor"]:
+        for advisor_name, counts in summary["by_advisor"].items():
+            visible_counts = [
+                f"{category}: {count}"
+                for category, count in counts.items()
+                if count > 0
+            ]
+            if visible_counts:
+                print(f"- {advisor_name}")
+                for line in visible_counts:
+                    print(f"  {line}")
     else:
         print("- none")
     print()
@@ -359,4 +368,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-PS C:\CALLAHAN\AI Workspace\AI-WORKSPACE\AI-TOOLS\Hermes-Runtime\modules>
