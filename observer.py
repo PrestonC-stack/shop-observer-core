@@ -226,6 +226,22 @@ def build_action_line(item: dict[str, object]) -> str:
     return f"Review {ticket_reference}"
 
 
+def action_type_for_item(item: dict[str, object]) -> str:
+    exceptions = item["exceptions"]
+
+    if "dvi_missing_incomplete" in exceptions:
+        return "dvi_missing_incomplete"
+    if "status_mismatch" in exceptions:
+        return "status_mismatch"
+    if "estimate_stalled" in exceptions:
+        return "estimate_stalled"
+    if "waiting_on_parts" in exceptions:
+        return "waiting_on_parts"
+    if "overdue_follow_up" in exceptions:
+        return "overdue_follow_up"
+    return "review"
+
+
 def build_executive_summary(
     by_location: dict[str, dict[str, int]], top_actions: list[str]
 ) -> list[str]:
@@ -326,10 +342,31 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
         item for item in monitored_items if item["priority"] in {"high", "medium"}
     ]
 
-    top_actions = [
-        build_action_line(item)
-        for item in monitored_items[:3]
-    ]
+    top_actions = []
+    used_action_types = set()
+
+    for item in monitored_items:
+        action_line = build_action_line(item)
+
+        # Extract action type (text before " - ")
+        action_type = action_line.split(" - ")[0]
+
+        if action_type not in used_action_types:
+            top_actions.append(action_line)
+            used_action_types.add(action_type)
+
+        if len(top_actions) == 3:
+            break
+
+    # If fewer than 3 unique actions exist, fill remaining slots
+    if len(top_actions) < 3:
+        for item in monitored_items:
+            action_line = build_action_line(item)
+            if action_line not in top_actions:
+                top_actions.append(action_line)
+            if len(top_actions) == 3:
+                break
+
     executive_summary = build_executive_summary(by_location, top_actions)
 
     follow_up_tasks = []
