@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
+from contextlib import redirect_stdout
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +11,8 @@ from pathlib import Path
 NOW = datetime.now()
 PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
 INPUT_FILE = Path(__file__).resolve().parent / "inputs" / "sample_input.json"
+OUTPUTS_DIR = Path(__file__).resolve().parent / "outputs"
+HISTORY_DIR = OUTPUTS_DIR / "history"
 
 
 @dataclass
@@ -541,10 +545,27 @@ def print_summary(summary: dict[str, object]) -> None:
         print(f"  notes: {item['notes']}")
 
 
+def write_report_outputs(report_text: str) -> None:
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+
+    latest_summary_path = OUTPUTS_DIR / "latest_summary.txt"
+    history_summary_path = HISTORY_DIR / f"shop_summary_{NOW.strftime('%Y-%m-%d_%H%M')}.txt"
+
+    latest_summary_path.write_text(report_text, encoding="utf-8")
+    history_summary_path.write_text(report_text, encoding="utf-8")
+
+
 def main() -> None:
     items = sample_items()
     summary = summarize_items(items)
-    print_summary(summary)
+    report_buffer = io.StringIO()
+    with redirect_stdout(report_buffer):
+        print_summary(summary)
+
+    report_text = report_buffer.getvalue()
+    print(report_text, end="")
+    write_report_outputs(report_text)
 
 
 if __name__ == "__main__":
