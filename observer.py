@@ -312,6 +312,25 @@ def build_question_for_preston(
     return f"What follow-up is needed for {ticket_reference}?"
 
 
+def build_follow_up_task(item: dict[str, object]) -> dict[str, object]:
+    exceptions = item.get("exceptions", [])
+    exception_summary = ", ".join(exceptions) or "manual follow-up needed"
+
+    suggested_question = suggested_follow_up_question(exceptions)
+    if not suggested_question.strip():
+        suggested_question = (
+            f"What follow-up is needed for {item['display_ticket_reference']}?"
+        )
+
+    return {
+        "ticket_reference": item["display_ticket_reference"],
+        "advisor_name": item["advisor_name"],
+        "priority": item["priority"],
+        "exception_summary": exception_summary,
+        "suggested_follow_up_question": suggested_question,
+    }
+
+
 def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
     monitored_items = [build_item_record(item) for item in items]
     monitored_items = sort_records(monitored_items)
@@ -400,18 +419,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
     questions_for_preston = []
     for item in monitored_items:
         if item["exceptions"] or item["follow_up_needed"]:
-            follow_up_tasks.append(
-                {
-                    "ticket_reference": item["display_ticket_reference"],
-                    "advisor_name": item["advisor_name"],
-                    "priority": item["priority"],
-                    "exception_summary": ", ".join(item["exceptions"])
-                    or "manual follow-up needed",
-                    "suggested_follow_up_question": suggested_follow_up_question(
-                        item["exceptions"]
-                    ),
-                }
-            )
+            follow_up_tasks.append(build_follow_up_task(item))
             questions_for_preston.append(
                 build_question_for_preston(
                     item["exceptions"], item["display_ticket_reference"]
