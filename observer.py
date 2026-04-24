@@ -168,12 +168,26 @@ def suggested_follow_up_question(exceptions: list[str]) -> str:
     return "What is the next clear action for this item?"
 
 
+def display_ticket_reference(item: MonitoredItem) -> str:
+    ticket_reference = item.ticket_reference.strip()
+    if ticket_reference and ticket_reference != "RO-XXXX":
+        return ticket_reference
+
+    location_prefix = {
+        "Country Club": "CC",
+        "Apache": "AP",
+        "Mobile": "MB",
+    }.get(item.location, "UNK")
+    return f"{location_prefix}-{item.item_id}"
+
+
 def build_item_record(item: MonitoredItem) -> dict[str, object]:
     exceptions = detect_exceptions(item)
     priority = assign_priority(item, exceptions)
     return {
         "item_id": item.item_id,
         "ticket_reference": item.ticket_reference,
+        "display_ticket_reference": display_ticket_reference(item),
         "location": item.location,
         "advisor_name": item.advisor_name,
         "current_status": item.current_status,
@@ -197,7 +211,7 @@ def sort_records(records: list[dict[str, object]]) -> list[dict[str, object]]:
 
 def build_action_line(item: dict[str, object]) -> str:
     exceptions = item["exceptions"]
-    ticket_reference = item["ticket_reference"]
+    ticket_reference = item["display_ticket_reference"]
 
     if "dvi_missing_incomplete" in exceptions:
         return f"Complete DVI - missing photos/notes for {ticket_reference}"
@@ -258,7 +272,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
         if item["exceptions"] or item["follow_up_needed"]:
             follow_up_tasks.append(
                 {
-                    "ticket_reference": item["ticket_reference"],
+                    "ticket_reference": item["display_ticket_reference"],
                     "advisor_name": item["advisor_name"],
                     "priority": item["priority"],
                     "exception_summary": ", ".join(item["exceptions"])
@@ -325,7 +339,7 @@ def print_summary(summary: dict[str, object]) -> None:
     print("CRITICAL / PRIORITY ITEMS")
     if summary["critical_items"]:
         for item in summary["critical_items"]:
-            print(f"- {item['ticket_reference']} | {item['priority']}")
+            print(f"- {item['display_ticket_reference']} | {item['priority']}")
             print(f"  advisor: {item['advisor_name']}")
             print(f"  status: {item['current_status']}")
             print(f"  age_hours: {item['last_update_age_hours']}")
@@ -351,7 +365,9 @@ def print_summary(summary: dict[str, object]) -> None:
 
     print("FULL ITEM LIST")
     for item in summary["items"]:
-        print(f"- {item['item_id']} | {item['ticket_reference']} | {item['priority']}")
+        print(
+            f"- {item['item_id']} | {item['display_ticket_reference']} | {item['priority']}"
+        )
         print(f"  location: {item['location']}")
         print(f"  advisor: {item['advisor_name']}")
         print(f"  status: {item['current_status']}")
