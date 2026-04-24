@@ -226,6 +226,46 @@ def build_action_line(item: dict[str, object]) -> str:
     return f"Review {ticket_reference}"
 
 
+def build_executive_summary(summary: dict[str, object]) -> list[str]:
+    lines: list[str] = []
+
+    highest_location = None
+    highest_count = 0
+    for location, counts in summary["by_location"].items():
+        if counts["high"] > highest_count:
+            highest_count = counts["high"]
+            highest_location = location
+
+    if highest_location and highest_count > 0:
+        lines.append(
+            f"Highest high-priority load: {highest_location} with {highest_count} high-priority item(s)."
+        )
+
+    dvi_locations = [
+        location
+        for location, counts in summary["by_location"].items()
+        if counts["dvi_missing_incomplete"] > 0
+    ]
+    if dvi_locations:
+        lines.append(f"DVI issues are present in: {', '.join(dvi_locations)}.")
+
+    stalled_locations = [
+        location
+        for location, counts in summary["by_location"].items()
+        if counts["estimate_stalled"] > 0
+    ]
+    if stalled_locations:
+        lines.append(f"Stalled estimates are present in: {', '.join(stalled_locations)}.")
+
+    if summary["top_actions"]:
+        lines.append(f"Main focus right now: {summary['top_actions'][0]}.")
+
+    if not lines:
+        lines.append("No major issues detected. Focus on standard ticket flow and updates.")
+
+    return lines[:5]
+
+
 def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
     monitored_items = [build_item_record(item) for item in items]
     monitored_items = sort_records(monitored_items)
@@ -304,7 +344,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
                 }
             )
 
-    return {
+    summary = {
         "generated_at": NOW.isoformat(),
         "total_items": len(items),
         "counts_by_exception": counts_by_exception,
@@ -316,12 +356,22 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
         "follow_up_tasks": follow_up_tasks,
         "items": monitored_items,
     }
+    summary["executive_summary"] = build_executive_summary(summary)
+    return summary
 
 
 def print_summary(summary: dict[str, object]) -> None:
     print("SHOP ACTIVITY SUMMARY")
     print(f"Generated at: {summary['generated_at']}")
     print(f"Total items: {summary['total_items']}")
+    print()
+
+    print("EXECUTIVE SUMMARY")
+    if summary["executive_summary"]:
+        for line in summary["executive_summary"]:
+            print(f"- {line}")
+    else:
+        print("- none")
     print()
 
     print("TOP 3 ACTIONS RIGHT NOW")
