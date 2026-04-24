@@ -285,6 +285,22 @@ def build_executive_summary(
     return lines[:5]
 
 
+def build_question_for_preston(
+    exceptions: list[str], ticket_reference: str
+) -> str:
+    if "estimate_stalled" in exceptions:
+        return f"What is blocking the estimate for {ticket_reference}?"
+    if "dvi_missing_incomplete" in exceptions:
+        return f"What DVI support is missing for {ticket_reference}?"
+    if "waiting_on_parts" in exceptions:
+        return f"Is the parts ETA known for {ticket_reference}?"
+    if "overdue_follow_up" in exceptions:
+        return f"Does {ticket_reference} need a customer update right now?"
+    if "status_mismatch" in exceptions:
+        return f"Which status is accurate for {ticket_reference}?"
+    return f"What follow-up is needed for {ticket_reference}?"
+
+
 def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
     monitored_items = [build_item_record(item) for item in items]
     monitored_items = sort_records(monitored_items)
@@ -370,6 +386,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
     executive_summary = build_executive_summary(by_location, top_actions)
 
     follow_up_tasks = []
+    questions_for_preston = []
     for item in monitored_items:
         if item["exceptions"] or item["follow_up_needed"]:
             follow_up_tasks.append(
@@ -384,6 +401,11 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
                     ),
                 }
             )
+            questions_for_preston.append(
+                build_question_for_preston(
+                    item["exceptions"], item["display_ticket_reference"]
+                )
+            )
 
     return {
         "generated_at": NOW.isoformat(),
@@ -396,6 +418,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
         "by_location": by_location,
         "critical_items": critical_items,
         "follow_up_tasks": follow_up_tasks,
+        "questions_for_preston": questions_for_preston,
         "items": monitored_items,
     }
 
@@ -493,6 +516,14 @@ def print_summary(summary: dict[str, object]) -> None:
             print(
                 f"  suggested_follow_up_question: {task['suggested_follow_up_question']}"
             )
+    else:
+        print("- none")
+    print()
+
+    print("QUESTIONS FOR PRESTON")
+    if summary["questions_for_preston"]:
+        for question in summary["questions_for_preston"]:
+            print(f"- {question}")
     else:
         print("- none")
     print()
