@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from connectors.autoflow import get_dvi
+from connectors.autoflow import get_work_order
+from connectors.autoflow import load_mock_autoflow_jobs
+from normalizers.shop_state_normalizer import normalize_shop_state
+
 
 NOW = datetime.now()
 PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
@@ -15,6 +20,7 @@ CURRENT_SHOP_SNAPSHOT_FILE = INPUTS_DIR / "current_shop_snapshot.json"
 INPUT_FILE = INPUTS_DIR / "sample_input.json"
 OUTPUTS_DIR = Path(__file__).resolve().parent / "outputs"
 HISTORY_DIR = OUTPUTS_DIR / "history"
+LIVE_TEST_RO = "13298"
 
 
 @dataclass
@@ -87,6 +93,104 @@ def fallback_sample_items() -> list[MonitoredItem]:
             notes="No recent customer update logged.",
         ),
     ]
+
+
+def _parse_datetime(value: object, default: datetime) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return default
+    try:
+        normalized = str(value).replace("Z", "+00:00")
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return default
+
+
+def _normalize_current_status(value: object) -> str:
+    if value in (None, ""):
+        return "unknown"
+    return str(value).strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _build_items_from_shop_state(shop_state: dict[str, object]) -> list[MonitoredItem]:
+    generated_at = _parse_datetime(shop_state.get("generated_at"), NOW)
+    items: list[MonitoredItem] = []
+
+    for index, job in enumerate(shop_state.get("jobs", []), start=1):
+        inspection_status = _normalize_current_status(job.get("inspection_status", "unknown"))
+        approval_status = _normalize_current_status(job.get("approval_status", "unknown"))
+        parts_ordered = bool(job.get("parts_ordered", False))
+        parts_received = bool(job.get("parts_received", False))
+        workflow_status = _normalize_current_status(job.get("workflow_status", "unknown"))
+
+        items.append(
+            MonitoredItem(
+                item_id=str(job.get("job_id", f"ITEM-{index:03d}")),
+                location=str(job.get("location", "Unknown")),
+                advisor_name=str(job.get("advisor_name", "Unknown")),
+                ticket_reference=str(job.get("ticket_reference", f"RO-{index:04d}")),
+                current_status=workflow_status,
+                last_update_at=generated_at,
+                has_parts_hold=parts_ordered and not parts_received,
+                dvi_complete=inspection_status in {"complete", "completed"} or bool(
+                    job.get("dvi_completed", False)
+                ),
+                estimate_complete=approval_status in {"approved", "authorized", "customer_approved"},
+                status_mismatch=False,
+                follow_up_needed=workflow_status in {"assigned", "active", "waiting_on_parts"},
+                notes=str(job.get("notes", "")),
+            )
+        )
+
+    return items
+
+
+def load_runtime_items() -> tuple[list[MonitoredItem], str, str | None]:
+    try:
+        work_order = get_work_order(LIVE_TEST_RO)
+        dvi = get_dvi(LIVE_TEST_RO)
+        shop_state = normalize_shop_state(
+            {
+                "generated_at": NOW.isoformat(),
+                "mode": "api",
+                "source": "autoflow-api",
+                "records": [
+                    {
+                        "ticket_reference": LIVE_TEST_RO,
+                        "work_order": work_order,
+                        "dvi": dvi,
+                    }
+                ],
+            },
+            {"source": "tekmetric-unset", "tickets": []},
+        )
+        items = _build_items_from_shop_state(shop_state)
+        if items:
+            return items, "AUTOFLOW_API", None
+        raise RuntimeError("AutoFlow API normalization returned no jobs")
+    except Exception as exc:
+        if CURRENT_SHOP_SNAPSHOT_FILE.exists():
+            return (
+                load_items_from_json(CURRENT_SHOP_SNAPSHOT_FILE),
+                "MOCK_FALLBACK",
+                str(exc),
+            )
+
+        try:
+            shop_state = normalize_shop_state(
+                load_mock_autoflow_jobs(),
+                {"source": "tekmetric-unset", "tickets": []},
+            )
+            items = _build_items_from_shop_state(shop_state)
+            if items:
+                return items, "MOCK_FALLBACK", str(exc)
+        except Exception:
+            pass
+
+        if INPUT_FILE.exists():
+            return load_items_from_json(INPUT_FILE), "MOCK_FALLBACK", str(exc)
+        return fallback_sample_items(), "MOCK_FALLBACK", str(exc)
 
 
 def load_items_from_json(input_path: Path) -> list[MonitoredItem]:
@@ -572,10 +676,14 @@ def write_report_outputs(report_text: str) -> None:
 
 
 def main() -> None:
-    items = sample_items()
+    items, data_source, fallback_reason = load_runtime_items()
     summary = summarize_items(items)
     report_buffer = io.StringIO()
     with redirect_stdout(report_buffer):
+        print(f"DATA SOURCE: {data_source}")
+        if fallback_reason:
+            print(f"FALLBACK REASON: {fallback_reason}")
+        print()
         print_summary(summary)
 
     report_text = report_buffer.getvalue()

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,8 +18,18 @@ MOCK_AUTOFLOW_PATH = REPO_ROOT / "inputs" / "mock_autoflow_techflow_jobs.json"
 DEFAULT_TIMEOUT_SECONDS = 20
 DEFAULT_WORK_ORDER_PATH_TEMPLATE = "/api/work-orders/{ro_number}"
 DEFAULT_DVI_PATH_TEMPLATE = "/api/dvi/{ro_number}"
+DEFAULT_AUTH_MODE = "basic"
 
 COMPLETE_STATUSES = {"complete", "completed", "closed", "done"}
+
+LOGGER = logging.getLogger("shop_observer.autoflow")
+if not LOGGER.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("[autoflow] %(levelname)s %(message)s"))
+    LOGGER.addHandler(handler)
+LOGGER.setLevel(logging.INFO)
+LOGGER.propagate = False
+_ENV_LOADED = False
 
 
 def load_mock_autoflow_jobs(input_path: Path | None = None) -> dict[str, Any]:
@@ -25,6 +37,26 @@ def load_mock_autoflow_jobs(input_path: Path | None = None) -> dict[str, Any]:
     source_path = input_path or MOCK_AUTOFLOW_PATH
     with source_path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def _load_local_env_file() -> None:
+    global _ENV_LOADED
+    if _ENV_LOADED:
+        return
+
+    env_path = REPO_ROOT / ".env"
+    if env_path.exists():
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+    _ENV_LOADED = True
 
 
 def _deep_get(container: Any, path: tuple[Any, ...]) -> Any:
@@ -85,9 +117,30 @@ def _normalize_status(value: Any, default: str = "unknown") -> str:
 
 
 def _build_headers() -> dict[str, str]:
+    _load_local_env_file()
     headers = {"Accept": "application/json"}
 
+    api_key = os.getenv("AUTOFLOW_API_KEY", "").strip()
+    password = os.getenv("AUTOFLOW_API_PASSWORD", "").strip()
+    auth_mode = os.getenv("AUTOFLOW_AUTH_MODE", DEFAULT_AUTH_MODE).strip().lower()
     token = os.getenv("AUTOFLOW_API_TOKEN", "").strip()
+
+    if api_key and password:
+        if auth_mode == "headers":
+            key_header = os.getenv("AUTOFLOW_API_KEY_HEADER", "X-API-Key").strip()
+            password_header = os.getenv(
+                "AUTOFLOW_API_PASSWORD_HEADER", "X-API-Password"
+            ).strip()
+            headers[key_header] = api_key
+            headers[password_header] = password
+            return headers
+
+        credentials = base64.b64encode(f"{api_key}:{password}".encode("utf-8")).decode(
+            "ascii"
+        )
+        headers["Authorization"] = f"Basic {credentials}"
+        return headers
+
     if token:
         auth_header = os.getenv("AUTOFLOW_AUTH_HEADER", "Authorization").strip()
         auth_prefix = os.getenv("AUTOFLOW_AUTH_PREFIX", "Bearer").strip()
@@ -97,15 +150,26 @@ def _build_headers() -> dict[str, str]:
 
 
 def _request_json(path_template: str, ro_number: str) -> dict[str, Any]:
+    _load_local_env_file()
     base_url = os.getenv("AUTOFLOW_API_BASE_URL", "").strip()
     if not base_url:
         raise RuntimeError("AUTOFLOW_API_BASE_URL is required for real AutoFlow intake")
 
+    headers = _build_headers()
+    if len(headers) == 1:
+        raise RuntimeError(
+            "AutoFlow credentials are required via AUTOFLOW_API_KEY/AUTOFLOW_API_PASSWORD or AUTOFLOW_API_TOKEN"
+        )
+
     path = path_template.format(ro_number=ro_number)
-    request_url = path if path.startswith("http") else urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+    request_url = (
+        path
+        if path.startswith("http")
+        else urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+    )
     timeout_seconds = int(os.getenv("AUTOFLOW_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS)))
 
-    request = Request(request_url, headers=_build_headers(), method="GET")
+    request = Request(request_url, headers=headers, method="GET")
 
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
@@ -151,7 +215,7 @@ def get_dvi(ro_number: str) -> dict[str, Any]:
 def merge_work_order_and_dvi(
     work_order: dict[str, Any], dvi: dict[str, Any], ro_number: str
 ) -> dict[str, Any]:
-    """Merge read-only AutoFlow work order + DVI payloads into one normalized job."""
+    """Merge read-only AutoFlow work order + DVI payloads into one raw record."""
     ticket_reference = str(
         _first_value(
             work_order,
@@ -161,109 +225,43 @@ def merge_work_order_and_dvi(
             ("workOrderNumber",),
             default=ro_number,
         )
-    )
-    workflow_status = _normalize_status(
-        _first_value(
-            work_order,
-            ("workflow_status",),
-            ("workflowStatus",),
-            ("status",),
-            ("job_status",),
-            default="unknown",
-        )
-    )
-    progress_percent = _to_float(
-        _first_value(
-            dvi,
-            ("progress_percent",),
-            ("progressPercent",),
-            ("completionPercent",),
-            ("inspection", "progressPercent"),
-            ("summary", "completionPercent"),
-            ("percent_complete",),
-            default=_first_value(
-                work_order,
-                ("progress_percent",),
-                ("progressPercent",),
-                default=0,
-            ),
-        )
-    )
-    labor_hours_remaining = _to_float(
-        _first_value(
-            work_order,
-            ("labor_hours_remaining",),
-            ("laborHoursRemaining",),
-            ("labor", "hoursRemaining"),
-            ("estimatedHoursRemaining",),
-            ("remaining_labor_hours",),
-            default=0.0,
-        )
-    )
-    approval_status = _normalize_status(
-        _first_value(
-            work_order,
-            ("approval_status",),
-            ("approvalStatus",),
-            ("estimate", "approvalStatus"),
-            ("work_status",),
-            default="unknown",
-        )
-    )
-    parts_ordered = _to_bool(
-        _first_value(
-            work_order,
-            ("parts_ordered",),
-            ("partsOrdered",),
-            ("parts_summary", "ordered"),
-            ("parts", "ordered"),
-            ("parts", "isOrdered"),
-            default=False,
-        )
-    )
-    parts_received = _to_bool(
-        _first_value(
-            work_order,
-            ("parts_received",),
-            ("partsReceived",),
-            ("parts_summary", "received"),
-            ("parts", "received"),
-            ("parts", "isReceived"),
-            default=False,
-        )
-    )
-    job_marked_complete = _to_bool(
-        _first_value(
-            work_order,
-            ("job_marked_complete",),
-            ("jobMarkedComplete",),
-            ("isComplete",),
-            default=workflow_status in COMPLETE_STATUSES,
-        )
-    )
-    dvi_completed = _to_bool(
-        _first_value(
-            dvi,
-            ("completed",),
-            ("isCompleted",),
-            ("status",),
-            ("summary", "completed"),
-            default=False,
-        ),
-        default=False,
-    )
-
+    ).strip() or ro_number
     return {
-        "job_id": str(
+        "ticket_reference": ticket_reference,
+        "ro_number": ticket_reference,
+        "work_order_id": str(
+            _first_value(work_order, ("id",), ("work_order_id",), ("workOrderId",), default="")
+        ),
+        "dvi_id": str(_first_value(dvi, ("id",), ("dvi_id",), ("dviId",), default="")),
+        "workflow_status": _normalize_status(
             _first_value(
                 work_order,
-                ("id",),
-                ("work_order_id",),
-                ("workOrderId",),
-                default=ticket_reference,
+                ("workflow_status",),
+                ("workflowStatus",),
+                ("status",),
+                ("job_status",),
+                default="unknown",
             )
         ),
-        "ticket_reference": ticket_reference,
+        "job_marked_complete": _to_bool(
+            _first_value(
+                work_order,
+                ("job_marked_complete",),
+                ("jobMarkedComplete",),
+                ("isComplete",),
+                default=False,
+            )
+        ),
+        "approval_status": _normalize_status(
+            _first_value(
+                work_order,
+                ("approval_status",),
+                ("approvalStatus",),
+                ("estimate", "approvalStatus"),
+                ("work_status",),
+                default="unknown",
+            )
+        ),
         "location": str(
             _first_value(
                 work_order,
@@ -293,7 +291,6 @@ def merge_work_order_and_dvi(
                 default="Unassigned",
             )
         ),
-        "workflow_status": workflow_status,
         "clocked_in": _to_bool(
             _first_value(
                 work_order,
@@ -304,13 +301,45 @@ def merge_work_order_and_dvi(
                 default=False,
             )
         ),
-        "progress_percent": progress_percent,
-        "labor_hours_remaining": labor_hours_remaining,
-        "job_marked_complete": job_marked_complete,
-        "approval_status": approval_status,
-        "parts_ordered": parts_ordered,
-        "parts_received": parts_received,
-        "dvi_completed": dvi_completed,
+        "progress_percent": _to_float(
+            _first_value(
+                dvi,
+                ("progress_percent",),
+                ("progressPercent",),
+                ("completionPercent",),
+                ("inspection", "progressPercent"),
+                ("summary", "completionPercent"),
+                ("percent_complete",),
+                default=_first_value(
+                    work_order,
+                    ("progress_percent",),
+                    ("progressPercent",),
+                    default=0,
+                ),
+            )
+        ),
+        "labor_hours_remaining": _to_float(
+            _first_value(
+                work_order,
+                ("labor_hours_remaining",),
+                ("laborHoursRemaining",),
+                ("labor", "hoursRemaining"),
+                ("estimatedHoursRemaining",),
+                ("remaining_labor_hours",),
+                default=0.0,
+            )
+        ),
+        "dvi_completed": _to_bool(
+            _first_value(
+                dvi,
+                ("completed",),
+                ("isCompleted",),
+                ("status",),
+                ("summary", "completed"),
+                default=False,
+            ),
+            default=False,
+        ),
         "dvi_status": _normalize_status(
             _first_value(dvi, ("status",), ("inspection", "status"), default="unknown")
         ),
@@ -344,31 +373,42 @@ def merge_work_order_and_dvi(
             ),
             "dvi_id": _first_value(dvi, ("id",), ("dvi_id",), ("dviId",), default=""),
         },
-        "raw": {
-            "work_order": work_order,
-            "dvi": dvi,
-        },
+        "work_order": work_order,
+        "dvi": dvi,
     }
 
 
 def build_shop_state(ro_numbers: Iterable[str]) -> dict[str, Any]:
-    jobs: list[dict[str, Any]] = []
-
-    for ro_number in ro_numbers:
-        work_order = get_work_order(ro_number)
-        dvi = get_dvi(ro_number)
-        jobs.append(merge_work_order_and_dvi(work_order, dvi, ro_number))
-
-    return {
-        "shop_state_version": "v1-autoflow-readonly",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "sources": {
-            "autoflow": os.getenv("AUTOFLOW_API_BASE_URL", "autoflow-api"),
-        },
-        "jobs": jobs,
-    }
+    return fetch_autoflow_data(ro_numbers)
 
 
 def fetch_autoflow_data(ro_numbers: Iterable[str]) -> dict[str, Any]:
-    """Read-only connector entrypoint for real AutoFlow intake."""
-    return build_shop_state(ro_numbers)
+    """Read-only connector entrypoint for real AutoFlow intake with safe mock fallback."""
+    ro_list = [str(ro_number).strip() for ro_number in ro_numbers if str(ro_number).strip()]
+    if not ro_list:
+        LOGGER.warning("No RO numbers were provided; using mock AutoFlow fallback.")
+        mock_data = load_mock_autoflow_jobs()
+        mock_data["mode"] = "mock_fallback"
+        mock_data["source"] = "autoflow-techflow-mock-fallback"
+        return mock_data
+
+    try:
+        records: list[dict[str, Any]] = []
+        for ro_number in ro_list:
+            work_order = get_work_order(ro_number)
+            dvi = get_dvi(ro_number)
+            records.append(merge_work_order_and_dvi(work_order, dvi, ro_number))
+        LOGGER.info("Using live AutoFlow API data for %s RO(s).", len(records))
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "mode": "api",
+            "source": os.getenv("AUTOFLOW_API_BASE_URL", "autoflow-api"),
+            "records": records,
+        }
+    except Exception as exc:
+        LOGGER.warning("AutoFlow API unavailable; using mock fallback. %s", exc)
+        mock_data = load_mock_autoflow_jobs()
+        mock_data["mode"] = "mock_fallback"
+        mock_data["source"] = "autoflow-techflow-mock-fallback"
+        mock_data["fallback_reason"] = str(exc)
+        return mock_data
