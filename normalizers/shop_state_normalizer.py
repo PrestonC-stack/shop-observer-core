@@ -66,6 +66,48 @@ def _normalize_status(value: Any, default: str = "unknown") -> str:
     return str(value).strip().lower().replace("-", "_").replace(" ", "_")
 
 
+def _clean_text(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        return " ".join(value.split())
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, list):
+        return "; ".join(
+            text for text in (_clean_text(item) for item in value) if text
+        )
+    if isinstance(value, dict):
+        for key in (
+            "summary",
+            "notes",
+            "note",
+            "comment",
+            "recommendation",
+            "description",
+            "name",
+            "title",
+            "label",
+            "value",
+        ):
+            text = _clean_text(value.get(key))
+            if text:
+                return text
+        scalar_values = [
+            _clean_text(item)
+            for item in value.values()
+            if not isinstance(item, (dict, list))
+        ]
+        return "; ".join(text for text in scalar_values if text)
+    return str(value)
+
+
+def _append_unique(values: list[str], value: Any) -> None:
+    text = _clean_text(value)
+    if text and text not in values:
+        values.append(text)
+
+
 def _extract_dvi_items(
     work_order: dict[str, Any], dvi: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -179,12 +221,14 @@ def _normalize_parts_list(
                     )
                 ),
                 "description": str(
-                    _first_value(
-                        part,
-                        ("description",),
-                        ("name",),
-                        ("label",),
-                        default="",
+                    _clean_text(
+                        _first_value(
+                            part,
+                            ("description",),
+                            ("name",),
+                            ("label",),
+                            default="",
+                        )
                     )
                 ),
                 "quantity": _to_float(
@@ -206,6 +250,295 @@ def _normalize_parts_list(
     return normalized_parts
 
 
+def _build_ro_summary_job(
+    record: dict[str, Any],
+    work_order: dict[str, Any],
+    dvi: dict[str, Any],
+    dvi_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    ticket_reference = str(
+        record.get("ticket_reference")
+        or _first_value(
+            work_order,
+            ("ro_number",),
+            ("roNumber",),
+            ("work_order_number",),
+            ("workOrderNumber",),
+            ("work_order", "ro_number"),
+            ("work_order", "id"),
+            default="UNKNOWN",
+        )
+    )
+    display_ticket_reference = (
+        f"RO-{ticket_reference}" if ticket_reference.isdigit() else ticket_reference
+    )
+    customer_first_name = _clean_text(
+        _first_value(
+            work_order,
+            ("customer", "firstname"),
+            ("customer", "first_name"),
+            ("work_order", "customer", "firstname"),
+            ("work_order", "customer", "first_name"),
+            default="",
+        )
+    )
+    customer_last_name = _clean_text(
+        _first_value(
+            work_order,
+            ("customer", "lastname"),
+            ("customer", "last_name"),
+            ("work_order", "customer", "lastname"),
+            ("work_order", "customer", "last_name"),
+            default="",
+        )
+    )
+    customer_name = " ".join(
+        part for part in [customer_first_name, customer_last_name] if part
+    ).strip()
+    vehicle_parts = [
+        _first_value(
+            work_order,
+            ("vehicle", "year"),
+            ("work_order", "vehicle", "year"),
+            default="",
+        ),
+        _first_value(
+            work_order,
+            ("vehicle", "make"),
+            ("work_order", "vehicle", "make"),
+            default="",
+        ),
+        _first_value(
+            work_order,
+            ("vehicle", "model"),
+            ("work_order", "vehicle", "model"),
+            default="",
+        ),
+    ]
+    vehicle = " ".join(_clean_text(part) for part in vehicle_parts if part not in (None, ""))
+    location = _clean_text(
+        record.get("location")
+        or _first_value(
+            work_order,
+            ("location", "name"),
+            ("location",),
+            ("shop", "name"),
+            ("locationName",),
+            ("work_order", "location", "name"),
+            ("work_order", "location"),
+            default="Country Club",
+        )
+    )
+    advisor_name = _clean_text(
+        record.get("advisor_name")
+        or _first_value(
+            dvi,
+            ("content", "service_advisor_name"),
+            ("service_advisor_name",),
+            default="",
+        )
+        or _first_value(
+            work_order,
+            ("advisor", "name"),
+            ("serviceAdvisor", "name"),
+            ("advisorName",),
+            default="Unknown",
+        )
+    )
+    technician_name = _clean_text(
+        record.get("technician_name")
+        or _first_value(
+            work_order,
+            ("technician", "name"),
+            ("assignedTech", "name"),
+            ("technicianName",),
+            default="Unassigned",
+        )
+    )
+    workflow_status = _clean_text(
+        _first_value(
+            dvi,
+            ("content", "current_status"),
+            ("current_status",),
+            default="",
+        )
+        or record.get("workflow_status")
+        or _first_value(
+            work_order,
+            ("workflow_status",),
+            ("workflowStatus",),
+            ("status",),
+            default="unknown",
+        )
+    )
+    approval_status = _normalize_status(
+        record.get("approval_status")
+        or _first_value(
+            work_order,
+            ("approval_status",),
+            ("approvalStatus",),
+            ("estimate", "approvalStatus"),
+            default="unknown",
+        )
+    )
+    dvis = _extract_dvis(dvi)
+    first_dvi = dvis[0] if dvis else {}
+    dvi_completed = bool(
+        _first_value(
+            first_dvi,
+            ("completed_datetime",),
+            ("completed_by",),
+            default=_first_value(
+                dvi,
+                ("content", "dvis", 0, "completed_datetime"),
+                ("content", "dvis", 0, "completed_by"),
+                ("dvis", 0, "completed_datetime"),
+                ("dvis", 0, "completed_by"),
+                ("completed",),
+                ("isCompleted",),
+                ("summary", "completed"),
+                default="",
+            ),
+        )
+    )
+    reason_vehicle_is_here = _clean_text(
+        _first_value(
+            dvi,
+            ("content", "reason_vehicle_is_here"),
+            ("reason_vehicle_is_here",),
+            default="",
+        )
+    )
+
+    all_parts: list[dict[str, Any]] = []
+    unarrived_part_numbers: list[str] = []
+    summary_lines: list[str] = []
+    job_names: list[str] = []
+    total_sold_hours = 0.0
+    total_labor_hours_remaining = 0.0
+    max_progress_percent = 0.0
+
+    _append_unique(summary_lines, reason_vehicle_is_here)
+    for dvi_item in dvi_items:
+        _append_unique(
+            job_names,
+            _first_value(
+                dvi_item,
+                ("job_name",),
+                ("jobName",),
+                ("title",),
+                ("name",),
+                ("label",),
+                default="",
+            ),
+        )
+        _append_unique(
+            summary_lines,
+            _first_value(
+                dvi_item,
+                ("summary",),
+                ("finding",),
+                ("findings",),
+                ("notes",),
+                ("note",),
+                ("comment",),
+                ("recommendation",),
+                ("description",),
+                default="",
+            ),
+        )
+        sold_hours = _to_float(
+            _first_value(
+                dvi_item,
+                ("labor", "quantity"),
+                ("labor_quantity",),
+                ("laborQuantity",),
+                ("sold_hours",),
+                ("soldHours",),
+                ("hours",),
+                default=0.0,
+            )
+        )
+        progress_percent = _to_float(
+            _first_value(
+                dvi_item,
+                ("progress_percent",),
+                ("progressPercent",),
+                ("percent_complete",),
+                default=0,
+            )
+        )
+        labor_hours_remaining = _to_float(
+            _first_value(
+                dvi_item,
+                ("labor_hours_remaining",),
+                ("laborHoursRemaining",),
+                ("remaining_labor_hours",),
+                ("remainingHours",),
+                default=max(sold_hours - ((sold_hours * progress_percent) / 100), 0.0),
+            )
+        )
+        total_sold_hours += sold_hours
+        total_labor_hours_remaining += labor_hours_remaining
+        max_progress_percent = max(max_progress_percent, progress_percent)
+
+        for part in _normalize_parts_list(work_order, dvi_item):
+            all_parts.append(part)
+            if part["status"] != "received":
+                _append_unique(
+                    unarrived_part_numbers,
+                    part["part_number"] or part["description"] or part["part_id"],
+                )
+
+    parts_ordered = any(part["status"] in {"ordered", "received"} for part in all_parts)
+    parts_received = bool(all_parts) and all(
+        part["status"] == "received" for part in all_parts
+    )
+    parts_not_arrived = bool(unarrived_part_numbers)
+    notes = " | ".join(summary_lines)
+
+    return {
+        "job_id": display_ticket_reference,
+        "ticket_reference": display_ticket_reference,
+        "raw_ticket_reference": ticket_reference,
+        "job_name": ", ".join(job_names) if job_names else "RO summary",
+        "location": location or "Country Club",
+        "advisor_name": advisor_name or "Unknown",
+        "technician_name": technician_name,
+        "customer_name": customer_name,
+        "vehicle": vehicle,
+        "workflow_status": workflow_status,
+        "clocked_in": _to_bool(record.get("clocked_in", False)),
+        "progress_percent": max_progress_percent,
+        "sold_hours": total_sold_hours,
+        "labor_hours_remaining": total_labor_hours_remaining,
+        "job_marked_complete": _to_bool(
+            record.get("job_marked_complete"),
+            default=_normalize_status(workflow_status) in {"complete", "completed", "closed", "done", "finished"},
+        ),
+        "approval_status": approval_status,
+        "parts_list": all_parts,
+        "parts_ordered": parts_ordered,
+        "parts_received": parts_received,
+        "parts_not_arrived": parts_not_arrived,
+        "unarrived_parts": unarrived_part_numbers,
+        "dvi_completed": dvi_completed,
+        "inspection_status": "completed" if dvi_completed else "pending",
+        "latest_activity": _clean_text(record.get("latest_activity", "")),
+        "summary_lines": summary_lines,
+        "notes": notes,
+        "source_refs": {
+            **deepcopy(record.get("source_refs", {})),
+            "autoflow_ticket_reference": display_ticket_reference,
+        },
+        "raw": {
+            "work_order": deepcopy(work_order),
+            "dvi": deepcopy(dvi),
+            "dvi_items": deepcopy(dvi_items),
+        },
+    }
+
+
 def _normalize_autoflow_record(record: dict[str, Any]) -> list[dict[str, Any]]:
     work_order = record.get("work_order", {})
     dvi = record.get("dvi", {})
@@ -218,6 +551,8 @@ def _normalize_autoflow_record(record: dict[str, Any]) -> list[dict[str, Any]]:
     dvi_items = _extract_dvi_items(work_order, dvi)
     if not dvi_items:
         dvi_items = [{}]
+
+    return [_build_ro_summary_job(record, work_order, dvi, dvi_items)]
 
     ticket_reference = str(
         record.get("ticket_reference")

@@ -37,6 +37,10 @@ class MonitoredItem:
     status_mismatch: bool = False
     follow_up_needed: bool = False
     parts_not_arrived: bool = False
+    customer_name: str = ""
+    vehicle: str = ""
+    summary_lines: list[str] | None = None
+    unarrived_parts: list[str] | None = None
     notes: str = ""
 
 
@@ -150,6 +154,18 @@ def _build_items_from_shop_state(shop_state: dict[str, object]) -> list[Monitore
                 follow_up_needed=workflow_status_key in {"assigned", "active", "waiting_on_parts"}
                 or parts_not_arrived,
                 parts_not_arrived=parts_not_arrived,
+                customer_name=str(job.get("customer_name", "")),
+                vehicle=str(job.get("vehicle", "")),
+                summary_lines=[
+                    str(line)
+                    for line in job.get("summary_lines", [])
+                    if str(line).strip()
+                ],
+                unarrived_parts=[
+                    str(part)
+                    for part in job.get("unarrived_parts", [])
+                    if str(part).strip()
+                ],
                 notes=str(job.get("notes", "")),
             )
         )
@@ -222,6 +238,10 @@ def load_items_from_json(input_path: Path) -> list[MonitoredItem]:
             status_mismatch=item.get("status_mismatch", False),
             follow_up_needed=item.get("follow_up_needed", False),
             parts_not_arrived=item.get("parts_not_arrived", False),
+            customer_name=item.get("customer_name", ""),
+            vehicle=item.get("vehicle", ""),
+            summary_lines=item.get("summary_lines", []),
+            unarrived_parts=item.get("unarrived_parts", []),
             notes=item.get("notes", ""),
         )
         for item in raw_items
@@ -326,6 +346,10 @@ def build_item_record(item: MonitoredItem) -> dict[str, object]:
         "exceptions": exceptions,
         "priority": priority,
         "follow_up_needed": item.follow_up_needed,
+        "customer_name": item.customer_name,
+        "vehicle": item.vehicle,
+        "summary_lines": item.summary_lines or [],
+        "unarrived_parts": item.unarrived_parts or [],
         "notes": item.notes,
     }
 
@@ -542,14 +566,19 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
 
     follow_up_tasks = []
     questions_for_preston = []
+    seen_follow_up_tickets: set[str] = set()
     for item in monitored_items:
-        if item["exceptions"] or item["follow_up_needed"]:
+        ticket_reference = str(item["display_ticket_reference"])
+        if (
+            item["exceptions"] or item["follow_up_needed"]
+        ) and ticket_reference not in seen_follow_up_tickets:
             follow_up_tasks.append(build_follow_up_task(item))
             questions_for_preston.append(
                 build_question_for_preston(
                     item["exceptions"], item["display_ticket_reference"]
                 )
             )
+            seen_follow_up_tickets.add(ticket_reference)
 
     return {
         "generated_at": NOW.isoformat(),
@@ -645,9 +674,25 @@ def print_summary(summary: dict[str, object]) -> None:
             print(f"- {item['display_ticket_reference']} | {item['priority']}")
             print(f"  advisor: {item['advisor_name']}")
             print(f"  status: {item['current_status']}")
+            if item["customer_name"]:
+                print(f"  customer: {item['customer_name']}")
+            if item["vehicle"]:
+                print(f"  vehicle: {item['vehicle']}")
             print(f"  age_hours: {item['last_update_age_hours']}")
             print(f"  exceptions: {', '.join(item['exceptions'])}")
-            print(f"  notes: {item['notes']}")
+            if item["summary_lines"]:
+                print("  summary:")
+                for line in item["summary_lines"]:
+                    print(f"  - {line}")
+            elif item["notes"]:
+                print(f"  notes: {item['notes']}")
+            if item["unarrived_parts"]:
+                print("  unarrived parts:")
+                for part in item["unarrived_parts"]:
+                    print(f"  - {part}")
+            print(
+                f"  follow_up: {suggested_follow_up_question(item['exceptions'])}"
+            )
     else:
         print("- none")
     print()
@@ -676,15 +721,27 @@ def print_summary(summary: dict[str, object]) -> None:
 
     print("FULL ITEM LIST")
     for item in summary["items"]:
-        print(
-            f"- {item['item_id']} | {item['display_ticket_reference']} | {item['priority']}"
-        )
+        print(f"- {item['display_ticket_reference']}")
         print(f"  location: {item['location']}")
         print(f"  advisor: {item['advisor_name']}")
         print(f"  status: {item['current_status']}")
+        if item["customer_name"]:
+            print(f"  customer: {item['customer_name']}")
+        if item["vehicle"]:
+            print(f"  vehicle: {item['vehicle']}")
         print(f"  age_hours: {item['last_update_age_hours']}")
         print(f"  exceptions: {', '.join(item['exceptions']) or 'none'}")
-        print(f"  notes: {item['notes']}")
+        if item["summary_lines"]:
+            print("  summary:")
+            for line in item["summary_lines"]:
+                print(f"  - {line}")
+        elif item["notes"]:
+            print(f"  notes: {item['notes']}")
+        if item["unarrived_parts"]:
+            print("  unarrived parts:")
+            for part in item["unarrived_parts"]:
+                print(f"  - {part}")
+        print(f"  follow_up: {suggested_follow_up_question(item['exceptions'])}")
 
 
 def write_report_outputs(report_text: str) -> None:
