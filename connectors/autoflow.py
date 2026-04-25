@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
@@ -16,8 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MOCK_AUTOFLOW_PATH = REPO_ROOT / "inputs" / "mock_autoflow_techflow_jobs.json"
 
 DEFAULT_TIMEOUT_SECONDS = 20
-DEFAULT_WORK_ORDER_PATH_TEMPLATE = "/api/work-orders/{ro_number}"
-DEFAULT_DVI_PATH_TEMPLATE = "/api/dvi/{ro_number}"
+DEFAULT_WORK_ORDER_PATH_TEMPLATE = "/api/v1/work_orders/{ro_number}"
+DEFAULT_DVI_PATH_TEMPLATE = "/api/v1/dvi/{ro_number}"
 DEFAULT_AUTH_MODE = "basic"
 
 COMPLETE_STATUSES = {"complete", "completed", "closed", "done"}
@@ -167,6 +168,14 @@ def _request_json(path_template: str, ro_number: str) -> dict[str, Any]:
         if path.startswith("http")
         else urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
     )
+    sanitized_endpoint = path
+    if path.startswith("http"):
+        parsed_url = urlparse(path)
+        sanitized_endpoint = parsed_url.path or "/"
+        if parsed_url.query:
+            sanitized_endpoint = f"{sanitized_endpoint}?{parsed_url.query}"
+
+    LOGGER.info("AUTOFLOW REQUEST: GET %s", sanitized_endpoint)
     timeout_seconds = int(os.getenv("AUTOFLOW_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS)))
 
     request = Request(request_url, headers=headers, method="GET")
