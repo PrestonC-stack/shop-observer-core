@@ -66,18 +66,42 @@ def _normalize_status(value: Any, default: str = "unknown") -> str:
     return str(value).strip().lower().replace("-", "_").replace(" ", "_")
 
 
-def _extract_dvi_items(dvi: dict[str, Any]) -> list[dict[str, Any]]:
+def _extract_dvi_items(
+    work_order: dict[str, Any], dvi: dict[str, Any]
+) -> list[dict[str, Any]]:
     items = _first_value(
-        dvi,
+        work_order,
+        ("work_order", "dvi_items"),
+        ("content", "work_order", "dvi_items"),
         ("dvi_items",),
-        ("dviItems",),
-        ("inspectionItems",),
-        ("inspection", "items"),
-        ("items",),
         default=[],
     )
+    if not items:
+        items = _first_value(
+            dvi,
+            ("content", "work_order", "dvi_items"),
+            ("work_order", "dvi_items"),
+            ("dvi_items",),
+            ("dviItems",),
+            ("inspectionItems",),
+            ("inspection", "items"),
+            ("items",),
+            default=[],
+        )
     if isinstance(items, list) and items:
         return [item for item in items if isinstance(item, dict)]
+    return []
+
+
+def _extract_dvis(dvi: dict[str, Any]) -> list[dict[str, Any]]:
+    dvis = _first_value(
+        dvi,
+        ("content", "dvis"),
+        ("dvis",),
+        default=[],
+    )
+    if isinstance(dvis, list) and dvis:
+        return [item for item in dvis if isinstance(item, dict)]
     return []
 
 
@@ -93,6 +117,8 @@ def _normalize_parts_list(
             ("parts",),
             ("partsList",),
             ("lineItems", "parts"),
+            ("work_order", "parts"),
+            ("content", "work_order", "parts"),
             default=[],
         ),
     )
@@ -144,9 +170,11 @@ def _normalize_parts_list(
                 "part_number": str(
                     _first_value(
                         part,
+                        ("part_number",),
                         ("partNumber",),
                         ("sku",),
                         ("number",),
+                        ("number_str",),
                         default="",
                     )
                 ),
@@ -181,7 +209,13 @@ def _normalize_parts_list(
 def _normalize_autoflow_record(record: dict[str, Any]) -> list[dict[str, Any]]:
     work_order = record.get("work_order", {})
     dvi = record.get("dvi", {})
-    dvi_items = _extract_dvi_items(dvi)
+    dvi_content = dvi.get("content", {}) if isinstance(dvi.get("content"), dict) else {}
+    work_order_content = (
+        work_order.get("work_order", {})
+        if isinstance(work_order.get("work_order"), dict)
+        else {}
+    )
+    dvi_items = _extract_dvi_items(work_order, dvi)
     if not dvi_items:
         dvi_items = [{}]
 
@@ -193,9 +227,60 @@ def _normalize_autoflow_record(record: dict[str, Any]) -> list[dict[str, Any]]:
             ("roNumber",),
             ("work_order_number",),
             ("workOrderNumber",),
+            ("work_order", "ro_number"),
+            ("work_order", "id"),
             default="UNKNOWN",
         )
     )
+    if ticket_reference.isdigit():
+        display_ticket_reference = f"RO-{ticket_reference}"
+    else:
+        display_ticket_reference = ticket_reference
+
+    customer_first_name = str(
+        _first_value(
+            work_order,
+            ("customer", "firstname"),
+            ("customer", "first_name"),
+            ("work_order", "customer", "firstname"),
+            ("work_order", "customer", "first_name"),
+            default="",
+        )
+    )
+    customer_last_name = str(
+        _first_value(
+            work_order,
+            ("customer", "lastname"),
+            ("customer", "last_name"),
+            ("work_order", "customer", "lastname"),
+            ("work_order", "customer", "last_name"),
+            default="",
+        )
+    )
+    customer_name = " ".join(
+        part for part in [customer_first_name, customer_last_name] if part
+    ).strip()
+    vehicle_parts = [
+        _first_value(
+            work_order,
+            ("vehicle", "year"),
+            ("work_order", "vehicle", "year"),
+            default="",
+        ),
+        _first_value(
+            work_order,
+            ("vehicle", "make"),
+            ("work_order", "vehicle", "make"),
+            default="",
+        ),
+        _first_value(
+            work_order,
+            ("vehicle", "model"),
+            ("work_order", "vehicle", "model"),
+            default="",
+        ),
+    ]
+    vehicle = " ".join(str(part) for part in vehicle_parts if part not in (None, ""))
     location = str(
         record.get("location")
         or _first_value(
@@ -208,6 +293,12 @@ def _normalize_autoflow_record(record: dict[str, Any]) -> list[dict[str, Any]]:
     )
     advisor_name = str(
         record.get("advisor_name")
+        or _first_value(
+            dvi,
+            ("content", "service_advisor_name"),
+            ("service_advisor_name",),
+            default="",
+        )
         or _first_value(
             work_order,
             ("advisor", "name"),
@@ -226,8 +317,14 @@ def _normalize_autoflow_record(record: dict[str, Any]) -> list[dict[str, Any]]:
             default="Unassigned",
         )
     )
-    base_workflow_status = _normalize_status(
-        record.get("workflow_status")
+    base_workflow_status = (
+        _first_value(
+            dvi,
+            ("content", "current_status"),
+            ("current_status",),
+            default="",
+        )
+        or record.get("workflow_status")
         or _first_value(
             work_order,
             ("workflow_status",),
@@ -246,17 +343,36 @@ def _normalize_autoflow_record(record: dict[str, Any]) -> list[dict[str, Any]]:
             default="unknown",
         )
     )
+    dvis = _extract_dvis(dvi)
+    first_dvi = dvis[0] if dvis else {}
     dvi_completed = _to_bool(
         record.get("dvi_completed"),
-        default=_to_bool(
+        default=bool(
             _first_value(
-                dvi,
+                first_dvi,
+                ("completed_datetime",),
+                ("completed_by",),
+                default=_first_value(
+                    dvi,
+                ("content", "dvis", 0, "completed_datetime"),
+                ("content", "dvis", 0, "completed_by"),
+                ("dvis", 0, "completed_datetime"),
+                ("dvis", 0, "completed_by"),
                 ("completed",),
                 ("isCompleted",),
                 ("summary", "completed"),
-                default=False,
+                default="",
+                ),
             )
         ),
+    )
+    reason_vehicle_is_here = str(
+        _first_value(
+            dvi,
+            ("content", "reason_vehicle_is_here"),
+            ("reason_vehicle_is_here",),
+            default="",
+        )
     )
 
     normalized_jobs: list[dict[str, Any]] = []
@@ -275,9 +391,9 @@ def _normalize_autoflow_record(record: dict[str, Any]) -> list[dict[str, Any]]:
         sold_hours = _to_float(
             _first_value(
                 dvi_item,
+                ("labor", "quantity"),
                 ("labor_quantity",),
                 ("laborQuantity",),
-                ("labor", "quantity"),
                 ("sold_hours",),
                 ("soldHours",),
                 ("hours",),
@@ -316,6 +432,13 @@ def _normalize_autoflow_record(record: dict[str, Any]) -> list[dict[str, Any]]:
         parts_received = bool(ordered_parts) and all(
             part["status"] == "received" for part in ordered_parts
         )
+        unarrived_parts = [
+            part for part in parts_list if part["status"] != "received"
+        ]
+        unarrived_part_numbers = [
+            part["part_number"] or part["description"] or part["part_id"]
+            for part in unarrived_parts
+        ]
         inspection_status = _normalize_status(
             _first_value(
                 dvi_item,
@@ -325,6 +448,39 @@ def _normalize_autoflow_record(record: dict[str, Any]) -> list[dict[str, Any]]:
                 default="completed" if dvi_completed else "pending",
             )
         )
+        item_notes = str(
+            _first_value(
+                dvi_item,
+                ("notes",),
+                ("note",),
+                ("comment",),
+                ("recommendation",),
+                default="",
+            )
+        )
+        note_parts = [
+            part
+            for part in [
+                reason_vehicle_is_here,
+                item_notes,
+                (
+                    "Unarrived parts: " + ", ".join(unarrived_part_numbers)
+                    if unarrived_part_numbers
+                    else ""
+                ),
+                (
+                    f"Customer: {customer_name}"
+                    if customer_name
+                    else ""
+                ),
+                (
+                    f"Vehicle: {vehicle}"
+                    if vehicle
+                    else ""
+                ),
+            ]
+            if part
+        ]
 
         normalized_jobs.append(
             {
@@ -337,20 +493,21 @@ def _normalize_autoflow_record(record: dict[str, Any]) -> list[dict[str, Any]]:
                         default=f"{ticket_reference}-{index}",
                     )
                 ),
-                "ticket_reference": ticket_reference,
+                "ticket_reference": display_ticket_reference,
+                "raw_ticket_reference": ticket_reference,
                 "job_name": job_name,
                 "location": location,
                 "advisor_name": advisor_name,
                 "technician_name": technician_name,
-                "workflow_status": _normalize_status(
-                    _first_value(
-                        dvi_item,
-                        ("workflow_status",),
-                        ("workflowStatus",),
-                        ("job_status",),
-                        ("jobStatus",),
-                        default=base_workflow_status,
-                    )
+                "customer_name": customer_name,
+                "vehicle": vehicle,
+                "workflow_status": _first_value(
+                    dvi_item,
+                    ("workflow_status",),
+                    ("workflowStatus",),
+                    ("job_status",),
+                    ("jobStatus",),
+                    default=base_workflow_status,
                 ),
                 "clocked_in": _to_bool(record.get("clocked_in", False)),
                 "progress_percent": progress_percent,
@@ -364,20 +521,15 @@ def _normalize_autoflow_record(record: dict[str, Any]) -> list[dict[str, Any]]:
                 "parts_list": parts_list,
                 "parts_ordered": bool(ordered_parts),
                 "parts_received": parts_received,
+                "parts_not_arrived": bool(unarrived_parts),
+                "unarrived_parts": unarrived_part_numbers,
                 "dvi_completed": dvi_completed,
                 "inspection_status": inspection_status,
                 "latest_activity": str(record.get("latest_activity", "")),
-                "notes": str(
-                    _first_value(
-                        dvi_item,
-                        ("notes",),
-                        ("comment",),
-                        default=record.get("notes", ""),
-                    )
-                ),
+                "notes": " | ".join(note_parts) or str(record.get("notes", "")),
                 "source_refs": {
                     **deepcopy(record.get("source_refs", {})),
-                    "autoflow_ticket_reference": ticket_reference,
+                    "autoflow_ticket_reference": display_ticket_reference,
                     "dvi_item_id": _first_value(
                         dvi_item, ("id",), ("itemId",), ("jobId",), default=""
                     ),

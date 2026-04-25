@@ -36,6 +36,7 @@ class MonitoredItem:
     estimate_complete: bool = True
     status_mismatch: bool = False
     follow_up_needed: bool = False
+    parts_not_arrived: bool = False
     notes: str = ""
 
 
@@ -110,6 +111,12 @@ def _parse_datetime(value: object, default: datetime) -> datetime:
 def _normalize_current_status(value: object) -> str:
     if value in (None, ""):
         return "unknown"
+    return str(value).strip()
+
+
+def _status_key(value: object) -> str:
+    if value in (None, ""):
+        return "unknown"
     return str(value).strip().lower().replace("-", "_").replace(" ", "_")
 
 
@@ -118,11 +125,13 @@ def _build_items_from_shop_state(shop_state: dict[str, object]) -> list[Monitore
     items: list[MonitoredItem] = []
 
     for index, job in enumerate(shop_state.get("jobs", []), start=1):
-        inspection_status = _normalize_current_status(job.get("inspection_status", "unknown"))
-        approval_status = _normalize_current_status(job.get("approval_status", "unknown"))
+        inspection_status = _status_key(job.get("inspection_status", "unknown"))
+        approval_status = _status_key(job.get("approval_status", "unknown"))
         parts_ordered = bool(job.get("parts_ordered", False))
         parts_received = bool(job.get("parts_received", False))
+        parts_not_arrived = bool(job.get("parts_not_arrived", False))
         workflow_status = _normalize_current_status(job.get("workflow_status", "unknown"))
+        workflow_status_key = _status_key(workflow_status)
 
         items.append(
             MonitoredItem(
@@ -132,13 +141,15 @@ def _build_items_from_shop_state(shop_state: dict[str, object]) -> list[Monitore
                 ticket_reference=str(job.get("ticket_reference", f"RO-{index:04d}")),
                 current_status=workflow_status,
                 last_update_at=generated_at,
-                has_parts_hold=parts_ordered and not parts_received,
+                has_parts_hold=(parts_ordered and not parts_received) or parts_not_arrived,
                 dvi_complete=inspection_status in {"complete", "completed"} or bool(
                     job.get("dvi_completed", False)
                 ),
                 estimate_complete=approval_status in {"approved", "authorized", "customer_approved"},
                 status_mismatch=False,
-                follow_up_needed=workflow_status in {"assigned", "active", "waiting_on_parts"},
+                follow_up_needed=workflow_status_key in {"assigned", "active", "waiting_on_parts"}
+                or parts_not_arrived,
+                parts_not_arrived=parts_not_arrived,
                 notes=str(job.get("notes", "")),
             )
         )
@@ -210,6 +221,7 @@ def load_items_from_json(input_path: Path) -> list[MonitoredItem]:
             estimate_complete=item.get("estimate_complete", True),
             status_mismatch=item.get("status_mismatch", False),
             follow_up_needed=item.get("follow_up_needed", False),
+            parts_not_arrived=item.get("parts_not_arrived", False),
             notes=item.get("notes", ""),
         )
         for item in raw_items
@@ -231,7 +243,9 @@ def age_hours(item: MonitoredItem) -> float:
 def detect_exceptions(item: MonitoredItem) -> list[str]:
     exceptions: list[str] = []
 
-    if item.has_parts_hold:
+    if item.parts_not_arrived:
+        exceptions.append("parts_not_arrived")
+    if item.has_parts_hold or item.parts_not_arrived:
         exceptions.append("waiting_on_parts")
     if not item.dvi_complete:
         exceptions.append("dvi_missing_incomplete")
@@ -278,6 +292,8 @@ def suggested_follow_up_question(exceptions: list[str]) -> str:
         return "What missing DVI support needs to be added before this can move forward?"
     if "overdue_follow_up" in exceptions:
         return "Who owns the next follow-up, and when will that update happen?"
+    if "parts_not_arrived" in exceptions:
+        return "Which parts are still not arrived, and what is the current ETA?"
     if "waiting_on_parts" in exceptions:
         return "What is the current parts ETA, and does the customer need an update now?"
     return "What is the next clear action for this item?"
@@ -407,6 +423,8 @@ def build_question_for_preston(
         return f"What is blocking the estimate for {ticket_reference}?"
     if "dvi_missing_incomplete" in exceptions:
         return f"What DVI support is missing for {ticket_reference}?"
+    if "parts_not_arrived" in exceptions:
+        return f"Which parts have not arrived yet for {ticket_reference}?"
     if "waiting_on_parts" in exceptions:
         return f"Is the parts ETA known for {ticket_reference}?"
     if "overdue_follow_up" in exceptions:
@@ -441,6 +459,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
 
     counts_by_exception = {
         "waiting_on_parts": 0,
+        "parts_not_arrived": 0,
         "dvi_missing_incomplete": 0,
         "estimate_stalled": 0,
         "status_mismatch": 0,
@@ -462,6 +481,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
                 "overdue_follow_up": 0,
                 "dvi_missing_incomplete": 0,
                 "waiting_on_parts": 0,
+                "parts_not_arrived": 0,
                 "status_mismatch": 0,
             }
         for exception in item["exceptions"]:
@@ -479,6 +499,7 @@ def summarize_items(items: list[MonitoredItem]) -> dict[str, object]:
                 "overdue_follow_up": 0,
                 "dvi_missing_incomplete": 0,
                 "waiting_on_parts": 0,
+                "parts_not_arrived": 0,
                 "status_mismatch": 0,
             }
 
@@ -600,6 +621,8 @@ def print_summary(summary: dict[str, object]) -> None:
                 print(f"- dvi issues: {counts['dvi_missing_incomplete']}")
             if counts["waiting_on_parts"] > 0:
                 print(f"- waiting on parts: {counts['waiting_on_parts']}")
+            if counts["parts_not_arrived"] > 0:
+                print(f"- parts not arrived: {counts['parts_not_arrived']}")
             if counts["status_mismatch"] > 0:
                 print(f"- status mismatches: {counts['status_mismatch']}")
     else:

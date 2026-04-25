@@ -29,6 +29,8 @@ def evaluate_shop_rules(shop_state: dict[str, Any]) -> list[dict[str, Any]]:
         approval_status = str(job.get("approval_status", "unknown")).lower()
         parts_ordered = bool(job.get("parts_ordered", False))
         parts_received = bool(job.get("parts_received", False))
+        parts_not_arrived = bool(job.get("parts_not_arrived", False))
+        unarrived_parts = job.get("unarrived_parts", [])
         job_marked_complete = bool(job.get("job_marked_complete", False)) or workflow_status in COMPLETE_STATUSES
 
         if workflow_status == "assigned" and not clocked_in:
@@ -83,6 +85,18 @@ def evaluate_shop_rules(shop_state: dict[str, Any]) -> list[dict[str, Any]]:
                     "severity": "high",
                     "title": "Part ordered but not received while job marked complete",
                     "detail": "Completion status conflicts with parts receipt state.",
+                }
+            )
+
+        if parts_not_arrived:
+            parts_summary = ", ".join(str(part) for part in unarrived_parts) or "unknown parts"
+            findings.append(
+                {
+                    "rule_id": "parts_not_arrived",
+                    "ticket_reference": ticket_reference,
+                    "severity": "medium",
+                    "title": "Parts not arrived",
+                    "detail": f"Parts still not arrived: {parts_summary}.",
                 }
             )
 

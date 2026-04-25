@@ -27,6 +27,8 @@ def build_draft_nudges(findings: list[dict[str, Any]]) -> list[dict[str, str]]:
             message = (
                 f"Resolve parts receipt mismatch before treating {ticket_reference} as complete."
             )
+        elif rule_id == "parts_not_arrived":
+            message = f"Confirm ETA for parts not arrived on {ticket_reference}."
         else:
             message = f"Review finding for {ticket_reference}."
 
