@@ -1,0 +1,34 @@
+{
+  "source": "tekmetric-mock",
+  "generated_at": "2026-04-24T07:00:00",
+  "tickets": [
+    {
+      "ticket_reference": "RO-2301",
+      "approval_status": "not_approved",
+      "parts_ordered": false,
+      "parts_received": false,
+      "latest_activity": "Job assigned to technician."
+    },
+    {
+      "ticket_reference": "RO-2302",
+      "approval_status": "approved",
+      "parts_ordered": false,
+      "parts_received": false,
+      "latest_activity": "Customer approved work but parts have not been ordered."
+    },
+    {
+      "ticket_reference": "RO-2303",
+      "approval_status": "approved",
+      "parts_ordered": true,
+      "parts_received": true,
+      "latest_activity": "Parts received and technician finishing the last labor step."
+    },
+    {
+      "ticket_reference": "RO-2304",
+      "approval_status": "approved",
+      "parts_ordered": true,
+      "parts_received": false,
+      "latest_activity": "Part ordered but still pending receipt while job is marked complete."
+    }
+  ]
+}

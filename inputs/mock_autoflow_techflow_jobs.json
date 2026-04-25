@@ -1,0 +1,58 @@
+{
+  "source": "autoflow-techflow-mock",
+  "generated_at": "2026-04-24T07:00:00",
+  "jobs": [
+    {
+      "job_id": "AF-1001",
+      "ticket_reference": "RO-2301",
+      "location": "Country Club",
+      "advisor_name": "Drew",
+      "technician_name": "Caleb",
+      "workflow_status": "assigned",
+      "clocked_in": false,
+      "progress_percent": 0,
+      "labor_hours_remaining": 3.8,
+      "job_marked_complete": false,
+      "notes": "Assigned but technician has not clocked in yet."
+    },
+    {
+      "job_id": "AF-1002",
+      "ticket_reference": "RO-2302",
+      "location": "Country Club",
+      "advisor_name": "Mitch",
+      "technician_name": "Eli",
+      "workflow_status": "active",
+      "clocked_in": true,
+      "progress_percent": 0,
+      "labor_hours_remaining": 2.6,
+      "job_marked_complete": false,
+      "notes": "Vehicle is active but no measurable progress has been logged."
+    },
+    {
+      "job_id": "AF-1003",
+      "ticket_reference": "RO-2303",
+      "location": "Apache",
+      "advisor_name": "Preston",
+      "technician_name": "Marco",
+      "workflow_status": "active",
+      "clocked_in": true,
+      "progress_percent": 85,
+      "labor_hours_remaining": 0.4,
+      "job_marked_complete": false,
+      "notes": "Repair is near completion based on remaining labor."
+    },
+    {
+      "job_id": "AF-1004",
+      "ticket_reference": "RO-2304",
+      "location": "Mobile",
+      "advisor_name": "Preston",
+      "technician_name": "Luis",
+      "workflow_status": "complete",
+      "clocked_in": false,
+      "progress_percent": 100,
+      "labor_hours_remaining": 0.0,
+      "job_marked_complete": true,
+      "notes": "Job is marked complete pending final parts reconciliation."
+    }
+  ]
+}
