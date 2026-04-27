@@ -18,9 +18,10 @@ PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
 INPUTS_DIR = Path(__file__).resolve().parent / "inputs"
 CURRENT_SHOP_SNAPSHOT_FILE = INPUTS_DIR / "current_shop_snapshot.json"
 INPUT_FILE = INPUTS_DIR / "sample_input.json"
+ACTIVE_ROS_FILE = INPUTS_DIR / "active_ros.txt"
 OUTPUTS_DIR = Path(__file__).resolve().parent / "outputs"
 HISTORY_DIR = OUTPUTS_DIR / "history"
-LIVE_TEST_RO = "13298"
+DEFAULT_ACTIVE_ROS = ["13298"]
 
 
 @dataclass
@@ -173,51 +174,77 @@ def _build_items_from_shop_state(shop_state: dict[str, object]) -> list[Monitore
     return items
 
 
-def load_runtime_items() -> tuple[list[MonitoredItem], str, str | None]:
-    try:
-        work_order = get_work_order(LIVE_TEST_RO)
-        dvi = get_dvi(LIVE_TEST_RO)
+def load_active_ros() -> list[str]:
+    if not ACTIVE_ROS_FILE.exists():
+        return DEFAULT_ACTIVE_ROS
+
+    ro_numbers: list[str] = []
+    for raw_line in ACTIVE_ROS_FILE.read_text(encoding="utf-8").splitlines():
+        ro_number = raw_line.split("#", 1)[0].strip()
+        if ro_number and ro_number not in ro_numbers:
+            ro_numbers.append(ro_number)
+
+    return ro_numbers or DEFAULT_ACTIVE_ROS
+
+
+def load_runtime_items() -> tuple[list[MonitoredItem], str, str | None, dict[str, str]]:
+    failed_ros: dict[str, str] = {}
+    records: list[dict[str, object]] = []
+
+    for ro_number in load_active_ros():
+        try:
+            work_order = get_work_order(ro_number)
+            dvi = get_dvi(ro_number)
+            records.append(
+                {
+                    "ticket_reference": ro_number,
+                    "work_order": work_order,
+                    "dvi": dvi,
+                }
+            )
+        except Exception as exc:
+            failed_ros[ro_number] = str(exc)
+
+    if records:
         shop_state = normalize_shop_state(
             {
                 "generated_at": NOW.isoformat(),
                 "mode": "api",
                 "source": "autoflow-api",
-                "records": [
-                    {
-                        "ticket_reference": LIVE_TEST_RO,
-                        "work_order": work_order,
-                        "dvi": dvi,
-                    }
-                ],
+                "records": records,
             },
             {"source": "tekmetric-unset", "tickets": []},
         )
         items = _build_items_from_shop_state(shop_state)
         if items:
-            return items, "AUTOFLOW_API", None
-        raise RuntimeError("AutoFlow API normalization returned no jobs")
-    except Exception as exc:
-        if CURRENT_SHOP_SNAPSHOT_FILE.exists():
-            return (
-                load_items_from_json(CURRENT_SHOP_SNAPSHOT_FILE),
-                "MOCK_FALLBACK",
-                str(exc),
-            )
+            return items, "AUTOFLOW_API", None, failed_ros
+        failed_ros["normalization"] = "AutoFlow API normalization returned no jobs"
 
-        try:
-            shop_state = normalize_shop_state(
-                load_mock_autoflow_jobs(),
-                {"source": "tekmetric-unset", "tickets": []},
-            )
-            items = _build_items_from_shop_state(shop_state)
-            if items:
-                return items, "MOCK_FALLBACK", str(exc)
-        except Exception:
-            pass
+    fallback_reason = "; ".join(
+        f"{ro_number}: {reason}" for ro_number, reason in failed_ros.items()
+    ) or "No AutoFlow API records were loaded"
+    if CURRENT_SHOP_SNAPSHOT_FILE.exists():
+        return (
+            load_items_from_json(CURRENT_SHOP_SNAPSHOT_FILE),
+            "MOCK_FALLBACK",
+            fallback_reason,
+            failed_ros,
+        )
 
-        if INPUT_FILE.exists():
-            return load_items_from_json(INPUT_FILE), "MOCK_FALLBACK", str(exc)
-        return fallback_sample_items(), "MOCK_FALLBACK", str(exc)
+    try:
+        shop_state = normalize_shop_state(
+            load_mock_autoflow_jobs(),
+            {"source": "tekmetric-unset", "tickets": []},
+        )
+        items = _build_items_from_shop_state(shop_state)
+        if items:
+            return items, "MOCK_FALLBACK", fallback_reason, failed_ros
+    except Exception:
+        pass
+
+    if INPUT_FILE.exists():
+        return load_items_from_json(INPUT_FILE), "MOCK_FALLBACK", fallback_reason, failed_ros
+    return fallback_sample_items(), "MOCK_FALLBACK", fallback_reason, failed_ros
 
 
 def load_items_from_json(input_path: Path) -> list[MonitoredItem]:
@@ -756,13 +783,17 @@ def write_report_outputs(report_text: str) -> None:
 
 
 def main() -> None:
-    items, data_source, fallback_reason = load_runtime_items()
+    items, data_source, fallback_reason, failed_ros = load_runtime_items()
     summary = summarize_items(items)
     report_buffer = io.StringIO()
     with redirect_stdout(report_buffer):
         print(f"DATA SOURCE: {data_source}")
         if fallback_reason:
             print(f"FALLBACK REASON: {fallback_reason}")
+        if failed_ros:
+            print("FAILED ROS:")
+            for ro_number, reason in failed_ros.items():
+                print(f"- {ro_number}: {reason}")
         print()
         print_summary(summary)
 
