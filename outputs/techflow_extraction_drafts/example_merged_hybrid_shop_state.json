@@ -1,0 +1,50 @@
+{
+  "shop_state_version": "v1-hybrid-draft",
+  "generated_at": "2026-04-30T00:00:00Z",
+  "source_labels": [
+    "autoflow_api",
+    "techflow_screenshot",
+    "merged_hybrid"
+  ],
+  "jobs": [
+    {
+      "ticket_reference": "RO-13298",
+      "source_labels": [
+        "autoflow_api",
+        "techflow_screenshot",
+        "merged_hybrid"
+      ],
+      "hybrid_match": {
+        "match_reasons": [
+          "ro_number"
+        ],
+        "needs_review": false
+      },
+      "techflow_screenshot": [
+        {
+          "source_label": "techflow_screenshot",
+          "confidence_score": 0.91,
+          "extraction_flags": [
+            "review_required",
+            "high_confidence"
+          ],
+          "review_status": "needs_review",
+          "fields": {
+            "ro_number": "13298",
+            "technician_name": "Example Tech",
+            "vehicle": "2024 RAM 3500",
+            "customer": "Example Customer",
+            "job_name": "DEF contamination diagnosis",
+            "workflow_status": "Active",
+            "percent_complete": 0,
+            "labor_sold_hours": 2.5,
+            "labor_clocked_hours": 0,
+            "labor_remaining_hours": 2.5,
+            "priority_position": 1
+          }
+        }
+      ]
+    }
+  ],
+  "unmatched_techflow_drafts": []
+}
