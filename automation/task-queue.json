@@ -1,5 +1,43 @@
 {
-  "active": [],
-  "queued": [],
-  "completed": []
+  "active": [
+    {
+      "task": "Upgrade Advisor Game Plan into accountability loop",
+      "owner": "ChatGPT / AI Machine",
+      "status": "active",
+      "priority": "high"
+    }
+  ],
+  "queued": [
+    {
+      "task": "Create advisor_tasks.json feed",
+      "owner": "AI Machine",
+      "status": "queued",
+      "priority": "high"
+    },
+    {
+      "task": "Add missed-action detection",
+      "owner": "AI Machine",
+      "status": "queued",
+      "priority": "high"
+    },
+    {
+      "task": "Prepare OpenClaw execution loop",
+      "owner": "OpenClaw",
+      "status": "queued",
+      "priority": "medium"
+    },
+    {
+      "task": "Prepare Hermes continuity loop",
+      "owner": "Hermes",
+      "status": "queued",
+      "priority": "medium"
+    }
+  ],
+  "completed": [
+    {
+      "task": "Stabilize GitHub repo and add Build Ops status tracker",
+      "owner": "AI Machine",
+      "status": "completed"
+    }
+  ]
 }
