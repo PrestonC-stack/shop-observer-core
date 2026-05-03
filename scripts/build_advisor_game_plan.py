@@ -121,6 +121,7 @@ def risk_for(status: str, idle_hours: float) -> str:
 
     if idle_hours >= 24:
         return "RED"
+
     if idle_hours >= 4:
         return "YELLOW"
 
@@ -130,18 +131,23 @@ def risk_for(status: str, idle_hours: float) -> str:
 def action_for(owner: str, status: str) -> str:
     if owner == "Drew":
         return "Bay-lap progress check. Confirm tech activity, clock-in, parts, blockers, and next action."
+
     if owner == "Mitch":
         return "Customer/ticket action. Confirm estimate, approval, parts, update, payment, or closeout."
+
     if owner == "Preston":
         return "Technical escalation. Review and give direction."
+
     return f"Assign owner immediately. Current status could not be mapped: {status}"
 
 
 def due_minutes_for(risk: str) -> int:
     if risk == "RED":
         return 30
+
     if risk == "YELLOW":
         return 120
+
     return 240
 
 
@@ -151,8 +157,10 @@ def build_rows() -> list[dict[str, Any]]:
 
     for record in load_events():
         event = extract_event(record)
+
         if event["ro"] == "unknown":
             continue
+
         grouped.setdefault(event["ro"], []).append(event)
 
     rows = []
@@ -176,6 +184,7 @@ def build_rows() -> list[dict[str, Any]]:
 
     order = {"RED": 0, "YELLOW": 1, "NORMAL": 2}
     rows.sort(key=lambda r: (order.get(r["risk"], 9), -r["idle_hours"]))
+
     return rows
 
 
@@ -217,10 +226,19 @@ def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if old.get("due_by"):
             due_by = old["due_by"]
         else:
-            due_by = (parse_time(created_at) + timedelta(minutes=due_minutes_for(r["risk"]))).isoformat()
+            due_by = (
+                parse_time(created_at)
+                + timedelta(minutes=due_minutes_for(r["risk"]))
+            ).isoformat()
 
         due_by_dt = parse_time(due_by)
+
         status_tracking = old.get("status_tracking", "pending")
+
+        completed_at = old.get("completed_at")
+        if status_tracking == "completed" and not completed_at:
+            completed_at = now.isoformat()
+
         overdue = status_tracking == "pending" and now > due_by_dt
 
         tasks.append({
@@ -232,6 +250,7 @@ def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "created_at": created_at,
             "due_by": due_by,
             "status_tracking": status_tracking,
+            "completed_at": completed_at,
             "overdue": overdue,
             "checked_at": now.isoformat(),
         })
@@ -242,18 +261,26 @@ def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def build_report(rows: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> str:
     report = "# Advisor Game Plan\n\n"
 
-    overdue_tasks = [t for t in tasks if t.get("overdue") is True]
+    overdue_tasks = [
+        task for task in tasks
+        if task.get("overdue") is True
+    ]
+
+    completed_tasks = [
+        task for task in tasks
+        if task.get("status_tracking") == "completed"
+    ]
 
     if overdue_tasks:
         report += "## MISSED / OVERDUE ACTIONS\n\n"
 
-        for t in overdue_tasks:
+        for task in overdue_tasks:
             report += (
-                f"- RO {t['ro']} | {t['owner']} | {t['risk']}\n"
-                f"  - Status: {t['status']}\n"
-                f"  - Task: {t['task']}\n"
-                f"  - Due By: {t['due_by']}\n"
-                f"  - Checked At: {t['checked_at']}\n\n"
+                f"- RO {task['ro']} | {task['owner']} | {task['risk']}\n"
+                f"  - Status: {task['status']}\n"
+                f"  - Task: {task['task']}\n"
+                f"  - Due By: {task['due_by']}\n"
+                f"  - Checked At: {task['checked_at']}\n\n"
             )
 
     report += "## Current Priorities\n\n"
@@ -261,12 +288,22 @@ def build_report(rows: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> str
     if not rows:
         report += "No RO data found.\n"
 
-    for r in rows[:10]:
+    for row in rows[:10]:
         report += (
-            f"RO {r['ro']} | {r['owner']} | {r['risk']} | Idle {r['idle_hours']}h\n"
-            f"Status: {r['status']}\n"
-            f"→ {r['next_action']}\n\n"
+            f"RO {row['ro']} | {row['owner']} | {row['risk']} | Idle {row['idle_hours']}h\n"
+            f"Status: {row['status']}\n"
+            f"→ {row['next_action']}\n\n"
         )
+
+    if completed_tasks:
+        report += "## Completed Tasks\n\n"
+
+        for task in completed_tasks:
+            report += (
+                f"- RO {task['ro']} | {task['owner']}\n"
+                f"  - Task: {task['task']}\n"
+                f"  - Completed At: {task.get('completed_at')}\n\n"
+            )
 
     return report
 
