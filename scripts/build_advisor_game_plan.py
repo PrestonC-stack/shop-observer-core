@@ -11,6 +11,10 @@ EVENT_LOG = ROOT / "data" / "autoflow_events" / "autoflow_events.jsonl"
 OUT_MD = ROOT / "outputs" / "advisor_game_plan.md"
 TASK_FILE = ROOT / "outputs" / "advisor_tasks.json"
 
+DREW_TASK_FILE = ROOT / "outputs" / "tasks_drew.json"
+MITCH_TASK_FILE = ROOT / "outputs" / "tasks_mitch.json"
+PRESTON_TASK_FILE = ROOT / "outputs" / "tasks_preston.json"
+
 
 def parse_time(value: Any) -> datetime:
     try:
@@ -209,11 +213,11 @@ def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     existing = load_existing_tasks()
     tasks = []
 
-    for r in rows:
-        if r["risk"] not in ("RED", "YELLOW"):
+    for row in rows:
+        if row["risk"] not in ("RED", "YELLOW"):
             continue
 
-        key = f"{r['ro']}|{r['owner']}|{r['next_action']}"
+        key = f"{row['ro']}|{row['owner']}|{row['next_action']}"
         old = existing.get(key, {})
 
         created_at = old.get("created_at") or now.isoformat()
@@ -223,7 +227,7 @@ def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             due_by = (
                 parse_time(created_at)
-                + timedelta(minutes=due_minutes_for(r["risk"]))
+                + timedelta(minutes=due_minutes_for(row["risk"]))
             ).isoformat()
 
         due_by_dt = parse_time(due_by)
@@ -236,11 +240,11 @@ def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         overdue = status_tracking == "pending" and now > due_by_dt
 
         tasks.append({
-            "ro": r["ro"],
-            "owner": r["owner"],
-            "risk": r["risk"],
-            "status": r["status"],
-            "task": r["next_action"],
+            "ro": row["ro"],
+            "owner": row["owner"],
+            "risk": row["risk"],
+            "status": row["status"],
+            "task": row["next_action"],
             "created_at": created_at,
             "due_by": due_by,
             "status_tracking": status_tracking,
@@ -250,6 +254,29 @@ def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         })
 
     return tasks
+
+
+def split_tasks_by_owner(tasks: list[dict[str, Any]]) -> None:
+    drew = []
+    mitch = []
+    preston = []
+
+    for task in tasks:
+        if task.get("status_tracking") == "completed":
+            continue
+
+        owner = task.get("owner")
+
+        if owner == "Drew":
+            drew.append(task)
+        elif owner == "Mitch":
+            mitch.append(task)
+        elif owner == "Preston":
+            preston.append(task)
+
+    DREW_TASK_FILE.write_text(json.dumps(drew, indent=2), encoding="utf-8")
+    MITCH_TASK_FILE.write_text(json.dumps(mitch, indent=2), encoding="utf-8")
+    PRESTON_TASK_FILE.write_text(json.dumps(preston, indent=2), encoding="utf-8")
 
 
 def build_report(rows: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> str:
@@ -324,12 +351,17 @@ def main() -> None:
     TASK_FILE.parent.mkdir(parents=True, exist_ok=True)
     TASK_FILE.write_text(json.dumps(tasks, indent=2), encoding="utf-8")
 
+    split_tasks_by_owner(tasks)
+
     report = build_report(rows, tasks)
     OUT_MD.write_text(report, encoding="utf-8")
 
     print("Created:")
     print(OUT_MD)
     print(TASK_FILE)
+    print(DREW_TASK_FILE)
+    print(MITCH_TASK_FILE)
+    print(PRESTON_TASK_FILE)
 
 
 if __name__ == "__main__":
