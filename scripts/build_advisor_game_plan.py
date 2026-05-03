@@ -131,23 +131,18 @@ def risk_for(status: str, idle_hours: float) -> str:
 def action_for(owner: str, status: str) -> str:
     if owner == "Drew":
         return "Bay-lap progress check. Confirm tech activity, clock-in, parts, blockers, and next action."
-
     if owner == "Mitch":
         return "Customer/ticket action. Confirm estimate, approval, parts, update, payment, or closeout."
-
     if owner == "Preston":
         return "Technical escalation. Review and give direction."
-
     return f"Assign owner immediately. Current status could not be mapped: {status}"
 
 
 def due_minutes_for(risk: str) -> int:
     if risk == "RED":
         return 30
-
     if risk == "YELLOW":
         return 120
-
     return 240
 
 
@@ -232,7 +227,6 @@ def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             ).isoformat()
 
         due_by_dt = parse_time(due_by)
-
         status_tracking = old.get("status_tracking", "pending")
 
         completed_at = old.get("completed_at")
@@ -266,6 +260,12 @@ def build_report(rows: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> str
         if task.get("overdue") is True
     ]
 
+    active_task_keys = {
+        f"{task['ro']}|{task['owner']}|{task['task']}"
+        for task in tasks
+        if task.get("status_tracking") != "completed"
+    }
+
     completed_tasks = [
         task for task in tasks
         if task.get("status_tracking") == "completed"
@@ -285,15 +285,24 @@ def build_report(rows: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> str
 
     report += "## Current Priorities\n\n"
 
-    if not rows:
-        report += "No RO data found.\n"
+    active_count = 0
 
     for row in rows[:10]:
+        key = f"{row['ro']}|{row['owner']}|{row['next_action']}"
+
+        if key not in active_task_keys:
+            continue
+
+        active_count += 1
+
         report += (
             f"RO {row['ro']} | {row['owner']} | {row['risk']} | Idle {row['idle_hours']}h\n"
             f"Status: {row['status']}\n"
             f"→ {row['next_action']}\n\n"
         )
+
+    if active_count == 0:
+        report += "No active pending priorities.\n\n"
 
     if completed_tasks:
         report += "## Completed Tasks\n\n"
