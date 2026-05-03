@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +17,7 @@ def parse_time(value: Any) -> datetime:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             return parsed.replace(tzinfo=timezone.utc)
-        return parsed
+        return parsed.astimezone(timezone.utc)
     except Exception:
         return datetime.min.replace(tzinfo=timezone.utc)
 
@@ -137,6 +137,14 @@ def action_for(owner: str, status: str) -> str:
     return f"Assign owner immediately. Current status could not be mapped: {status}"
 
 
+def due_minutes_for(risk: str) -> int:
+    if risk == "RED":
+        return 30
+    if risk == "YELLOW":
+        return 120
+    return 240
+
+
 def build_rows() -> list[dict[str, Any]]:
     now = datetime.now(timezone.utc)
     grouped: dict[str, list[dict[str, Any]]] = {}
@@ -171,25 +179,84 @@ def build_rows() -> list[dict[str, Any]]:
     return rows
 
 
-def main() -> None:
-    rows = build_rows()
+def load_existing_tasks() -> dict[str, dict[str, Any]]:
+    if not TASK_FILE.exists():
+        return {}
 
-    tasks = [
-        {
+    try:
+        raw = json.loads(TASK_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+    existing = {}
+
+    for task in raw:
+        if not isinstance(task, dict):
+            continue
+
+        key = f"{task.get('ro')}|{task.get('owner')}|{task.get('task')}"
+        existing[key] = task
+
+    return existing
+
+
+def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    existing = load_existing_tasks()
+    tasks = []
+
+    for r in rows:
+        if r["risk"] not in ("RED", "YELLOW"):
+            continue
+
+        key = f"{r['ro']}|{r['owner']}|{r['next_action']}"
+        old = existing.get(key, {})
+
+        created_at = old.get("created_at") or now.isoformat()
+
+        if old.get("due_by"):
+            due_by = old["due_by"]
+        else:
+            due_by = (parse_time(created_at) + timedelta(minutes=due_minutes_for(r["risk"]))).isoformat()
+
+        due_by_dt = parse_time(due_by)
+        status_tracking = old.get("status_tracking", "pending")
+        overdue = status_tracking == "pending" and now > due_by_dt
+
+        tasks.append({
             "ro": r["ro"],
             "owner": r["owner"],
             "risk": r["risk"],
             "status": r["status"],
             "task": r["next_action"],
-            "status_tracking": "pending",
-        }
-        for r in rows
-        if r["risk"] in ("RED", "YELLOW")
-    ]
+            "created_at": created_at,
+            "due_by": due_by,
+            "status_tracking": status_tracking,
+            "overdue": overdue,
+            "checked_at": now.isoformat(),
+        })
 
-    TASK_FILE.write_text(json.dumps(tasks, indent=2), encoding="utf-8")
+    return tasks
 
+
+def build_report(rows: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> str:
     report = "# Advisor Game Plan\n\n"
+
+    overdue_tasks = [t for t in tasks if t.get("overdue") is True]
+
+    if overdue_tasks:
+        report += "## MISSED / OVERDUE ACTIONS\n\n"
+
+        for t in overdue_tasks:
+            report += (
+                f"- RO {t['ro']} | {t['owner']} | {t['risk']}\n"
+                f"  - Status: {t['status']}\n"
+                f"  - Task: {t['task']}\n"
+                f"  - Due By: {t['due_by']}\n"
+                f"  - Checked At: {t['checked_at']}\n\n"
+            )
+
+    report += "## Current Priorities\n\n"
 
     if not rows:
         report += "No RO data found.\n"
@@ -201,6 +268,17 @@ def main() -> None:
             f"→ {r['next_action']}\n\n"
         )
 
+    return report
+
+
+def main() -> None:
+    rows = build_rows()
+    tasks = build_tasks(rows)
+
+    TASK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TASK_FILE.write_text(json.dumps(tasks, indent=2), encoding="utf-8")
+
+    report = build_report(rows, tasks)
     OUT_MD.write_text(report, encoding="utf-8")
 
     print("Created:")
