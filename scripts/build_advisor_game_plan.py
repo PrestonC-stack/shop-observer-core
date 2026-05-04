@@ -10,20 +10,14 @@ EVENT_LOG = ROOT / "data" / "autoflow_events" / "autoflow_events.jsonl"
 
 OUT_MD = ROOT / "outputs" / "advisor_game_plan.md"
 TASK_FILE = ROOT / "outputs" / "advisor_tasks.json"
+COMPLETED_REGISTRY = ROOT / "outputs" / "completed_task_registry.json"
 
 DREW_TASK_FILE = ROOT / "outputs" / "tasks_drew.json"
 MITCH_TASK_FILE = ROOT / "outputs" / "tasks_mitch.json"
 PRESTON_TASK_FILE = ROOT / "outputs" / "tasks_preston.json"
 
-IGNORE_STATUSES = {
-    "close",
-    "apache job",
-}
-
-NOT_HERE_STATUSES = {
-    "scheduled-not here",
-    "dvi only- not here",
-}
+IGNORE_STATUSES = {"close", "apache job"}
+NOT_HERE_STATUSES = {"scheduled-not here", "dvi only- not here"}
 
 TECH_CONTROLLED_STATUSES = {
     "ready for tech",
@@ -59,6 +53,27 @@ def clean(value: Any, default: str = "unknown") -> str:
 
 def normalize_status(status: str) -> str:
     return " ".join(str(status).lower().strip().split())
+
+
+def task_key(ro: str, owner: str, status: str) -> str:
+    return f"{ro}|{owner}|{status}"
+
+
+def load_completed_registry() -> set[str]:
+    if not COMPLETED_REGISTRY.exists():
+        return set()
+    try:
+        data = json.loads(COMPLETED_REGISTRY.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return set(str(item) for item in data)
+    except Exception:
+        pass
+    return set()
+
+
+def save_completed_registry(keys: set[str]) -> None:
+    COMPLETED_REGISTRY.parent.mkdir(parents=True, exist_ok=True)
+    COMPLETED_REGISTRY.write_text(json.dumps(sorted(keys), indent=2), encoding="utf-8")
 
 
 def load_events() -> list[dict[str, Any]]:
@@ -189,9 +204,7 @@ def extract_event(record: dict[str, Any]) -> dict[str, Any]:
 def is_today(dt: datetime | None, now: datetime) -> bool:
     if not dt or dt == datetime.min.replace(tzinfo=timezone.utc):
         return False
-    local_dt = dt.astimezone()
-    local_now = now.astimezone()
-    return local_dt.date() == local_now.date()
+    return dt.astimezone().date() == now.astimezone().date()
 
 
 def should_ignore_status(status: str) -> bool:
@@ -240,8 +253,6 @@ def owner_for(status: str) -> str:
 
 
 def risk_for(status: str, idle_hours: float, age_hours: float) -> str:
-    s = normalize_status(status)
-
     if should_ignore_status(status):
         return "IGNORE"
 
@@ -444,17 +455,31 @@ def load_existing_tasks() -> dict[str, dict[str, Any]]:
         return {}
 
     existing = {}
+    completed = load_completed_registry()
+
     for task in raw:
         if not isinstance(task, dict):
             continue
-        key = f"{task.get('ro')}|{task.get('owner')}|{task.get('status')}"
 
+        key = task_key(
+            str(task.get("ro")),
+            str(task.get("owner")),
+            str(task.get("status")),
+        )
+
+        if task.get("status_tracking") == "completed":
+            completed.add(key)
+
+        existing[key] = task
+
+    save_completed_registry(completed)
     return existing
 
 
 def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     now = datetime.now(timezone.utc)
     existing = load_existing_tasks()
+    completed = load_completed_registry()
     tasks = []
 
     for row in rows:
@@ -467,11 +492,16 @@ def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if row["risk"] not in ("CRITICAL", "RED", "YELLOW") and row["priority"] not in ("P1", "P2"):
             continue
 
-        key = f"{row['ro']}|{row['owner']}|{row['status']}"
+        key = task_key(row["ro"], row["owner"], row["status"])
+
+        if key in completed:
+            continue
+
         old = existing.get(key, {})
 
         if old.get("status_tracking") == "completed":
-            tasks.append(old)
+            completed.add(key)
+            save_completed_registry(completed)
             continue
 
         created_at = old.get("created_at") or now.isoformat()
@@ -538,7 +568,7 @@ def build_report(rows: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> str
     report += "\n## Current Priorities\n\n"
 
     active_task_keys = {
-        f"{task['ro']}|{task['owner']}|{task['status']}"
+        task_key(str(task["ro"]), str(task["owner"]), str(task["status"]))
         for task in tasks
         if task.get("status_tracking") != "completed"
     }
@@ -546,7 +576,7 @@ def build_report(rows: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> str
     active_count = 0
 
     for row in rows[:30]:
-        key = f"{row['ro']}|{row['owner']}|{row['status']}"
+        key = task_key(row["ro"], row["owner"], row["status"])
         if key not in active_task_keys:
             continue
 
@@ -561,22 +591,6 @@ def build_report(rows: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> str
 
     if active_count == 0:
         report += "No active pending priorities.\n\n"
-
-    completed_tasks = [
-        task for task in tasks
-        if task.get("status_tracking") == "completed"
-    ]
-
-    if completed_tasks:
-        report += "## Completed Tasks\n\n"
-        for task in completed_tasks:
-            report += (
-                f"- RO {task['ro']} | {task.get('priority', 'P?')} | {task['owner']}\n"
-                f"  - Customer: {task.get('customer', 'unknown')}\n"
-                f"  - Vehicle: {task.get('vehicle', 'unknown')}\n"
-                f"  - Task: {task['task']}\n"
-                f"  - Completed At: {task.get('completed_at')}\n\n"
-            )
 
     report += "## Rolling Job Board\n\n"
     for row in rows[:60]:
