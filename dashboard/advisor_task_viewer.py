@@ -254,79 +254,64 @@ def render_owner(owner: str) -> str:
 
 
 def render_board() -> str:
-    body = '<div class="grid">'
-    load_summary = []
+    import json
+    from pathlib import Path
 
-    for owner in TASK_FILES:
-        tasks = load_tasks(owner)
+    ROOT = Path(__file__).resolve().parents[1]
+    TASK_FILE = ROOT / "outputs" / "advisor_tasks.json"
 
-        total = len(tasks)
-        red = sum(1 for t in tasks if t.get("risk") == "RED")
-        yellow = sum(1 for t in tasks if t.get("risk") == "YELLOW")
-        overdue = sum(1 for t in tasks if t.get("overdue") is True)
+    try:
+        tasks = json.loads(TASK_FILE.read_text(encoding="utf-8"))
+    except:
+        tasks = []
 
-        if red >= 3 or overdue >= 2:
-            load = "CRITICAL"
-        elif red >= 1 or total >= 5:
-            load = "HEAVY"
-        else:
-            load = "OK"
+    columns = {"P1": [], "P2": [], "P3": [], "P4": []}
 
-        load_summary.append((owner, load, red, overdue, total))
+    for task in tasks:
+        if task.get("status_tracking") == "completed":
+            continue
 
-        body += f"""
-        <div class="score">
-            <h2>{owner}</h2>
-            <div class="count">{total}</div>
-            <p>Active Tasks</p>
-            <p>RED: {red}</p>
-            <p>YELLOW: {yellow}</p>
-            <p>OVERDUE: {overdue}</p>
-            <p><b>LOAD: {load}</b></p>
-        </div>
-        """
+        priority = task.get("priority", "P4")
+        columns.setdefault(priority, []).append(task)
+
+    body = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">'
+
+    for p in ["P1", "P2", "P3", "P4"]:
+        body += f'<div style="background:#111;padding:10px;border-radius:10px;">'
+        body += f'<h2 style="color:white;text-align:center;">{p}</h2>'
+
+        # ACTION NOW (top section)
+        body += '<div style="background:#222;padding:5px;margin-bottom:10px;">'
+        body += '<strong style="color:#0ff;">Action Now</strong><br>'
+
+        for task in columns[p][:5]:
+            body += f"""
+            <div style="background:#333;margin:5px;padding:5px;border-radius:5px;">
+                RO {task['ro']}<br>
+                {task['owner']} | {task['risk']}<br>
+                {task['task'][:60]}
+            </div>
+            """
+
+        body += '</div>'
+
+        # FULL LIST
+        body += '<div style="background:#1a1a1a;padding:5px;">'
+        body += '<strong style="color:#aaa;">All Jobs</strong><br>'
+
+        for task in columns[p]:
+            body += f"""
+            <div style="border-bottom:1px solid #333;padding:4px;">
+                RO {task['ro']} | {task['owner']} | {task['risk']}
+            </div>
+            """
+
+        body += '</div>'
+        body += '</div>'
 
     body += "</div>"
 
-    bottleneck = max(load_summary, key=lambda x: (x[2], x[3], x[4]), default=None)
-
-    if bottleneck and bottleneck[4] > 0:
-        owner, load, red, overdue, total = bottleneck
-
-        if owner == "Drew":
-            if red >= 2:
-                suggestion = "Preston should assist with diagnostics or direction immediately."
-            else:
-                suggestion = "Mitch should avoid pushing new work until Drew stabilizes bay flow."
-        elif owner == "Mitch":
-            if overdue >= 2:
-                suggestion = "Preston should step in on approvals or customer decisions."
-            else:
-                suggestion = "Drew should slow new findings until approvals catch up."
-        elif owner == "Preston":
-            suggestion = "High-level bottleneck — reduce escalations and push decisions downward."
-        else:
-            suggestion = "Monitor system load."
-
-        body += f"""
-        <div class="card RED">
-            <h2>System Bottleneck</h2>
-            <p><b>{owner}</b> is currently the constraint.</p>
-            <p>RED: {red} | OVERDUE: {overdue} | TOTAL: {total}</p>
-            <hr>
-            <h3>Suggested Action</h3>
-            <p>{suggestion}</p>
-        </div>
-        """
-    else:
-        body += """
-        <div class="card NORMAL">
-            <h2>System Bottleneck</h2>
-            <p>No active bottleneck detected.</p>
-        </div>
-        """
-
-    return html_shell("Shop Scoreboard", body)
+    return html_shell("Shop Command Board", body)
 
 
 class Handler(BaseHTTPRequestHandler):
