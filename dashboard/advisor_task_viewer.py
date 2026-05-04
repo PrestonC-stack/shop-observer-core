@@ -79,10 +79,7 @@ def short_time(value: str) -> str:
 
 
 def active_tasks(tasks: list[dict]) -> list[dict]:
-    return [
-        task for task in tasks
-        if task.get("status_tracking") != "completed"
-    ]
+    return [task for task in tasks if task.get("status_tracking") != "completed"]
 
 
 def write_owner_feeds(tasks: list[dict]) -> None:
@@ -294,11 +291,31 @@ def render_board() -> str:
     bottleneck = max(load_summary, key=lambda x: (x[2], x[3], x[4]), default=None)
 
     if bottleneck and bottleneck[4] > 0:
+        owner, load, red, overdue, total = bottleneck
+
+        if owner == "Drew":
+            if red >= 2:
+                suggestion = "Preston should assist with diagnostics or direction immediately."
+            else:
+                suggestion = "Mitch should avoid pushing new work until Drew stabilizes bay flow."
+        elif owner == "Mitch":
+            if overdue >= 2:
+                suggestion = "Preston should step in on approvals or customer decisions."
+            else:
+                suggestion = "Drew should slow new findings until approvals catch up."
+        elif owner == "Preston":
+            suggestion = "High-level bottleneck — reduce escalations and push decisions downward."
+        else:
+            suggestion = "Monitor system load."
+
         body += f"""
         <div class="card RED">
             <h2>System Bottleneck</h2>
-            <p><b>{bottleneck[0]}</b> is currently the constraint.</p>
-            <p>RED: {bottleneck[2]} | OVERDUE: {bottleneck[3]} | TOTAL: {bottleneck[4]}</p>
+            <p><b>{owner}</b> is currently the constraint.</p>
+            <p>RED: {red} | OVERDUE: {overdue} | TOTAL: {total}</p>
+            <hr>
+            <h3>Suggested Action</h3>
+            <p>{suggestion}</p>
         </div>
         """
     else:
@@ -351,7 +368,6 @@ class Handler(BaseHTTPRequestHandler):
 
 def run():
     write_owner_feeds(load_json(TASK_FILE))
-
     server = HTTPServer(("0.0.0.0", 8080), Handler)
     print("Advisor Task Viewer running with load balancing board")
     server.serve_forever()
