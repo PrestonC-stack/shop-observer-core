@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,7 @@ from flask import Flask, jsonify, request
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EVENT_LOG_PATH = REPO_ROOT / "data" / "autoflow_events" / "autoflow_events.jsonl"
+BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_advisor_game_plan.py"
 
 app = Flask(__name__)
 
@@ -45,10 +48,9 @@ def _safe_text(value: Any) -> str:
 
 
 def _safe_summary(payload: dict[str, Any], received_at: str) -> dict[str, str]:
-    # ✅ FIXED: prioritize nested AutoFlow structure
     event_type = _first_value(
         payload,
-        ("event", "type"),  # 🔥 FIX
+        ("event", "type"),
         ("event_type",),
         ("eventType",),
         ("type",),
@@ -57,7 +59,7 @@ def _safe_summary(payload: dict[str, Any], received_at: str) -> dict[str, str]:
 
     invoice_or_ro = _first_value(
         payload,
-        ("ticket", "invoice"),  # 🔥 FIX
+        ("ticket", "invoice"),
         ("invoice",),
         ("invoice_number",),
         ("invoiceNumber",),
@@ -73,7 +75,7 @@ def _safe_summary(payload: dict[str, Any], received_at: str) -> dict[str, str]:
 
     ticket_status = _first_value(
         payload,
-        ("ticket", "status"),  # 🔥 FIX
+        ("ticket", "status"),
         ("ticket_status",),
         ("ticketStatus",),
         ("status",),
@@ -94,7 +96,6 @@ def _safe_summary(payload: dict[str, Any], received_at: str) -> dict[str, str]:
 
     vehicle_make = _first_value(
         payload,
-        payload,
         ("vehicle", "make"),
         ("vehicle_make",),
         ("vehicleMake",),
@@ -114,7 +115,7 @@ def _safe_summary(payload: dict[str, Any], received_at: str) -> dict[str, str]:
     event_timestamp = _first_value(
         payload,
         ("timestamp",),
-        ("event", "timestamp"),  # 🔥 FIX
+        ("event", "timestamp"),
         ("event_timestamp",),
         ("eventTimestamp",),
         ("updated_at",),
@@ -150,6 +151,18 @@ def _append_event(payload: dict[str, Any], received_at: str) -> None:
         handle.write("\n")
 
 
+def _rebuild_advisor_tasks() -> None:
+    try:
+        subprocess.run(
+            [sys.executable, str(BUILD_SCRIPT)],
+            cwd=str(REPO_ROOT),
+            check=False,
+        )
+        print("TASK REBUILD TRIGGERED")
+    except Exception as e:
+        print(f"TASK REBUILD FAILED: {e}")
+
+
 def _print_summary(summary: dict[str, str]) -> None:
     print("AUTOFLOW WEBHOOK EVENT")
     print(f"- event type: {summary['event_type']}")
@@ -169,7 +182,10 @@ def receive_autoflow_webhook():
         return jsonify({"status": "error", "message": "JSON object required"}), 400
 
     received_at = datetime.now(timezone.utc).isoformat()
+
     _append_event(payload, received_at)
+    _rebuild_advisor_tasks()
+
     summary = _safe_summary(payload, received_at)
     _print_summary(summary)
 
@@ -179,6 +195,7 @@ def receive_autoflow_webhook():
             "saved": True,
             "event_type": summary["event_type"],
             "invoice_or_ro": summary["invoice_or_ro"],
+            "tasks_rebuilt": True,
         }
     )
 
