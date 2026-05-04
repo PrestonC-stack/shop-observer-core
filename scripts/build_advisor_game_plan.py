@@ -15,25 +15,30 @@ DREW_TASK_FILE = ROOT / "outputs" / "tasks_drew.json"
 MITCH_TASK_FILE = ROOT / "outputs" / "tasks_mitch.json"
 PRESTON_TASK_FILE = ROOT / "outputs" / "tasks_preston.json"
 
-IGNORE_STATUS_KEYWORDS = [
-    "closed",
-    "paid",
-    "posted",
-    "void",
-    "cancelled",
-    "canceled",
-    "warranty close",
-    "company vehicle",
-]
+IGNORE_STATUSES = {
+    "close",
+    "apache job",
+}
 
-NO_TASK_STATUSES = [
+NOT_HERE_STATUSES = {
     "scheduled-not here",
-    "not started-not here",
-    "online action",
-    "online /stage",
     "dvi only- not here",
-    "drop off/ tow-in",
-]
+}
+
+TECH_CONTROLLED_STATUSES = {
+    "ready for tech",
+    "testing",
+    "dvi updates",
+    "awaiting tech",
+    "servicing",
+    "in progress",
+}
+
+P4_EXTERNAL_STATUSES = {
+    "waiting approval",
+    "ordering parts",
+    "waiting parts",
+}
 
 
 def parse_time(value: Any) -> datetime:
@@ -50,6 +55,10 @@ def clean(value: Any, default: str = "unknown") -> str:
     if value in (None, "", [], {}):
         return default
     return str(value)
+
+
+def normalize_status(status: str) -> str:
+    return " ".join(str(status).lower().strip().split())
 
 
 def load_events() -> list[dict[str, Any]]:
@@ -74,6 +83,13 @@ def get_nested(d: dict[str, Any], *keys: str) -> Any:
             return None
         cur = cur.get(key)
     return cur
+
+
+def first_value(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, "", [], {}):
+            return value
+    return None
 
 
 def vehicle_label(vehicle: dict[str, Any]) -> str:
@@ -114,21 +130,48 @@ def extract_event(record: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(vehicle, dict):
         vehicle = {}
 
-    ro = (
-        ticket.get("invoice")
-        or ticket.get("remote_id")
-        or payload.get("invoice_or_ro")
-        or payload.get("ro")
-        or payload.get("invoice")
-        or "unknown"
+    ro = first_value(
+        ticket.get("invoice"),
+        ticket.get("remote_id"),
+        payload.get("invoice_or_ro"),
+        payload.get("ro"),
+        payload.get("invoice"),
+        "unknown",
     )
 
-    status = ticket.get("status") or payload.get("status") or "unknown"
+    status = first_value(
+        ticket.get("status"),
+        payload.get("status"),
+        "unknown",
+    )
 
-    timestamp = (
-        get_nested(payload, "event", "timestamp")
-        or payload.get("timestamp")
-        or record.get("received_at")
+    timestamp = first_value(
+        get_nested(payload, "event", "timestamp"),
+        payload.get("timestamp"),
+        record.get("received_at"),
+    )
+
+    promised_at = first_value(
+        ticket.get("promised_at"),
+        ticket.get("promise_time"),
+        ticket.get("promisedTime"),
+        payload.get("promised_at"),
+        payload.get("promise_time"),
+        payload.get("promisedTime"),
+    )
+
+    appointment_at = first_value(
+        ticket.get("appointment_at"),
+        ticket.get("appointmentTime"),
+        payload.get("appointment_at"),
+        payload.get("appointmentTime"),
+    )
+
+    customer_updated_at = first_value(
+        ticket.get("customer_updated_at"),
+        ticket.get("last_customer_update"),
+        payload.get("customer_updated_at"),
+        payload.get("last_customer_update"),
     )
 
     return {
@@ -137,61 +180,58 @@ def extract_event(record: dict[str, Any]) -> dict[str, Any]:
         "customer": customer_label(payload),
         "vehicle": vehicle_label(vehicle),
         "timestamp": parse_time(timestamp),
+        "promised_at": parse_time(promised_at) if promised_at else None,
+        "appointment_at": parse_time(appointment_at) if appointment_at else None,
+        "customer_updated_at": parse_time(customer_updated_at) if customer_updated_at else None,
     }
 
 
+def is_today(dt: datetime | None, now: datetime) -> bool:
+    if not dt or dt == datetime.min.replace(tzinfo=timezone.utc):
+        return False
+    local_dt = dt.astimezone()
+    local_now = now.astimezone()
+    return local_dt.date() == local_now.date()
+
+
 def should_ignore_status(status: str) -> bool:
-    s = status.lower().strip()
-
-    if not s or s == "unknown":
-        return True
-
-    if any(word in s for word in IGNORE_STATUS_KEYWORDS):
-        return True
-
-    if s in NO_TASK_STATUSES:
-        return True
-
-    if (
-        "scheduled" in s
-        or "not here" in s
-        or "drop off" in s
-        or "tow-in" in s
-    ):
-        return True
-
-    return False
+    s = normalize_status(status)
+    return s in IGNORE_STATUSES or s == "unknown"
 
 
 def owner_for(status: str) -> str:
-    s = status.lower()
+    s = normalize_status(status)
 
     if should_ignore_status(status):
         return "Ignore"
 
-    if "technical review" in s or "technical advisement" in s:
+    if s in NOT_HERE_STATUSES:
+        return "Ignore"
+
+    if "technical advisement" in s or "technical overview" in s:
         return "Preston"
 
     if (
-        "in progress" in s
-        or "servicing" in s
-        or "testing" in s
-        or "dvi" in s
-        or "qc" in s
+        "online /stage" in s
+        or "drop off" in s
+        or "tow-in" in s
         or "ready for tech" in s
         or "awaiting tech" in s
+        or "testing" in s
+        or "dvi updates" in s
+        or "servicing" in s
+        or "in progress" in s
+        or s == "qc"
+        or "advisor qc review" in s
+        or "advisor finalize ro" in s
     ):
         return "Drew"
 
     if (
-        "estimate" in s
-        or "approval" in s
-        or "auth" in s
-        or "parts" in s
-        or "customer" in s
-        or "payment" in s
-        or "collection" in s
-        or "advisor final" in s
+        "advisor estimate" in s
+        or "waiting approval" in s
+        or "ordering parts" in s
+        or "waiting parts" in s
         or s == "ready"
     ):
         return "Mitch"
@@ -200,102 +240,121 @@ def owner_for(status: str) -> str:
 
 
 def risk_for(status: str, idle_hours: float, age_hours: float) -> str:
-    s = status.lower()
+    s = normalize_status(status)
 
     if should_ignore_status(status):
         return "IGNORE"
 
-    if owner_for(status) == "Unknown":
+    owner = owner_for(status)
+    if owner in ("Ignore", "Unknown"):
         return "IGNORE"
 
-    if "technical review" in s or "technical advisement" in s:
-        return "RED"
-
-    if "in progress" in s or "servicing" in s:
-        if idle_hours >= 2:
-            return "RED"
-        if idle_hours >= 1:
-            return "YELLOW"
-        return "NORMAL"
-
-    if "ready for tech" in s or "awaiting tech" in s:
-        if idle_hours >= 8:
-            return "RED"
-        if idle_hours >= 4:
-            return "YELLOW"
-        return "NORMAL"
-
-    if "advisor estimate" in s or "building estimate" in s:
-        if idle_hours >= 4:
-            return "RED"
-        if idle_hours >= 2:
-            return "YELLOW"
-        return "NORMAL"
-
-    if "waiting approval" in s or "requires auth" in s or "pending auth" in s:
-        if idle_hours >= 4:
-            return "RED"
-        if idle_hours >= 2:
-            return "YELLOW"
-        return "NORMAL"
-
-    if "ordering parts" in s or "waiting parts" in s:
-        if age_hours >= 48:
-            return "RED"
-        if age_hours >= 24:
-            return "YELLOW"
-        return "NORMAL"
-
-    if "customer notified" in s or "waiting for customer" in s:
-        if idle_hours >= 24:
-            return "RED"
-        if idle_hours >= 8:
-            return "YELLOW"
-        return "NORMAL"
-
-    if "ready" in s or "payment" in s or "collection" in s:
-        if idle_hours >= 24:
-            return "RED"
-        if idle_hours >= 8:
-            return "YELLOW"
-        return "NORMAL"
-
-    if idle_hours >= 24:
-        return "RED"
-
     if idle_hours >= 4:
+        return "CRITICAL"
+
+    if idle_hours >= 2:
+        return "RED"
+
+    if idle_hours >= 1:
+        return "YELLOW"
+
+    if age_hours >= 48:
+        return "RED"
+
+    if age_hours >= 24:
         return "YELLOW"
 
     return "NORMAL"
 
 
+def priority_for(
+    status: str,
+    risk: str,
+    idle_hours: float,
+    age_hours: float,
+    promised_at: datetime | None,
+    appointment_at: datetime | None,
+    customer_updated_at: datetime | None,
+    now: datetime,
+) -> str:
+    s = normalize_status(status)
+
+    if s in IGNORE_STATUSES:
+        return "P4"
+
+    if s in NOT_HERE_STATUSES:
+        return "P4"
+
+    if risk in ("CRITICAL", "RED"):
+        return "P1"
+
+    if is_today(appointment_at, now):
+        return "P1"
+
+    if promised_at:
+        hours_to_promise = (promised_at - now).total_seconds() / 3600
+        if hours_to_promise <= 24:
+            return "P1"
+
+    if s == "ready":
+        return "P1"
+
+    if s in P4_EXTERNAL_STATUSES:
+        return "P4"
+
+    if s in TECH_CONTROLLED_STATUSES:
+        if customer_updated_at:
+            return "P3"
+        return "P2"
+
+    if "advisor estimate" in s:
+        return "P2"
+
+    if "technical advisement" in s or "technical overview" in s:
+        return "P2"
+
+    if "advisor qc review" in s or "advisor finalize ro" in s or s == "qc":
+        return "P2"
+
+    if age_hours >= 24:
+        return "P2"
+
+    return "P3"
+
+
 def action_for(owner: str, status: str) -> str:
-    s = status.lower()
+    s = normalize_status(status)
 
     if owner == "Drew":
-        if "in progress" in s or "servicing" in s:
-            return "Bay-lap progress check. Confirm tech activity, clock-in, parts, blockers, and next action."
+        if "online /stage" in s or "drop off" in s or "tow-in" in s:
+            return "Vehicle intake/staging. Take starting photos, verify vehicle/key/tag, and prep for tech handoff."
         if "ready for tech" in s or "awaiting tech" in s:
-            return "Dispatch control. Confirm tech assignment, bay availability, parts readiness, and next job sequence."
-        if "dvi" in s:
-            return "Review DVI. Verify notes/photos are complete and prepare advisor-ready findings."
+            return "Dispatch control. Assign tech, confirm bay readiness, and remove blockers."
         if "testing" in s:
-            return "Testing verification. Confirm test result, blocker/no blocker, and whether customer update is needed."
-        if "qc" in s:
-            return "QC verification. Confirm repair completion, notes, photos, and final readiness."
+            return "Testing verification. Confirm test result, blocker/no blocker, and next action."
+        if "dvi updates" in s:
+            return "Review DVI/photos and prepare advisor-ready findings."
+        if "servicing" in s or "in progress" in s:
+            return "Production check. Confirm tech progress, blockers, parts, and next completion estimate."
+        if s == "qc":
+            return "QC verification. Confirm repair complete and ready for advisor QC."
+        if "advisor qc review" in s:
+            return "Advisor QC review. Confirm notes, photos, repair story, and ready-to-close status."
+        if "advisor finalize ro" in s:
+            return "Finalize RO. Clean notes, confirm charges, and prep invoice for customer closeout."
         return "Shop-side check. Verify actual bay status and next action."
 
     if owner == "Mitch":
-        if "estimate" in s:
-            return "Build/sell estimate or document blocker."
-        if "approval" in s or "auth" in s:
-            return "Push customer approval. Contact customer, document response, and set next follow-up."
-        if "parts" in s:
-            return "Parts control. Confirm order/source/ETA and update timeline."
-        if "customer" in s:
-            return "Customer follow-up. Contact customer and document next decision."
-        if "payment" in s or "collection" in s or "ready" in s:
-            return "Customer closeout. Confirm pickup/payment/final communication and clear RO."
+        if "advisor estimate" in s:
+            return "Final estimate/customer strategy. Review, prepare, and sell the estimate."
+        if "waiting approval" in s:
+            return "Customer approval follow-up. Contact customer, document response, and set next move."
+        if "ordering parts" in s:
+            return "Parts ordering. Confirm source, ETA, and job timeline."
+        if "waiting parts" in s:
+            return "Parts ETA tracking. Confirm ETA and update customer/job timeline."
+        if s == "ready":
+            return "Customer closeout. Confirm pickup, payment, final communication, and delivery."
         return "Customer/ticket action. Confirm estimate, approval, parts, update, payment, or closeout."
 
     if owner == "Preston":
@@ -304,12 +363,14 @@ def action_for(owner: str, status: str) -> str:
     return f"Assign owner immediately. Current status could not be mapped: {status}"
 
 
-def due_minutes_for(risk: str) -> int:
-    if risk == "RED":
+def due_minutes_for(priority: str, risk: str) -> int:
+    if priority == "P1" or risk == "CRITICAL":
         return 30
-    if risk == "YELLOW":
-        return 120
-    return 240
+    if priority == "P2" or risk == "RED":
+        return 60
+    if priority == "P3" or risk == "YELLOW":
+        return 240
+    return 480
 
 
 def build_rows() -> list[dict[str, Any]]:
@@ -335,6 +396,17 @@ def build_rows() -> list[dict[str, Any]]:
         owner = owner_for(latest["status"])
         risk = risk_for(latest["status"], idle_hours, age_hours)
 
+        priority = priority_for(
+            latest["status"],
+            risk,
+            idle_hours,
+            age_hours,
+            latest.get("promised_at"),
+            latest.get("appointment_at"),
+            latest.get("customer_updated_at"),
+            now,
+        )
+
         rows.append({
             "ro": ro,
             "customer": latest["customer"],
@@ -342,13 +414,22 @@ def build_rows() -> list[dict[str, Any]]:
             "status": latest["status"],
             "owner": owner,
             "risk": risk,
+            "priority": priority,
             "age_hours": round(age_hours, 1),
             "idle_hours": round(idle_hours, 1),
             "next_action": action_for(owner, latest["status"]),
         })
 
-    order = {"RED": 0, "YELLOW": 1, "NORMAL": 2, "IGNORE": 9}
-    rows.sort(key=lambda r: (order.get(r["risk"], 8), -r["idle_hours"]))
+    priority_order = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
+    risk_order = {"CRITICAL": 0, "RED": 1, "YELLOW": 2, "NORMAL": 3, "IGNORE": 9}
+
+    rows.sort(
+        key=lambda r: (
+            priority_order.get(r["priority"], 9),
+            risk_order.get(r["risk"], 9),
+            -r["idle_hours"],
+        )
+    )
 
     return rows
 
@@ -366,8 +447,7 @@ def load_existing_tasks() -> dict[str, dict[str, Any]]:
     for task in raw:
         if not isinstance(task, dict):
             continue
-        key = f"{task.get('ro')}|{task.get('owner')}|{task.get('task')}"
-        existing[key] = task
+        key = f"{task.get('ro')}|{task.get('owner')}|{task.get('status')}"
 
     return existing
 
@@ -378,13 +458,16 @@ def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     tasks = []
 
     for row in rows:
-        if row["risk"] not in ("RED", "YELLOW"):
-            continue
-
         if row["owner"] in ("Ignore", "Unknown"):
             continue
 
-        key = f"{row['ro']}|{row['owner']}|{row['next_action']}"
+        if row["priority"] == "P4" and row["risk"] in ("NORMAL", "IGNORE"):
+            continue
+
+        if row["risk"] not in ("CRITICAL", "RED", "YELLOW") and row["priority"] not in ("P1", "P2"):
+            continue
+
+        key = f"{row['ro']}|{row['owner']}|{row['status']}"
         old = existing.get(key, {})
 
         if old.get("status_tracking") == "completed":
@@ -398,7 +481,7 @@ def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             due_by = (
                 parse_time(created_at)
-                + timedelta(minutes=due_minutes_for(row["risk"]))
+                + timedelta(minutes=due_minutes_for(row["priority"], row["risk"]))
             ).isoformat()
 
         due_by_dt = parse_time(due_by)
@@ -410,6 +493,7 @@ def build_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "vehicle": row["vehicle"],
             "owner": row["owner"],
             "risk": row["risk"],
+            "priority": row["priority"],
             "status": row["status"],
             "task": row["next_action"],
             "created_at": created_at,
@@ -446,60 +530,60 @@ def split_tasks_by_owner(tasks: list[dict[str, Any]]) -> None:
 def build_report(rows: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> str:
     report = "# Advisor Game Plan\n\n"
 
-    overdue_tasks = [task for task in tasks if task.get("overdue") is True]
+    report += "## Priority Summary\n\n"
+    for priority in ["P1", "P2", "P3", "P4"]:
+        count = sum(1 for row in rows if row["priority"] == priority)
+        report += f"- {priority}: {count} jobs\n"
+
+    report += "\n## Current Priorities\n\n"
+
     active_task_keys = {
-        f"{task['ro']}|{task['owner']}|{task['task']}"
+        f"{task['ro']}|{task['owner']}|{task['status']}"
         for task in tasks
         if task.get("status_tracking") != "completed"
     }
-    completed_tasks = [
-        task for task in tasks
-        if task.get("status_tracking") == "completed"
-    ]
 
-    if overdue_tasks:
-        report += "## MISSED / OVERDUE ACTIONS\n\n"
-        for task in overdue_tasks:
-            report += (
-                f"- RO {task['ro']} | {task['owner']} | {task['risk']}\n"
-                f"  - Customer: {task.get('customer', 'unknown')}\n"
-                f"  - Vehicle: {task.get('vehicle', 'unknown')}\n"
-                f"  - Status: {task['status']}\n"
-                f"  - Task: {task['task']}\n"
-                f"  - Due By: {task['due_by']}\n"
-                f"  - Checked At: {task['checked_at']}\n\n"
-            )
-
-    report += "## Current Priorities\n\n"
     active_count = 0
 
-    for row in rows[:15]:
-        key = f"{row['ro']}|{row['owner']}|{row['next_action']}"
+    for row in rows[:30]:
+        key = f"{row['ro']}|{row['owner']}|{row['status']}"
         if key not in active_task_keys:
             continue
 
         active_count += 1
         report += (
-            f"RO {row['ro']} | {row['owner']} | {row['risk']} | Idle {row['idle_hours']}h\n"
+            f"RO {row['ro']} | {row['priority']} | {row['owner']} | {row['risk']} | Idle {row['idle_hours']}h\n"
             f"Customer: {row.get('customer', 'unknown')}\n"
             f"Vehicle: {row.get('vehicle', 'unknown')}\n"
             f"Status: {row['status']}\n"
-            f"→ {row['next_action']}\n\n"
+            f"Action: {row['next_action']}\n\n"
         )
 
     if active_count == 0:
         report += "No active pending priorities.\n\n"
 
+    completed_tasks = [
+        task for task in tasks
+        if task.get("status_tracking") == "completed"
+    ]
+
     if completed_tasks:
         report += "## Completed Tasks\n\n"
         for task in completed_tasks:
             report += (
-                f"- RO {task['ro']} | {task['owner']}\n"
+                f"- RO {task['ro']} | {task.get('priority', 'P?')} | {task['owner']}\n"
                 f"  - Customer: {task.get('customer', 'unknown')}\n"
                 f"  - Vehicle: {task.get('vehicle', 'unknown')}\n"
                 f"  - Task: {task['task']}\n"
                 f"  - Completed At: {task.get('completed_at')}\n\n"
             )
+
+    report += "## Rolling Job Board\n\n"
+    for row in rows[:60]:
+        report += (
+            f"- {row['priority']} | RO {row['ro']} | {row['status']} | Waiting on: {row['owner']} | "
+            f"Risk: {row['risk']} | Idle: {row['idle_hours']}h | {row['vehicle']}\n"
+        )
 
     return report
 
