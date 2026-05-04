@@ -258,25 +258,57 @@ def render_owner(owner: str) -> str:
 
 def render_board() -> str:
     body = '<div class="grid">'
+    load_summary = []
 
     for owner in TASK_FILES:
         tasks = load_tasks(owner)
-        red = sum(1 for task in tasks if task.get("risk") == "RED")
-        yellow = sum(1 for task in tasks if task.get("risk") == "YELLOW")
-        overdue = sum(1 for task in tasks if task.get("overdue") is True)
+
+        total = len(tasks)
+        red = sum(1 for t in tasks if t.get("risk") == "RED")
+        yellow = sum(1 for t in tasks if t.get("risk") == "YELLOW")
+        overdue = sum(1 for t in tasks if t.get("overdue") is True)
+
+        if red >= 3 or overdue >= 2:
+            load = "CRITICAL"
+        elif red >= 1 or total >= 5:
+            load = "HEAVY"
+        else:
+            load = "OK"
+
+        load_summary.append((owner, load, red, overdue, total))
 
         body += f"""
         <div class="score">
             <h2>{owner}</h2>
-            <div class="count">{len(tasks)}</div>
+            <div class="count">{total}</div>
             <p>Active Tasks</p>
             <p>RED: {red}</p>
             <p>YELLOW: {yellow}</p>
             <p>OVERDUE: {overdue}</p>
+            <p><b>LOAD: {load}</b></p>
         </div>
         """
 
     body += "</div>"
+
+    bottleneck = max(load_summary, key=lambda x: (x[2], x[3], x[4]), default=None)
+
+    if bottleneck and bottleneck[4] > 0:
+        body += f"""
+        <div class="card RED">
+            <h2>System Bottleneck</h2>
+            <p><b>{bottleneck[0]}</b> is currently the constraint.</p>
+            <p>RED: {bottleneck[2]} | OVERDUE: {bottleneck[3]} | TOTAL: {bottleneck[4]}</p>
+        </div>
+        """
+    else:
+        body += """
+        <div class="card NORMAL">
+            <h2>System Bottleneck</h2>
+            <p>No active bottleneck detected.</p>
+        </div>
+        """
+
     return html_shell("Shop Scoreboard", body)
 
 
@@ -318,11 +350,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run():
-    # Rebuild split feeds from master task file every time the viewer starts.
     write_owner_feeds(load_json(TASK_FILE))
 
     server = HTTPServer(("0.0.0.0", 8080), Handler)
-    print("Advisor Task Viewer running with hardened COMPLETE button")
+    print("Advisor Task Viewer running with load balancing board")
     server.serve_forever()
 
 
