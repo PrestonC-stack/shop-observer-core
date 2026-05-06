@@ -262,7 +262,7 @@ def render_board() -> str:
 
     try:
         tasks = json.loads(TASK_FILE.read_text(encoding="utf-8"))
-    except:
+    except Exception:
         tasks = []
 
     columns = {"P1": [], "P2": [], "P3": [], "P4": []}
@@ -270,44 +270,280 @@ def render_board() -> str:
     for task in tasks:
         if task.get("status_tracking") == "completed":
             continue
-
         priority = task.get("priority", "P4")
         columns.setdefault(priority, []).append(task)
 
-    body = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">'
+    priority_styles = {
+        "P1": {"bg": "#fff1f1", "border": "#c00000", "header": "#b00020"},
+        "P2": {"bg": "#fff8e1", "border": "#d18b00", "header": "#c77700"},
+        "P3": {"bg": "#eef7ff", "border": "#2274a5", "header": "#1f6f9f"},
+        "P4": {"bg": "#f3f7f0", "border": "#4b8a3f", "header": "#3e7a34"},
+    }
+
+    body = """
+    <style>
+        body {
+            background: #f6f7fb !important;
+            color: #111 !important;
+        }
+
+        .print-controls {
+            margin: 10px 0 18px 0;
+            padding: 12px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 1px 4px rgba(0,0,0,.12);
+        }
+
+        .print-controls button {
+            margin-right: 8px;
+            padding: 10px 14px;
+            font-weight: bold;
+            border-radius: 8px;
+            border: 1px solid #333;
+            cursor: pointer;
+            background: #ffffff;
+        }
+
+        .command-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            align-items: start;
+        }
+
+        .priority-column {
+            border-radius: 14px;
+            padding: 10px;
+            min-height: 85vh;
+            border: 4px solid #ddd;
+            box-shadow: 0 2px 8px rgba(0,0,0,.16);
+        }
+
+        .priority-title {
+            color: white;
+            text-align: center;
+            padding: 10px;
+            border-radius: 10px;
+            font-size: 30px;
+            font-weight: 900;
+            margin-bottom: 10px;
+        }
+
+        .section {
+            background: rgba(255,255,255,.86);
+            padding: 8px;
+            margin-bottom: 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(0,0,0,.12);
+        }
+
+        .section-title {
+            font-weight: 900;
+            font-size: 18px;
+            margin-bottom: 6px;
+        }
+
+        .action-title { color: #0044cc; }
+        .incoming-title { color: #b26000; }
+        .all-title { color: #444; }
+
+        .task-card {
+            background: white;
+            color: #111;
+            margin: 7px 0;
+            padding: 9px;
+            border-radius: 9px;
+            border-left: 8px solid #999;
+            box-shadow: 0 1px 4px rgba(0,0,0,.16);
+            font-size: 15px;
+            line-height: 1.25;
+        }
+
+        .task-card.RED {
+            border-left-color: #d00000;
+            background: #fff2f2;
+        }
+
+        .task-card.CRITICAL {
+            border-left-color: #ff0000;
+            background: #ffe1e1;
+            animation: criticalFlash 1.2s infinite;
+        }
+
+        .task-card.YELLOW {
+            border-left-color: #e7a000;
+            background: #fff8dc;
+        }
+
+        .task-card.NORMAL {
+            border-left-color: #248a3d;
+            background: #f1fff4;
+        }
+
+        @keyframes criticalFlash {
+            0% { box-shadow: 0 0 0 rgba(255,0,0,0); }
+            50% { box-shadow: 0 0 18px rgba(255,0,0,.9); background: #ffd0d0; }
+            100% { box-shadow: 0 0 0 rgba(255,0,0,0); }
+        }
+
+        .ro-line {
+            font-size: 18px;
+            font-weight: 900;
+        }
+
+        .waiting-line {
+            font-weight: 900;
+            color: #b00020;
+        }
+
+        .small-line {
+            font-size: 13px;
+            color: #333;
+        }
+
+        .rolling-row {
+            border-bottom: 1px solid #ddd;
+            padding: 5px 2px;
+            font-size: 14px;
+        }
+
+        @media print {
+            body {
+                background: white !important;
+            }
+
+            .print-controls,
+            a,
+            hr {
+                display: none !important;
+            }
+
+            .command-grid {
+                display: block;
+            }
+
+            .priority-column {
+                display: none;
+                page-break-after: always;
+                min-height: auto;
+                box-shadow: none;
+                border: 2px solid #333;
+            }
+
+            body.print-P1 .priority-P1,
+            body.print-P2 .priority-P2,
+            body.print-P3 .priority-P3,
+            body.print-P4 .priority-P4,
+            body.print-all .priority-column {
+                display: block !important;
+            }
+        }
+    </style>
+
+    <script>
+        function printPriority(priority) {
+            document.body.classList.remove("print-P1", "print-P2", "print-P3", "print-P4", "print-all");
+            document.body.classList.add("print-" + priority);
+            window.print();
+            setTimeout(function() {
+                document.body.classList.remove("print-" + priority);
+            }, 500);
+        }
+
+        function printAllPriorities() {
+            document.body.classList.remove("print-P1", "print-P2", "print-P3", "print-P4");
+            document.body.classList.add("print-all");
+            window.print();
+            setTimeout(function() {
+                document.body.classList.remove("print-all");
+            }, 500);
+        }
+    </script>
+
+    <div class="print-controls">
+        <b>Print Hit Lists:</b>
+        <button onclick="printPriority('P1')">Print P1 Blitz List</button>
+        <button onclick="printPriority('P2')">Print P2 Info Needed</button>
+        <button onclick="printPriority('P3')">Print P3 Controlled Work</button>
+        <button onclick="printPriority('P4')">Print P4 Waiting</button>
+        <button onclick="printAllPriorities()">Print All</button>
+    </div>
+
+    <div class="command-grid">
+    """
 
     for p in ["P1", "P2", "P3", "P4"]:
-        body += f'<div style="background:#111;padding:10px;border-radius:10px;">'
-        body += f'<h2 style="color:white;text-align:center;">{p}</h2>'
+        style = priority_styles[p]
 
-        # ACTION NOW (top section)
-        body += '<div style="background:#222;padding:5px;margin-bottom:10px;">'
-        body += '<strong style="color:#0ff;">Action Now</strong><br>'
+        body += f"""
+        <div class="priority-column priority-{p}" style="background:{style['bg']};border-color:{style['border']};">
+            <div class="priority-title" style="background:{style['header']};">{p}</div>
+        """
 
-        for task in columns[p][:5]:
+        # ACTION NOW
+        body += """
+            <div class="section">
+                <div class="section-title action-title">Action Now</div>
+        """
+
+        for task in columns[p][:8]:
+            risk = task.get("risk", "NORMAL")
             body += f"""
-            <div style="background:#333;margin:5px;padding:5px;border-radius:5px;">
-                RO {task['ro']}<br>
-                {task['owner']} | {task['risk']}<br>
-                {task['task'][:60]}
-            </div>
+                <div class="task-card {risk}">
+                    <div class="ro-line">RO {task.get('ro')}</div>
+                    <div class="waiting-line">Waiting On: {task.get('owner')}</div>
+                    <div><b>Risk:</b> {risk}</div>
+                    <div><b>Status:</b> {task.get('status')}</div>
+                    <div class="small-line">{task.get('task', '')[:95]}</div>
+                </div>
             """
 
-        body += '</div>'
+        body += "</div>"
 
-        # FULL LIST
-        body += '<div style="background:#1a1a1a;padding:5px;">'
-        body += '<strong style="color:#aaa;">All Jobs</strong><br>'
+        # INCOMING SOON
+        body += """
+            <div class="section">
+                <div class="section-title incoming-title">Incoming Soon</div>
+        """
+
+        for task in columns[p]:
+            status = task.get("status", "").lower()
+            idle = task.get("idle_hours", 0)
+
+            if (
+                ("servicing" in status or "in progress" in status)
+                and idle < 2
+                and task.get("priority") != "P4"
+            ):
+                risk = task.get("risk", "NORMAL")
+                body += f"""
+                <div class="task-card {risk}">
+                    <div class="ro-line">RO {task.get('ro')}</div>
+                    <div><b>ETA Soon</b> → {task.get('owner')}</div>
+                    <div><b>Status:</b> {task.get('status')}</div>
+                </div>
+                """
+
+        body += "</div>"
+
+        # ALL JOBS
+        body += """
+            <div class="section">
+                <div class="section-title all-title">All Jobs</div>
+        """
 
         for task in columns[p]:
             body += f"""
-            <div style="border-bottom:1px solid #333;padding:4px;">
-                RO {task['ro']} | {task['owner']} | {task['risk']}
-            </div>
+                <div class="rolling-row">
+                    <b>RO {task.get('ro')}</b> | {task.get('owner')} | {task.get('risk')} | {task.get('status')}
+                </div>
             """
 
-        body += '</div>'
-        body += '</div>'
+        body += """
+            </div>
+        </div>
+        """
 
     body += "</div>"
 
