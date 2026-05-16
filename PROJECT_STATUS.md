@@ -3,7 +3,23 @@
 **Last Updated:** May 16, 2026  
 **Current Branch:** `ai-build-stabilization`  
 **Repo:** https://github.com/PrestonC-stack/shop-observer-core.git
+## Progress Update - May 16, 2026
 
+- Stabilized the Flask dashboard and confirmed it works locally and through Cloudflare.
+- Fixed dashboard repo-root import path so `connectors/autoflow.py` can load correctly.
+- Connected `/api/jobs` to `fetch_autoflow_data([])` with mock fallback.
+- Added normalized `/api/jobs` payload for frontend-safe rendering.
+- Added first-pass frontend rendering from `/api/jobs`.
+- Confirmed `/healthz` returns 200 OK.
+- Confirmed `/api/jobs` returns 200 OK with 4 normalized jobs.
+- Preserved Hermes separation: no Hermes/Ollama work runs on the main dashboard page load.
+- No polling has been added yet.
+
+### Next Priorities
+
+1. Monitor Cloudflare stability and watch for recurring 524 behavior.
+2. Validate real AutoFlow RO data path when live RO input is available.
+3. Add a manual Refresh button before considering polling.
 ---
 
 ## Project Goal
