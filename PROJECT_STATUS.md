@@ -1,0 +1,118 @@
+# Callahan AI - Shop Command Board
+
+**Last Updated:** May 16, 2026  
+**Current Branch:** `ai-build-stabilization`  
+**Repo:** https://github.com/PrestonC-stack/shop-observer-core.git
+
+---
+
+## Project Goal
+
+Build a **local-first, remote-accessible Advisor Command Board** for Callahan Auto that helps reduce operational chaos by providing:
+
+- Clear P1–P4 priority visibility
+- Advisor and Technician action queues
+- Technician Load and Bay Utilization
+- Hermes Intelligence layer for operational summaries and recommendations
+- Secure remote access via Cloudflare Tunnel
+
+---
+
+## Current Tech Stack
+
+| Component                    | Technology                          | Status      | Notes |
+|-----------------------------|-------------------------------------|-------------|-------|
+| Web Dashboard               | Flask (`dashboard/advisor_task_viewer.py`) | Active      | Port 5000 |
+| Intelligence Layer          | Hermes + Ollama (Qwen2.5-coder:7b)     | Active      | Summary & recommendations |
+| Webhook Receiver            | Flask (`webhooks/autoflow_webhook_receiver.py`) | Active | Port 5055 |
+| Cloudflare Tunnel           | cloudflared (Windows Service)          | Active      | Remote access |
+| Desktop Launchers           | PowerShell `.ps1` files                | Active      | Easy startup |
+| Data Source                 | AutoFlow (Webhook + Connector)         | Partial     | Using mock data in some areas |
+
+---
+
+## Architecture Decisions
+
+- **Separation of Concerns**:
+  - **Rules + Evidence Layer**: Handles ownership, priority scoring, timing, and action queues.
+  - **Hermes Layer**: Reads structured board data and provides summaries, explanations, and recommendations.
+- Hermes should **not** perform heavy data processing or direct calculations.
+- **Stability first** — Performance and reliability (especially remote access) take priority over new features.
+- Use desktop PowerShell launchers for reliable daily startup.
+
+---
+
+## Current Status (as of May 16, 2026)
+
+- Remote dashboard is accessible via Cloudflare but **unstable** (frequent 524 Timeouts).
+- Cloudflared service is installed but **unstable** (frequently starts/stops).
+- Hermes works when Ollama is running, but page load performance needs improvement.
+- P1–P4 structure exists but is still mostly placeholder.
+- Desktop launchers are created and working.
+
+---
+
+## Known Issues
+
+| Issue                    | Severity | Notes |
+|--------------------------|----------|-------|
+| Cloudflared instability  | High     | Main cause of 524 Timeouts |
+| Dashboard page load time | High     | Triggers Cloudflare timeouts |
+| Hermes connection errors | Medium   | Happens when Ollama is not running |
+| Limited real AutoFlow data in UI | Medium | Still using mock data in some places |
+
+---
+
+## Next Priorities (In Order)
+
+1. **Stabilize Remote Access** (Highest Priority)
+   - Fix/reduce 524 Timeouts
+   - Improve Cloudflared stability or configuration
+
+2. **Improve Dashboard Performance**
+   - Move heavy operations (especially Hermes) to background where possible
+   - Make error handling more graceful
+
+3. **Enhance P1–P4 Columns & Queues**
+   - Pull real data from AutoFlow
+   - Build Advisor Action Queue and Technician Action Queue
+   - Add Technician Load and Bay Utilization
+
+4. **Strengthen Hermes Layer**
+   - Improve reliability when Ollama is running
+   - Make summaries more actionable
+
+---
+
+## Key Files
+
+| File Path                                      | Purpose                              | Notes |
+|------------------------------------------------|--------------------------------------|-------|
+| `dashboard/advisor_task_viewer.py`             | Main Flask dashboard                 | Core file |
+| `hermes/intelligence/shop_intelligence_llm.py` | Hermes intelligence logic            | Summary generation |
+| `connectors/autoflow.py`                       | AutoFlow data connector              | Data source |
+| `webhooks/autoflow_webhook_receiver.py`        | Webhook receiver                     | Event intake |
+| `PROJECT_STATUS.md`                            | Living project status document       | This file |
+
+---
+
+## Branch Strategy (Current)
+
+- **Working Branch:** `ai-build-stabilization`
+- All active development should happen on this branch until further notice.
+- Major stable versions may be merged into `main` later.
+
+---
+
+## Rules for AI Assistants (Grok & Codex)
+
+- Always work incrementally.
+- Prioritize **stability and performance** before adding new features.
+- When editing code, prefer providing the **full updated file**.
+- Maintain separation between Rules/Evidence layer and Hermes.
+- Reference this document and the GitHub branch when making decisions.
+- Ask clarifying questions instead of making assumptions.
+
+---
+
+**This document should be updated regularly** as progress is made.
