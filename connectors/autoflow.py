@@ -421,3 +421,17 @@ def fetch_autoflow_data(ro_numbers: Iterable[str]) -> dict[str, Any]:
         mock_data["source"] = "autoflow-techflow-mock-fallback"
         mock_data["fallback_reason"] = str(exc)
         return mock_data
+# Add this at the very end of the file
+def get_active_ros_summary() -> dict:
+    """Simple helper to get current shop overview"""
+    try:
+        data = fetch_autoflow_data([])  # uses mock or live depending on config
+        records = data.get("records", [])
+        return {
+            "total_active": len(records),
+            "generated_at": data.get("generated_at"),
+            "mode": data.get("mode", "unknown"),
+            "sample_ros": [r.get("ro_number") for r in records[:5]]
+        }
+    except:
+        return {"total_active": 0, "error": "Failed to fetch"}

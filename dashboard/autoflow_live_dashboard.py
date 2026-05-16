@@ -1,161 +1,78 @@
-# --- START REPLACEMENT FILE ---
+"""
+Callahan AI - Advisor Command Board (Simple & Reliable)
+"""
 
-from __future__ import annotations
-import json
-from collections import Counter
-from datetime import datetime, timezone
+import sys
 from pathlib import Path
-from typing import Any
-from flask import Flask, Response
+from flask import Flask
+from datetime import datetime
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-EVENT_LOG_PATH = REPO_ROOT / "data" / "autoflow_events" / "autoflow_events.jsonl"
-STATE_PATH = REPO_ROOT / "state" / "active_shop_state.json"
+ROOT = Path("C:/AI-RUNTIME")
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "shop-observer-core"))
+
+# Import your existing stuff
+try:
+    from connectors.autoflow import fetch_autoflow_data
+    from hermes.intelligence.shop_intelligence_llm import ShopIntelligenceLLM
+    print("✅ Connectors loaded")
+except Exception as e:
+    print("Import error:", e)
 
 app = Flask(__name__)
 
-def _parse_timestamp(value):
+@app.route("/")
+def advisor_board():
+    # Get data
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        shop_data = fetch_autoflow_data([])  # mock for now
+        num_active = len(shop_data.get("records", []))
     except:
-        return datetime.min.replace(tzinfo=timezone.utc)
+        num_active = 0
 
-def _load():
-    if not EVENT_LOG_PATH.exists():
-        return []
-    out=[]
-    for line in EVENT_LOG_PATH.read_text().splitlines():
-        try:
-            out.append(json.loads(line))
-        except:
-            continue
-    return out
+    # Get intelligence
+    try:
+        intel = ShopIntelligenceLLM()
+        summary = intel.generate_smart_summary()
+    except Exception as e:
+        summary = f"Intelligence loading... ({str(e)[:100]})"
 
-def build_state():
-    now = datetime.now(timezone.utc)
-    ros = {}
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Country Club Advisor Command Board</title>
+        <meta http-equiv="refresh" content="60">
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; background: #f8f9fa; }}
+            h1 {{ color: #1e3a8a; }}
+            .card {{ background: white; padding: 25px; margin: 20px 0; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+            pre {{ background: #f1f5f9; padding: 20px; border-radius: 8px; }}
+        </style>
+    </head>
+    <body>
+        <h1>🚀 Country Club Advisor Command Board</h1>
+        <p><strong>Last Updated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+        
+        <div class="card">
+            <h2>📊 Shop Overview</h2>
+            <p><strong>Active Repair Orders:</strong> {num_active}</p>
+        </div>
 
-    for r in _load():
-        p = r.get("payload", {})
-        ro = str(p.get("ticket", {}).get("invoice", "unknown"))
-        status = str(p.get("ticket", {}).get("status", "unknown"))
-        ts = _parse_timestamp(p.get("timestamp") or r.get("received_at"))
+        <div class="card">
+            <h2>🧠 Live Intelligence</h2>
+            <pre>{summary}</pre>
+        </div>
 
-        if ro == "unknown":
-            continue
-
-        ros.setdefault(ro, []).append({
-            "status": status,
-            "ts": ts,
-            "vehicle": f"{p.get('vehicle',{}).get('year','')} {p.get('vehicle',{}).get('make','')} {p.get('vehicle',{}).get('model','')}"
-        })
-
-    rows=[]
-    for ro, events in ros.items():
-        events.sort(key=lambda x: x["ts"])
-        first = events[0]["ts"]
-        last = events[-1]["ts"]
-        status = events[-1]["status"]
-
-        age = (now - first).total_seconds()/60
-        idle = (now - last).total_seconds()/60
-
-        level = "none"
-        reason = ""
-
-        if "In Progress" in status:
-            if idle >= 120:
-                level="red"; reason="No progress >120m"
-            elif idle >= 60:
-                level="yellow"; reason="No progress >60m"
-
-        if "Part" in status:
-            if age >= 2880:
-                level="red"; reason="Waiting parts >2d"
-            elif age >= 1440:
-                level="yellow"; reason="Waiting parts >1d"
-
-        if age >= 7200:
-            level="red"; reason="Car >5d"
-        elif age >= 4320 and level!="red":
-            level="yellow"; reason="Car >3d"
-
-        rows.append({
-            "ro": ro,
-            "status": status,
-            "vehicle": events[-1]["vehicle"],
-            "last": last.isoformat(),
-            "count": len(events),
-            "age": int(age),
-            "idle": int(idle),
-            "level": level,
-            "reason": reason
-        })
-
-    rows.sort(key=lambda x: x["idle"], reverse=True)
-
-    return {
-        "rows": rows,
-        "summary": {
-            "total": len(rows),
-            "red": sum(1 for r in rows if r["level"]=="red"),
-            "yellow": sum(1 for r in rows if r["level"]=="yellow")
-        }
-    }
-
-def render(s):
-    rows=s["rows"]
-
-    def color(l):
-        return "red" if l=="red" else "orange" if l=="yellow" else "black"
-
-    trs="".join(f"""
-    <tr>
-    <td>{r['ro']}</td>
-    <td>{r['status']}</td>
-    <td>{r['vehicle']}</td>
-    <td>{r['age']}m</td>
-    <td>{r['idle']}m</td>
-    <td style='color:{color(r['level'])}'>{r['level']}</td>
-    <td>{r['reason']}</td>
-    </tr>
-    """ for r in rows)
-
-    return f"""
-    <html><head>
-    <meta http-equiv="refresh" content="10">
-    <style>
-    body{{font-family:Arial;padding:20px}}
-    table{{width:100%;border-collapse:collapse}}
-    td,th{{border:1px solid #ccc;padding:8px}}
-    </style>
-    </head><body>
-
-    <h2>Shop Dashboard</h2>
-
-    <div>
-    Total: {s['summary']['total']} |
-    Red: {s['summary']['red']} |
-    Yellow: {s['summary']['yellow']}
-    </div>
-
-    <table>
-    <tr>
-    <th>RO</th><th>Status</th><th>Vehicle</th>
-    <th>Age</th><th>Idle</th><th>Attention</th><th>Reason</th>
-    </tr>
-    {trs}
-    </table>
-
-    </body></html>
+        <p style="text-align:center; color:#666;">
+            Refreshing every 60 seconds
+        </p>
+    </body>
+    </html>
     """
+    return html
 
-@app.get("/")
-def home():
-    s = build_state()
-    return Response(render(s), mimetype="text/html")
-
-if __name__=="__main__":
-    app.run(port=5080)
-
-# --- END FILE ---
+if __name__ == "__main__":
+    print("🚀 Advisor Command Board Running")
+    print("Open in browser → http://127.0.0.1:5000")
+    app.run(host="0.0.0.0", port=5000, debug=False)

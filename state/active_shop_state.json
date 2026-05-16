@@ -1,0 +1,22 @@
+{
+  "event_log_path": "C:\\AI-RUNTIME\\shop-observer-core\\data\\autoflow_events\\autoflow_events.jsonl",
+  "generated_at": "2026-05-02T06:36:06.228742+00:00",
+  "rows": [
+    {
+      "current_status": "In Progress",
+      "event_count": 5,
+      "event_type": "ticket.updated",
+      "invoice_or_ro": "13298",
+      "last_update": "2026-05-01T23:30:00Z",
+      "vehicle": "2024 RAM 3500"
+    }
+  ],
+  "source": "local_autoflow_webhook_events",
+  "summary": {
+    "latest_event_time": "2026-05-01T23:30:00Z",
+    "status_counts": {
+      "In Progress": 1
+    },
+    "total_active_ros": 1
+  }
+}
