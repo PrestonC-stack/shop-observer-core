@@ -104,6 +104,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
             </div>
         </div>
+
+        <div class="mt-6 bg-zinc-900 rounded-xl p-5">
+            <h3 class="font-bold text-lg mb-3">Hermes Intelligence</h3>
+            <div id="hermes-summary" class="bg-zinc-800 rounded-lg p-3 text-sm text-zinc-400">
+                Loading Hermes summary...
+            </div>
+        </div>
     </div>
 
     <script>
@@ -112,7 +119,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .replace(/&/g, "&amp;")
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;")
-                .replace(/\"/g, "&quot;")
+                .replace(/\\"/g, "&quot;")
                 .replace(/'/g, "&#39;");
         }}
 
@@ -245,6 +252,28 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (bayUtilEl) bayUtilEl.textContent = "--";
         }}
 
+        function renderHermesSummary(summaryText) {{
+            const hermesEl = document.getElementById("hermes-summary");
+            if (!hermesEl) return;
+            hermesEl.textContent = "Hermes says: " + (summaryText || "No summary available.");
+        }}
+
+        function loadHermesSummary() {{
+            fetch("/api/hermes-summary", {{ cache: "no-store" }})
+                .then(function(response) {{
+                    if (!response.ok) {{
+                        throw new Error("Request failed");
+                    }}
+                    return response.json();
+                }})
+                .then(function(payload) {{
+                    renderHermesSummary(payload.summary || "No summary available.");
+                }})
+                .catch(function() {{
+                    renderHermesSummary("Hermes summary unavailable.");
+                }});
+        }}
+
         function loadJobs() {{
             const refreshButton = document.getElementById("refresh-jobs");
             if (refreshButton) {{
@@ -282,13 +311,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 }});
         }}
 
+        function refreshBoard() {{
+            loadJobs();
+            loadHermesSummary();
+        }}
+
         document.addEventListener("DOMContentLoaded", function() {{
             const refreshButton = document.getElementById("refresh-jobs");
             if (refreshButton) {{
-                refreshButton.addEventListener("click", loadJobs);
+                refreshButton.addEventListener("click", refreshBoard);
             }}
-            loadJobs();
-            window.setInterval(loadJobs, 30000);
+            refreshBoard();
+            window.setInterval(refreshBoard, 30000);
         }});
     </script>
 </body>
