@@ -10,6 +10,8 @@ EVENT_LOG = ROOT / "data" / "autoflow_events" / "autoflow_events.jsonl"
 ACTIVE_ROS_FILE = ROOT / "state" / "active_ros.json"
 
 CLOSED_STATUSES = {"close", "closed", "complete", "completed", "done"}
+EXCLUDED_RO_VALUES = {"RO-55555", "55555"}
+EXCLUDED_RO_TOKENS = {"TEST", "DEMO", "SAMPLE"}
 
 
 def _deep_get(container: Any, path: tuple[Any, ...]) -> Any:
@@ -48,6 +50,22 @@ def _normalize_status(value: Any) -> str:
     if value in (None, "", [], {}):
         return "unknown"
     return " ".join(str(value).strip().lower().split())
+
+
+def _is_production_ro(ro: str) -> bool:
+    normalized = str(ro).strip()
+    if not normalized:
+        return False
+
+    upper_value = normalized.upper()
+    if upper_value in EXCLUDED_RO_VALUES:
+        return False
+
+    for token in EXCLUDED_RO_TOKENS:
+        if token in upper_value:
+            return False
+
+    return True
 
 
 def _extract_event(record: dict[str, Any]) -> dict[str, Any]:
@@ -116,7 +134,7 @@ def build_active_ros_state() -> dict[str, Any]:
     for record in _load_events():
         event = _extract_event(record)
         ro = event["ro"]
-        if not ro:
+        if not ro or not _is_production_ro(ro):
             continue
 
         existing = latest_by_ro.get(ro)
