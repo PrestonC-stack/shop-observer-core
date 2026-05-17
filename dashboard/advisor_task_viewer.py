@@ -7,6 +7,7 @@ from flask import Flask, Response, jsonify
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(CURRENT_DIR)
 ACTIVE_ROS_STATE_PATH = os.path.join(REPO_ROOT, "state", "active_ros.json")
+SHOP_STATE_PATH = os.path.join(REPO_ROOT, "state", "shop_state.json")
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
@@ -353,6 +354,23 @@ def _normalize_text(value, default=""):
     return text if text else default
 
 
+def _load_shop_state():
+    try:
+        with open(SHOP_STATE_PATH, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, list) or not jobs:
+        return None
+
+    return payload
+
+
 def _load_active_ros():
     try:
         with open(ACTIVE_ROS_STATE_PATH, "r", encoding="utf-8") as handle:
@@ -515,6 +533,10 @@ def _normalize_jobs_payload(payload):
 
 
 def _load_jobs_from_autoflow():
+    shop_state = _load_shop_state()
+    if shop_state is not None:
+        return _normalize_jobs_payload(shop_state)
+
     try:
         from connectors import autoflow
     except Exception as exc:
