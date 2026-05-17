@@ -253,6 +253,101 @@ def merge_work_order_and_dvi(
             default=ro_number,
         )
     ).strip() or ro_number
+
+    advisor_name = str(
+        _first_value(
+            dvi,
+            ("service_advisor_name",),
+            default=_first_value(
+                work_order,
+                ("advisor", "name"),
+                ("serviceAdvisor", "name"),
+                ("advisor_name",),
+                ("advisorName",),
+                default="Unknown",
+            ),
+        )
+    )
+
+    workflow_status = _normalize_status(
+        _first_value(
+            dvi,
+            ("current_status",),
+            default=_first_value(
+                work_order,
+                ("workflow_status",),
+                ("workflowStatus",),
+                ("status",),
+                ("job_status",),
+                default="unknown",
+            ),
+        )
+    )
+
+    customer_first = str(
+        _first_value(
+            dvi,
+            ("customer_firstname",),
+            default=_first_value(work_order, ("customer", "firstname"), default=""),
+        )
+    ).strip()
+    customer_last = str(
+        _first_value(
+            dvi,
+            ("customer_lastname",),
+            default=_first_value(work_order, ("customer", "lastname"), default=""),
+        )
+    ).strip()
+    customer_name = " ".join(part for part in (customer_first, customer_last) if part).strip()
+
+    vehicle_year = str(
+        _first_value(
+            dvi,
+            ("year",),
+            default=_first_value(work_order, ("vehicle", "year"), default=""),
+        )
+    ).strip()
+    vehicle_make = str(
+        _first_value(
+            dvi,
+            ("make",),
+            default=_first_value(work_order, ("vehicle", "make"), default=""),
+        )
+    ).strip()
+    vehicle_model = str(
+        _first_value(
+            dvi,
+            ("model",),
+            default=_first_value(work_order, ("vehicle", "model"), default=""),
+        )
+    ).strip()
+    vehicle_submodel = str(_first_value(work_order, ("vehicle", "submodel"), default="")).strip()
+    vehicle = " ".join(
+        part for part in (vehicle_year, vehicle_make, vehicle_model, vehicle_submodel) if part
+    ).strip()
+
+    notes = str(
+        _first_value(
+            dvi,
+            ("additional_notes",),
+            default=_first_value(
+                dvi,
+                ("summary",),
+                ("notes",),
+                ("inspection", "notes"),
+                default=_first_value(
+                    work_order,
+                    ("notes",),
+                    ("customerConcern",),
+                    ("latest_activity",),
+                    ("latestActivity",),
+                    ("timeline", "latestEvent"),
+                    default="",
+                ),
+            ),
+        )
+    )
+
     return {
         "ticket_reference": ticket_reference,
         "ro_number": ticket_reference,
@@ -260,16 +355,7 @@ def merge_work_order_and_dvi(
             _first_value(work_order, ("id",), ("work_order_id",), ("workOrderId",), default="")
         ),
         "dvi_id": str(_first_value(dvi, ("id",), ("dvi_id",), ("dviId",), default="")),
-        "workflow_status": _normalize_status(
-            _first_value(
-                work_order,
-                ("workflow_status",),
-                ("workflowStatus",),
-                ("status",),
-                ("job_status",),
-                default="unknown",
-            )
-        ),
+        "workflow_status": workflow_status,
         "job_marked_complete": _to_bool(
             _first_value(
                 work_order,
@@ -298,16 +384,9 @@ def merge_work_order_and_dvi(
                 default="Unknown",
             )
         ),
-        "advisor_name": str(
-            _first_value(
-                work_order,
-                ("advisor", "name"),
-                ("serviceAdvisor", "name"),
-                ("advisor_name",),
-                ("advisorName",),
-                default="Unknown",
-            )
-        ),
+        "advisor_name": advisor_name,
+        "customer_name": customer_name,
+        "vehicle": vehicle,
         "technician_name": str(
             _first_value(
                 work_order,
@@ -379,20 +458,7 @@ def merge_work_order_and_dvi(
                 default="",
             )
         ),
-        "notes": str(
-            _first_value(
-                dvi,
-                ("summary",),
-                ("notes",),
-                ("inspection", "notes"),
-                default=_first_value(
-                    work_order,
-                    ("notes",),
-                    ("customerConcern",),
-                    default="",
-                ),
-            )
-        ),
+        "notes": notes,
         "source_refs": {
             "ro_number": ticket_reference,
             "work_order_id": _first_value(
