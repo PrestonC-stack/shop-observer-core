@@ -5,6 +5,19 @@
 **Repo:** https://github.com/PrestonC-stack/shop-observer-core.git
 ## Progress Update - May 16, 2026
 
+## Progress Update - May 16, 2026 - Shop State Layer
+
+- Added `scripts/build_active_ros_state.py` to derive active ROs from webhook events.
+- Added `scripts/build_shop_state.py` to build normalized `state/shop_state.json`.
+- Confirmed live AutoFlow RO `13298` maps advisor, customer, vehicle, workflow status, notes, and priority.
+- Updated `/api/jobs` to prefer local `state/shop_state.json` before live/mock fallback.
+- Preserved Hermes separation: no Hermes/Ollama execution on dashboard page load.
+- No polling added.
+
+### Current Data Flow
+
+`AutoFlow webhook log → active_ros.json → shop_state.json → /api/jobs → dashboard`
+
 - Stabilized the Flask dashboard and confirmed it works locally and through Cloudflare.
 - Fixed dashboard repo-root import path so `connectors/autoflow.py` can load correctly.
 - Connected `/api/jobs` to `fetch_autoflow_data([])` with mock fallback.
