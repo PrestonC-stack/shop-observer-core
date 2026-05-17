@@ -9,8 +9,10 @@
 
 - Added `scripts/build_active_ros_state.py` to derive active ROs from webhook events.
 - Added `scripts/build_shop_state.py` to build normalized `state/shop_state.json`.
+- Added `scripts/bootstrap_active_ros.py` to sync `active_ros.json` and `shop_state.json` in one step.
 - Confirmed live AutoFlow RO `13298` maps advisor, customer, vehicle, workflow status, notes, and priority.
 - Updated `/api/jobs` to prefer local `state/shop_state.json` before live/mock fallback.
+- `state/shop_state.json` is the canonical Rules/Evidence operational board-state file for both dashboard reads and future Hermes intelligence reads.
 - Preserved Hermes separation: no Hermes/Ollama execution on dashboard page load.
 - No polling added.
 
@@ -30,6 +32,7 @@
 - Added a Rules/Evidence active RO state layer sourced from `data/autoflow_events/autoflow_events.jsonl`.
 - Added command to build active RO state: `python scripts/build_active_ros_state.py`.
 - Added command to build normalized board state: `python scripts/build_shop_state.py`.
+- Added command to bootstrap the synced local state: `python scripts/bootstrap_active_ros.py`.
 
 ### Next Priorities
 
@@ -68,6 +71,7 @@ Build a **local-first, remote-accessible Advisor Command Board** for Callahan Au
 - **Separation of Concerns**:
   - **Rules + Evidence Layer**: Handles ownership, priority scoring, timing, and action queues.
   - **Hermes Layer**: Reads structured board data and provides summaries, explanations, and recommendations.
+- Hermes should **read `state/shop_state.json` as the primary operational evidence file** once intelligence summaries are wired in.
 - Hermes should **not** perform heavy data processing or direct calculations.
 - **Stability first** — Performance and reliability (especially remote access) take priority over new features.
 - Use desktop PowerShell launchers for reliable daily startup.
