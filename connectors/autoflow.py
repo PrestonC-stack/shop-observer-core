@@ -122,7 +122,7 @@ def _unwrap_response_envelope(response: Any) -> Any:
         return response
 
     wrapper_keys = {"status", "status_code", "code", "message", "success"}
-    payload_keys = ("data", "response", "result", "work_order", "dvi", "inspection", "ticket")
+    payload_keys = ("data", "response", "result", "work_order", "dvi", "inspection", "ticket", "content")
 
     if not any(key in response for key in wrapper_keys):
         return response
