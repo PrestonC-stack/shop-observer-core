@@ -117,6 +117,24 @@ def _normalize_status(value: Any, default: str = "unknown") -> str:
     return str(value).strip().lower().replace("-", "_").replace(" ", "_")
 
 
+def _unwrap_response_envelope(response: Any) -> Any:
+    if not isinstance(response, dict):
+        return response
+
+    wrapper_keys = {"status", "status_code", "code", "message", "success"}
+    payload_keys = ("data", "response", "result", "work_order", "dvi", "inspection", "ticket")
+
+    if not any(key in response for key in wrapper_keys):
+        return response
+
+    for key in payload_keys:
+        nested = response.get(key)
+        if isinstance(nested, dict):
+            return nested
+
+    return response
+
+
 def _build_headers() -> dict[str, str]:
     _load_local_env_file()
     headers = {"Accept": "application/json"}
@@ -212,13 +230,13 @@ def get_work_order(ro_number: str) -> dict[str, Any]:
     path_template = os.getenv(
         "AUTOFLOW_WORK_ORDER_PATH_TEMPLATE", DEFAULT_WORK_ORDER_PATH_TEMPLATE
     )
-    return _request_json(path_template, ro_number)
+    return _unwrap_response_envelope(_request_json(path_template, ro_number))
 
 
 def get_dvi(ro_number: str) -> dict[str, Any]:
     """Read a single AutoFlow DVI by RO number."""
     path_template = os.getenv("AUTOFLOW_DVI_PATH_TEMPLATE", DEFAULT_DVI_PATH_TEMPLATE)
-    return _request_json(path_template, ro_number)
+    return _unwrap_response_envelope(_request_json(path_template, ro_number))
 
 
 def merge_work_order_and_dvi(
