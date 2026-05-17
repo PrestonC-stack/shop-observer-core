@@ -16,6 +16,7 @@
 - No polling has been added yet.
 - Added a Rules/Evidence active RO state layer sourced from `data/autoflow_events/autoflow_events.jsonl`.
 - Added command to build active RO state: `python scripts/build_active_ros_state.py`.
+- Added command to build normalized board state: `python scripts/build_shop_state.py`.
 
 ### Next Priorities
 
