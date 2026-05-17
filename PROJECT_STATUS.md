@@ -14,12 +14,14 @@
 - Confirmed `/api/jobs` returns 200 OK with 4 normalized jobs.
 - Preserved Hermes separation: no Hermes/Ollama work runs on the main dashboard page load.
 - No polling has been added yet.
+- Added a Rules/Evidence active RO state layer sourced from `data/autoflow_events/autoflow_events.jsonl`.
+- Added command to build active RO state: `python scripts/build_active_ros_state.py`.
 
 ### Next Priorities
 
 1. Monitor Cloudflare stability and watch for recurring 524 behavior.
 2. Validate real AutoFlow RO data path when live RO input is available.
-3. Add a manual Refresh button before considering polling.
+3. Keep `/api/jobs` using `active_ros.json` when present and mock fallback when not.
 ---
 
 ## Project Goal
