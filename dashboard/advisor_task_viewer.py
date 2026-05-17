@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from datetime import datetime
@@ -5,6 +6,7 @@ from flask import Flask, Response, jsonify
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(CURRENT_DIR)
+ACTIVE_ROS_STATE_PATH = os.path.join(REPO_ROOT, "state", "active_ros.json")
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
@@ -109,7 +111,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .replace(/&/g, "&amp;")
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
+                .replace(/\"/g, "&quot;")
                 .replace(/'/g, "&#39;");
         }}
 
@@ -351,6 +353,29 @@ def _normalize_text(value, default=""):
     return text if text else default
 
 
+def _load_active_ros():
+    try:
+        with open(ACTIVE_ROS_STATE_PATH, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:
+        return []
+
+    if not isinstance(payload, dict):
+        return []
+
+    active_ros = payload.get("active_ros")
+    if not isinstance(active_ros, list):
+        return []
+
+    normalized = []
+    for ro in active_ros:
+        text = _normalize_text(ro, "")
+        if text:
+            normalized.append(text)
+
+    return normalized
+
+
 def _derive_priority(normalized_job):
     workflow_status = _normalize_text(normalized_job.get("workflow_status", ""), "").lower()
     clocked_in = _to_bool(normalized_job.get("clocked_in"))
@@ -495,9 +520,11 @@ def _load_jobs_from_autoflow():
     except Exception as exc:
         return _fallback_jobs_payload(f"import_failed: {exc}")
 
+    active_ros = _load_active_ros()
+
     try:
         if hasattr(autoflow, "fetch_autoflow_data") and callable(autoflow.fetch_autoflow_data):
-            payload = autoflow.fetch_autoflow_data([])
+            payload = autoflow.fetch_autoflow_data(active_ros)
             if isinstance(payload, dict):
                 return _normalize_jobs_payload(payload)
     except Exception as exc:
