@@ -10,6 +10,7 @@
 - Added `scripts/build_active_ros_state.py` to derive active ROs from webhook events.
 - Added `scripts/build_shop_state.py` to build normalized `state/shop_state.json`.
 - Added `scripts/bootstrap_active_ros.py` to sync `active_ros.json` and `shop_state.json` in one step.
+- Added `scripts/sync_active_appointments.py` to merge appointment-discovered AutoFlow ROs with webhook-derived active ROs.
 - Confirmed live AutoFlow RO `13298` maps advisor, customer, vehicle, workflow status, notes, and priority.
 - Updated `/api/jobs` to prefer local `state/shop_state.json` before live/mock fallback.
 - `state/shop_state.json` is the canonical Rules/Evidence operational board-state file for both dashboard reads and future Hermes intelligence reads.
@@ -31,6 +32,7 @@
 - No polling has been added yet.
 - Added a Rules/Evidence active RO state layer sourced from `data/autoflow_events/autoflow_events.jsonl`.
 - Added command to build active RO state: `python scripts/build_active_ros_state.py`.
+- Added command to sync appointment-discovered active ROs: `python scripts/sync_active_appointments.py`.
 - Added command to build normalized board state: `python scripts/build_shop_state.py`.
 - Added command to bootstrap the synced local state: `python scripts/bootstrap_active_ros.py`.
 
