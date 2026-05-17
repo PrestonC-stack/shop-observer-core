@@ -24,6 +24,8 @@ from hermes.orchestration.hermes_webhook_bridge import HermesWebhookBridge
 # ====================== EXISTING CODE ======================
 EVENT_LOG_PATH = REPO_ROOT / "data" / "autoflow_events" / "autoflow_events.jsonl"
 BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_advisor_game_plan.py"
+ACTIVE_ROS_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_active_ros_state.py"
+SHOP_STATE_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_shop_state.py"
 
 app = Flask(__name__)
 bridge = HermesWebhookBridge()   # ← Hermes Bridge
@@ -93,6 +95,45 @@ def _rebuild_advisor_tasks() -> None:
     except Exception as e:
         print(f"TASK REBUILD FAILED: {e}")
 
+
+def _run_build_script(script_path: Path, label: str) -> tuple[bool, str]:
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script_path)],
+            cwd=str(REPO_ROOT),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            print(f"{label} REBUILD TRIGGERED")
+            return True, ""
+
+        reason = (result.stderr or result.stdout or f"exit_code={result.returncode}").strip()
+        print(f"{label} REBUILD FAILED: {reason}")
+        return False, reason
+    except Exception as exc:
+        reason = str(exc)
+        print(f"{label} REBUILD FAILED: {reason}")
+        return False, reason
+
+
+def _rebuild_local_state() -> dict[str, Any]:
+    active_ros_ok, active_ros_reason = _run_build_script(ACTIVE_ROS_BUILD_SCRIPT, "ACTIVE RO STATE")
+    shop_state_ok, shop_state_reason = _run_build_script(SHOP_STATE_BUILD_SCRIPT, "SHOP STATE")
+
+    failures = []
+    if not active_ros_ok:
+        failures.append({"step": "build_active_ros_state", "reason": active_ros_reason})
+    if not shop_state_ok:
+        failures.append({"step": "build_shop_state", "reason": shop_state_reason})
+
+    return {
+        "active_ros_rebuilt": active_ros_ok,
+        "shop_state_rebuilt": shop_state_ok,
+        "failures": failures,
+    }
+
 def _print_summary(summary: dict[str, str]) -> None:
     print("AUTOFLOW WEBHOOK EVENT")
     print(f"- event type: {summary['event_type']}")
@@ -119,6 +160,7 @@ def receive_autoflow_webhook():
     # Your original logic continues
     _append_event(payload, received_at)
     _rebuild_advisor_tasks()
+    state_rebuild = _rebuild_local_state()
     
     summary = _safe_summary(payload, received_at)
     _print_summary(summary)
@@ -129,6 +171,9 @@ def receive_autoflow_webhook():
         "event_type": summary["event_type"],
         "invoice_or_ro": summary["invoice_or_ro"],
         "tasks_rebuilt": True,
+        "active_ros_rebuilt": state_rebuild["active_ros_rebuilt"],
+        "shop_state_rebuilt": state_rebuild["shop_state_rebuilt"],
+        "state_rebuild_failures": state_rebuild["failures"],
     })
 
 @app.get("/health")

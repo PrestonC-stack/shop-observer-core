@@ -11,11 +11,12 @@
 - Added `scripts/build_shop_state.py` to build normalized `state/shop_state.json`.
 - Added `scripts/bootstrap_active_ros.py` to sync `active_ros.json` and `shop_state.json` in one step.
 - Added `scripts/sync_active_appointments.py` to merge appointment-discovered AutoFlow ROs with webhook-derived active ROs.
+- AutoFlow webhook intake now rebuilds `state/active_ros.json` and `state/shop_state.json` after accepted events.
 - Confirmed live AutoFlow RO `13298` maps advisor, customer, vehicle, workflow status, notes, and priority.
 - Updated `/api/jobs` to prefer local `state/shop_state.json` before live/mock fallback.
 - `state/shop_state.json` is the canonical Rules/Evidence operational board-state file for both dashboard reads and future Hermes intelligence reads.
 - Preserved Hermes separation: no Hermes/Ollama execution on dashboard page load.
-- No polling added.
+- Dashboard now refreshes `/api/jobs` every 30 seconds without reloading the page.
 
 ### Current Data Flow
 

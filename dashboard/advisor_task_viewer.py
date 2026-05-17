@@ -288,6 +288,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 refreshButton.addEventListener("click", loadJobs);
             }}
             loadJobs();
+            window.setInterval(loadJobs, 30000);
         }});
     </script>
 </body>
