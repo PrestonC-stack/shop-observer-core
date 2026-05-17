@@ -9,7 +9,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 app = Flask(__name__)
-
+# Wallboard HTML Template (CSS braces safely escaped)
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,10 +32,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <h1 class="text-4xl font-bold">Country Club Advisor Command Board</h1>
                 <p class="text-zinc-400">Last Updated: {timestamp}</p>
             </div>
-            <span class="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-sm font-medium">● LIVE</span>
+            <div class="flex items-center gap-3">
+                <button
+                    id="refresh-jobs"
+                    class="px-3 py-1 rounded-full text-sm font-medium bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+                    type="button"
+                >
+                    Refresh Jobs
+                </button>
+                <span class="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-sm font-medium">● LIVE</span>
+            </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- P1–P4 Columns -->
             <div class="lg:col-span-7 space-y-6">
                 <h2 class="text-2xl font-semibold mb-4">Jobs by Priority</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -65,7 +75,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     </div>
                 </div>
             </div>
-
+            <!-- Sidebar -->
             <div class="lg:col-span-5 space-y-6">
                 <div class="bg-zinc-900 rounded-xl p-5">
                     <h3 class="font-bold text-lg mb-3">📋 Advisor Action Queue</h3>
@@ -131,7 +141,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
                 return (
                     '<div class="bg-zinc-800 rounded-lg p-3 text-sm">' +
-                        '<div class="font-medium">' + escapeHtml(titleParts.join(" • ") || "Unassigned Job") + '</div>' +
+                        '<div class="font-medium">' + escapeHtml(titleParts.join(' • ') || 'Unassigned Job') + '</div>' +
                         '<div class="text-zinc-400">' + escapeHtml(subtitle) + '</div>' +
                     '</div>'
                 );
@@ -156,7 +166,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
             container.innerHTML = jobs.map(function(job) {{
                 let text = "";
-
                 if (type === "advisor") {{
                     text = "Review " + (job.customer || job.ro || "job");
                 }} else {{
@@ -164,19 +173,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     text = bayPrefix + (job.vehicle || job.ro || "Job");
                 }}
 
-                const suffixClass = colorMap[job.priority] || "text-zinc-400";
-                let suffixText = job.priority || "P4";
-
+                let suffix = ' <span class="' + (colorMap[job.priority] || "text-zinc-400") + '">(' + escapeHtml(job.priority || "P4") + ')</span>';
                 if (type === "technician" && job.technician) {{
-                    suffixText = "Tech: " + job.technician;
+                    suffix = ' <span class="text-red-400">(Tech: ' + escapeHtml(job.technician) + ')</span>';
                 }}
 
-                return (
-                    '<div class="bg-zinc-800 p-3 rounded-lg">' +
-                        escapeHtml(text) +
-                        ' <span class="' + suffixClass + '">(' + escapeHtml(suffixText) + ')</span>' +
-                    '</div>'
-                );
+                return '<div class="bg-zinc-800 p-3 rounded-lg">' + escapeHtml(text) + suffix + '</div>';
             }}).join("");
         }}
 
@@ -227,7 +229,28 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             renderMetrics(jobs);
         }}
 
-        document.addEventListener("DOMContentLoaded", function() {{
+        function renderLoadingState() {{
+            renderEmpty("p1-jobs", "Loading jobs...");
+            renderEmpty("p2-jobs", "Loading jobs...");
+            renderEmpty("p3-jobs", "Loading jobs...");
+            renderEmpty("p4-jobs", "Loading jobs...");
+            renderEmpty("advisor-queue", "Loading jobs...");
+            renderEmpty("technician-queue", "Loading jobs...");
+            const techLoadEl = document.getElementById("tech-load");
+            const bayUtilEl = document.getElementById("bay-utilization");
+            if (techLoadEl) techLoadEl.textContent = "--";
+            if (bayUtilEl) bayUtilEl.textContent = "--";
+        }}
+
+        function loadJobs() {{
+            const refreshButton = document.getElementById("refresh-jobs");
+            if (refreshButton) {{
+                refreshButton.disabled = true;
+                refreshButton.classList.add("opacity-60");
+            }}
+
+            renderLoadingState();
+
             fetch("/api/jobs", {{ cache: "no-store" }})
                 .then(function(response) {{
                     if (!response.ok) {{
@@ -247,7 +270,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     renderQueue("advisor-queue", [], "No advisor actions right now", "advisor");
                     renderQueue("technician-queue", [], "No technician actions right now", "technician");
                     renderMetrics([]);
+                }})
+                .finally(function() {{
+                    if (refreshButton) {{
+                        refreshButton.disabled = false;
+                        refreshButton.classList.remove("opacity-60");
+                    }}
                 }});
+        }}
+
+        document.addEventListener("DOMContentLoaded", function() {{
+            const refreshButton = document.getElementById("refresh-jobs");
+            if (refreshButton) {{
+                refreshButton.addEventListener("click", loadJobs);
+            }}
+            loadJobs();
         }});
     </script>
 </body>
