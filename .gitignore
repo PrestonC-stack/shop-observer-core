@@ -7,3 +7,4 @@ data/autoflow_events/test_payload.json
 state/active_shop_state.jsoncloudflared.exe
 *.exe
 state/active_ros.json
+state/shop_state.json
