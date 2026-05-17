@@ -12,6 +12,7 @@ ACTIVE_ROS_FILE = ROOT / "state" / "active_ros.json"
 CLOSED_STATUSES = {"close", "closed", "complete", "completed", "done"}
 EXCLUDED_RO_VALUES = {"RO-55555", "55555"}
 EXCLUDED_RO_TOKENS = {"TEST", "DEMO", "SAMPLE"}
+EXCLUDED_NUMERIC_RO_RANGE = range(99990, 100000)
 
 
 def _deep_get(container: Any, path: tuple[Any, ...]) -> Any:
@@ -64,6 +65,9 @@ def _is_production_ro(ro: str) -> bool:
     for token in EXCLUDED_RO_TOKENS:
         if token in upper_value:
             return False
+
+    if normalized.isdigit() and int(normalized) in EXCLUDED_NUMERIC_RO_RANGE:
+        return False
 
     return True
 

@@ -208,6 +208,7 @@ def _normalize_payload(payload: dict[str, Any], active_ro_source: str) -> dict[s
         "active_ro_source": active_ro_source,
         "count": len(jobs),
         "jobs": jobs,
+        "skipped_ros": payload.get("skipped_ros", []),
         "message": payload.get("fallback_reason", payload.get("message", "")),
     }
 
@@ -219,6 +220,7 @@ def _empty_shop_state(message: str) -> dict[str, Any]:
         "active_ro_source": str(ACTIVE_ROS_FILE.relative_to(ROOT)),
         "count": 0,
         "jobs": [],
+        "skipped_ros": [],
         "message": message,
     }
 
@@ -247,17 +249,41 @@ def _load_active_ros() -> list[str]:
     return normalized
 
 
+def _fetch_live_jobs(active_ros: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    jobs: list[dict[str, Any]] = []
+    skipped_ros: list[dict[str, str]] = []
+
+    for ro in active_ros:
+        try:
+            work_order = autoflow.get_work_order(ro)
+            dvi = autoflow.get_dvi(ro)
+            jobs.append(_normalize_job(autoflow.merge_work_order_and_dvi(work_order, dvi, ro)))
+        except Exception as exc:
+            skipped_ros.append({"ro": ro, "reason": str(exc)})
+
+    return jobs, skipped_ros
+
+
 def build_shop_state() -> dict[str, Any]:
     active_ro_source = str(ACTIVE_ROS_FILE.relative_to(ROOT))
     active_ros = _load_active_ros()
     if not active_ros:
         return _empty_shop_state("No active RO state found. Run python scripts/build_active_ros_state.py first.")
 
-    payload = autoflow.fetch_autoflow_data(active_ros)
-    if not isinstance(payload, dict):
-        return _empty_shop_state("AutoFlow payload was not a JSON object.")
+    jobs, skipped_ros = _fetch_live_jobs(active_ros)
+    message = ""
+    if skipped_ros:
+        message = f"Skipped {len(skipped_ros)} RO(s) during live AutoFlow enrichment."
 
-    return _normalize_payload(payload, active_ro_source)
+    return {
+        "source": "rules_evidence",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "active_ro_source": active_ro_source,
+        "count": len(jobs),
+        "jobs": jobs,
+        "skipped_ros": skipped_ros,
+        "message": message,
+    }
 
 
 def main() -> None:
