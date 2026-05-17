@@ -114,21 +114,20 @@ def _extract_records(payload: Any) -> list[dict[str, Any]]:
 def _extract_ro(record: dict[str, Any]) -> str:
     value = _first_value(
         record,
-        ("remote_id",),
-        ("ticket", "remote_id"),
-        ("ticket", "invoice"),
-        ("invoice_or_ro",),
-        ("ro",),
+        ("appointment", "invoice"),
+        ("appointment", "ro"),
+        ("appointment", "ro_number"),
+        ("appointment", "repair_order"),
         ("invoice",),
         ("invoice_number",),
+        ("ro",),
         ("ro_number",),
         ("roNumber",),
         ("repair_order",),
+        ("ticket", "invoice"),
+        ("ticket", "ro_number"),
         ("work_order", "invoice"),
         ("work_order", "ro_number"),
-        ("appointment", "invoice"),
-        ("appointment", "ro_number"),
-        ("id",),
     )
     return _normalize_text(value, "")
 
