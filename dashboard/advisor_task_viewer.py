@@ -104,6 +104,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
             </div>
         </div>
+
+        <div class="mt-6 bg-zinc-900 rounded-xl p-5">
+            <h3 class="font-bold text-lg mb-3">Hermes Intelligence</h3>
+            <div id="hermes-summary" class="bg-zinc-800 rounded-lg p-3 text-sm text-zinc-400">
+                Loading Hermes summary...
+            </div>
+        </div>
     </div>
 
     <script>
@@ -210,26 +217,102 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }}
         }}
 
+        function normalizeStatus(value) {{
+            return String(value || "")
+                .trim()
+                .toLowerCase()
+                .replace(/[-\\s]+/g, "_");
+        }}
+
+        function toNumber(value, fallback) {{
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : fallback;
+        }}
+
+        function toBool(value) {{
+            if (typeof value === "boolean") return value;
+            if (typeof value === "number") return value !== 0;
+            return ["true", "1", "yes", "y", "complete", "completed", "closed", "done"].includes(
+                String(value || "").trim().toLowerCase()
+            );
+        }}
+
+        function deriveDisplayPriority(job) {{
+            const status = normalizeStatus(job.workflow_status);
+            const progress = toNumber(job.progress_percent, 0);
+            const clockedIn = toBool(job.clocked_in);
+            const markedComplete = toBool(job.job_marked_complete);
+            const laborRemaining = toNumber(job.labor_hours_remaining, 0);
+            const summary = normalizeStatus(job.summary);
+
+            if (
+                markedComplete ||
+                progress >= 100 ||
+                ["complete", "completed", "closed", "done", "finished", "delivered", "picked_up"].includes(status)
+            ) {{
+                return "P4";
+            }}
+
+            if (
+                !clockedIn &&
+                (
+                    laborRemaining >= 3 ||
+                    progress === 0 ||
+                    ["new", "assigned", "check_in", "inspection", "diagnosis", "triage", "no_start", "comeback"].includes(status) ||
+                    summary.includes("no_start") ||
+                    summary.includes("waiting_on_customer")
+                )
+            ) {{
+                return "P1";
+            }}
+
+            if (
+                ["waiting_on_parts", "waiting_for_parts", "waiting_on_customer", "waiting_for_customer", "waiting_on_approval", "approval_pending", "quality_control", "qc"].includes(status)
+            ) {{
+                return "P2";
+            }}
+
+            if (clockedIn && progress < 50) {{
+                return "P2";
+            }}
+
+            if (!clockedIn && progress < 50) {{
+                return "P2";
+            }}
+
+            if (progress < 100) {{
+                return "P3";
+            }}
+
+            return "P4";
+        }}
+
         function renderJobs(jobs) {{
-            const p1 = jobs.filter(function(job) {{ return job.priority === "P1"; }});
-            const p2 = jobs.filter(function(job) {{ return job.priority === "P2"; }});
-            const p3 = jobs.filter(function(job) {{ return job.priority === "P3"; }});
-            const p4 = jobs.filter(function(job) {{ return job.priority === "P4"; }});
+            const mappedJobs = jobs.map(function(job) {{
+                return Object.assign({{}}, job, {{
+                    priority: deriveDisplayPriority(job)
+                }});
+            }});
+
+            const p1 = mappedJobs.filter(function(job) {{ return job.priority === "P1"; }});
+            const p2 = mappedJobs.filter(function(job) {{ return job.priority === "P2"; }});
+            const p3 = mappedJobs.filter(function(job) {{ return job.priority === "P3"; }});
+            const p4 = mappedJobs.filter(function(job) {{ return job.priority === "P4"; }});
 
             renderJobCards("p1-jobs", p1, "No jobs in P1");
             renderJobCards("p2-jobs", p2, "No jobs in P2");
             renderJobCards("p3-jobs", p3, "No jobs in P3");
             renderJobCards("p4-jobs", p4, "No jobs in P4");
 
-            renderQueue("advisor-queue", jobs.slice(0, 4), "No advisor actions right now", "advisor");
+            renderQueue("advisor-queue", mappedJobs.slice(0, 4), "No advisor actions right now", "advisor");
             renderQueue(
                 "technician-queue",
-                jobs.filter(function(job) {{ return job.technician && job.technician !== "Unassigned"; }}).slice(0, 4),
+                mappedJobs.filter(function(job) {{ return job.technician && job.technician !== "Unassigned"; }}).slice(0, 4),
                 "No technician actions right now",
                 "technician"
             );
 
-            renderMetrics(jobs);
+            renderMetrics(mappedJobs);
         }}
 
         function renderLoadingState() {{
@@ -243,6 +326,73 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const bayUtilEl = document.getElementById("bay-utilization");
             if (techLoadEl) techLoadEl.textContent = "--";
             if (bayUtilEl) bayUtilEl.textContent = "--";
+        }}
+
+        function formatHermesSummary(summary) {{
+            if (Array.isArray(summary)) {{
+                return summary.map(function(item) {{ return String(item); }});
+            }}
+
+            if (summary && typeof summary === "object") {{
+                const lines = [];
+                if (summary.summary) lines.push(String(summary.summary));
+                if (Array.isArray(summary.highlights)) {{
+                    summary.highlights.forEach(function(item) {{ lines.push(String(item)); }});
+                }}
+                if (Array.isArray(summary.next_actions)) {{
+                    summary.next_actions.forEach(function(item) {{ lines.push("Next: " + String(item)); }});
+                }}
+                return lines;
+            }}
+
+            return String(summary || "")
+                .split(/\\n+/)
+                .map(function(line) {{ return line.trim(); }})
+                .filter(Boolean);
+        }}
+
+        function renderHermesSummary(payload) {{
+            const hermesEl = document.getElementById("hermes-summary");
+            if (!hermesEl) return;
+
+            const lines = formatHermesSummary(payload.summary);
+            const summaryHtml = lines.length
+                ? lines.map(function(line) {{
+                    return '<div class="text-zinc-100">• ' + escapeHtml(line) + '</div>';
+                }}).join("")
+                : '<div class="text-zinc-100">• No summary available.</div>';
+
+            const meta = [];
+            if (payload.status) meta.push("Status: " + String(payload.status));
+            if (payload.source) meta.push("Source: " + String(payload.source));
+            if (payload.timestamp) meta.push("Updated: " + String(payload.timestamp));
+
+            hermesEl.innerHTML =
+                '<div class="space-y-2">' +
+                    '<div class="font-medium text-zinc-200">Hermes says:</div>' +
+                    '<div class="space-y-1">' + summaryHtml + '</div>' +
+                    '<div class="text-xs text-zinc-500">' + escapeHtml(meta.join(" • ")) + '</div>' +
+                '</div>';
+        }}
+
+        function loadHermesSummary() {{
+            fetch("/api/hermes-summary", {{ cache: "no-store" }})
+                .then(function(response) {{
+                    if (!response.ok) {{
+                        throw new Error("Request failed");
+                    }}
+                    return response.json();
+                }})
+                .then(function(payload) {{
+                    renderHermesSummary(payload || {{}});
+                }})
+                .catch(function() {{
+                    renderHermesSummary({{
+                        status: "error",
+                        source: "dashboard",
+                        summary: "Hermes summary unavailable."
+                    }});
+                }});
         }}
 
         function loadJobs() {{
@@ -282,13 +432,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 }});
         }}
 
+        function refreshBoard() {{
+            loadJobs();
+            loadHermesSummary();
+        }}
+
         document.addEventListener("DOMContentLoaded", function() {{
             const refreshButton = document.getElementById("refresh-jobs");
             if (refreshButton) {{
-                refreshButton.addEventListener("click", loadJobs);
+                refreshButton.addEventListener("click", refreshBoard);
             }}
-            loadJobs();
-            window.setInterval(loadJobs, 30000);
+            refreshBoard();
+            window.setInterval(refreshBoard, 30000);
         }});
     </script>
 </body>
