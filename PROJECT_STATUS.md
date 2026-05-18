@@ -145,6 +145,27 @@
 - The bay-facing performance view now shows a friendlier front-of-house vs back-of-house score split for shop visibility.
 - Modal behavior was tightened so action flows open centered, highlight the active mode more clearly, and are easier to use across mixed screen sizes.
 
+## Progress Update - May 18, 2026 - Bay View / Printing / Tech Alias Refinement
+
+- Adjusted board risk-light language to read more naturally for the team:
+  - `Critical`
+  - `Moderate`
+  - `Good`
+- Added cleaner briefing print behavior:
+  - dedicated single-sheet print layout
+  - white paper-friendly output instead of full dark board styling
+  - note areas for advisor follow-up and tech questions
+  - print support for both Morning Briefing and Afternoon Brief
+- Expanded technician-name extraction and alias handling so the system can better recognize short AutoFlow/Tekmetric-style names such as:
+  - `L Cervantes`
+  - `Jonathan L`
+  - `TC Charleston`
+  - `Steve C`
+  - plus shop-routing aliases like `Shop HitList` and `DI Testing`
+- Added explanation sections to the Bay Performance board so the team can understand:
+  - what each score means
+  - what practical actions raise each score
+
 ### Git / Branch
 
 - Active branch: `ai-build-stabilization`

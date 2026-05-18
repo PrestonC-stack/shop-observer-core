@@ -252,12 +252,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function riskLight(level) {
             const normalized = String(level || "NORMAL").toUpperCase();
             if (normalized === "CRITICAL" || normalized === "RED") {
-                return { label: "Red", cls: "bg-red-500 text-white" };
+                return { label: "Critical", cls: "bg-red-500 text-white" };
             }
             if (normalized === "YELLOW") {
-                return { label: "Yellow", cls: "bg-amber-400 text-zinc-950" };
+                return { label: "Moderate", cls: "bg-amber-400 text-zinc-950" };
             }
-            return { label: "Green", cls: "bg-emerald-500 text-zinc-950" };
+            return { label: "Good", cls: "bg-emerald-500 text-zinc-950" };
         }
 
         function roleMatches(job) {
@@ -884,7 +884,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         '</div>' +
                         '<div class="rounded-2xl bg-zinc-900 p-5 text-xs text-zinc-400">Generated: ' + escapeHtml(payload.timestamp || "--") + "</div>";
                     document.getElementById("job-modal").style.display = "flex";
-                    document.getElementById("print-briefing").addEventListener("click", () => window.print());
+                    document.getElementById("print-briefing").addEventListener("click", () => openPrintWindow("Morning Briefing", "Quick team focal point for P1/P2 work and lunch reset planning.", lines, payload.timestamp || "--"));
                     document.getElementById("afternoon-briefing").addEventListener("click", loadAfternoonBriefing);
                     renderHermesSummary({ summary: payload.briefing || "No briefing available.", timestamp: payload.timestamp || "--" });
                 })
@@ -905,8 +905,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         '<div class="rounded-2xl bg-zinc-900 p-5 text-sm leading-relaxed text-zinc-100"><ol class="space-y-3 list-decimal pl-5">' +
                         lines.map((line) => '<li>' + escapeHtml(line) + '</li>').join("") +
                         '</ol></div>' +
+                        '<div class="flex flex-wrap gap-2">' +
+                        '<button id="print-afternoon-briefing" class="rounded-2xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900" type="button">Print Briefing</button>' +
+                        '</div>' +
                         '<div class="rounded-2xl bg-zinc-900 p-5 text-xs text-zinc-400">Generated: ' + escapeHtml(payload.timestamp || "--") + '</div>';
                     document.getElementById("job-modal").style.display = "flex";
+                    document.getElementById("print-afternoon-briefing").addEventListener("click", () => openPrintWindow("Afternoon Brief", "Post-lunch rollover check for remaining P1/P2 pressure and closeout opportunities.", lines, payload.timestamp || "--"));
                     renderHermesSummary({ summary: payload.briefing || "No briefing available.", timestamp: payload.timestamp || "--" });
                 })
                 .catch(() => showToast("Afternoon brief unavailable right now.", "error"));
@@ -922,6 +926,56 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             document.getElementById("job-modal").style.display = "flex";
             wireModalActions();
             setModalMode("hermes");
+        }
+
+        function openPrintWindow(title, subtitle, lines, timestamp) {
+            const printWindow = window.open("", "_blank", "width=900,height=760");
+            if (!printWindow) {
+                showToast("Popup blocked. Allow popups to print the briefing.", "error");
+                return;
+            }
+            const safeLines = (Array.isArray(lines) ? lines : []).filter(Boolean);
+            const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>${escapeHtml(title)}</title>
+    <style>
+        @page { size: auto; margin: 0.5in; }
+        body { font-family: Arial, sans-serif; color: #111; background: #fff; margin: 0; }
+        .sheet { max-width: 8in; margin: 0 auto; padding: 0.1in 0; }
+        h1 { margin: 0; font-size: 22px; }
+        .sub { margin-top: 6px; color: #444; font-size: 12px; }
+        ol { margin: 18px 0 0 20px; padding: 0; }
+        li { margin-bottom: 10px; line-height: 1.35; font-size: 13px; }
+        .meta { margin-top: 14px; font-size: 11px; color: #666; }
+        .notes { margin-top: 18px; }
+        .label { font-weight: bold; font-size: 12px; }
+        .box { border: 1px solid #bbb; min-height: 64px; margin-top: 6px; padding: 8px; }
+    </style>
+</head>
+<body>
+    <div class="sheet">
+        <h1>${escapeHtml(title)}</h1>
+        <div class="sub">${escapeHtml(subtitle)}</div>
+        <ol>${safeLines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ol>
+        <div class="notes">
+            <div class="label">Advisor notes / to-dos</div>
+            <div class="box"></div>
+        </div>
+        <div class="notes">
+            <div class="label">Tech follow-ups / questions to answer</div>
+            <div class="box"></div>
+        </div>
+        <div class="meta">Generated: ${escapeHtml(timestamp || "--")}</div>
+    </div>
+</body>
+</html>`;
+            printWindow.document.open();
+            printWindow.document.write(html);
+            printWindow.document.close();
+            printWindow.focus();
+            printWindow.print();
         }
 
         function submitBoardAction() {
@@ -1422,6 +1476,28 @@ def bay_performance():
         <div class="mt-8 rounded-3xl border border-zinc-800 bg-zinc-900 p-6">
             <h2 class="text-2xl font-bold">Live Message</h2>
             <p class="mt-4 text-2xl leading-relaxed text-zinc-200">Keep the bays moving, keep labor clocked, and help the front stay ahead of the next customer promise.</p>
+        </div>
+        <div class="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-6">
+                <h2 class="text-2xl font-bold">What The Scores Mean</h2>
+                <div class="mt-4 space-y-3 text-sm text-zinc-300">
+                    <div><span class="font-semibold text-zinc-100">Shop Support Score:</span> overall health across communication, productivity, and clean data signals.</div>
+                    <div><span class="font-semibold text-zinc-100">Front Of House:</span> customer updates staying ahead of the surprise and advisor-side action gaps staying under control.</div>
+                    <div><span class="font-semibold text-zinc-100">Back Of House:</span> tech clock-in visibility plus usable inspection/DVI evidence supporting production flow.</div>
+                    <div><span class="font-semibold text-zinc-100">P1 Jobs:</span> true pressure items that need direct attention now.</div>
+                    <div><span class="font-semibold text-zinc-100">Productivity / Data Needs:</span> combined count of jobs where the board still needs clearer floor evidence or cleaner source data.</div>
+                </div>
+            </div>
+            <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-6">
+                <h2 class="text-2xl font-bold">How To Bring Them Up</h2>
+                <div class="mt-4 space-y-3 text-sm text-zinc-300">
+                    <div><span class="font-semibold text-zinc-100">Raise Front Of House:</span> log customer updates sooner, tighten callbacks, and clear waiting-approval drift early.</div>
+                    <div><span class="font-semibold text-zinc-100">Raise Back Of House:</span> keep labor clocked, finish DVI work cleanly, and tighten who is actively on each job.</div>
+                    <div><span class="font-semibold text-zinc-100">Raise Shop Support:</span> reduce flashing board helpers by correcting the real blocker instead of working around it.</div>
+                    <div><span class="font-semibold text-zinc-100">Lower P1 count:</span> land the plane faster on ready jobs and remove unknowns before they turn into customer-trust issues.</div>
+                    <div><span class="font-semibold text-zinc-100">Lower Productivity / Data Needs:</span> fix missing tech assignment, missing concern detail, missing DVI completion, and bad status usage.</div>
+                </div>
+            </div>
         </div>
     </div>
 </body>
