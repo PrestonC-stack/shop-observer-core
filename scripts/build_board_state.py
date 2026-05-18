@@ -180,6 +180,8 @@ def _collect_alerts(job: dict[str, Any], normalized_status: str, waiting_on: str
     ro = _normalize_text(job.get("ro"), "")
     technician_names = _split_people(job.get("technician", ""))
     known_active_tech = any(name.lower() in ACTIVE_TECHS for name in technician_names)
+    summary = _normalize_text(job.get("summary"), "")
+    notes = _normalize_text(job.get("notes"), "")
 
     if not ro or ro.lower() in {"unknown ro", "0", "unknown"}:
         alerts.append(
@@ -206,6 +208,24 @@ def _collect_alerts(job: dict[str, Any], normalized_status: str, waiting_on: str
                 "code": "missing_tech_assignment",
                 "severity": "warning",
                 "message": "No clear active technician assignment is available in the current evidence. Verify dispatch and ownership on the floor.",
+            }
+        )
+
+    if not technician_names or _normalize_text(job.get("technician"), "").lower() in {"", "unassigned", "unknown"}:
+        alerts.append(
+            {
+                "code": "missing_info",
+                "severity": "info" if lane == "P4" else "warning",
+                "message": "Key operating info is incomplete. Confirm technician assignment and core ticket details.",
+            }
+        )
+
+    if not summary and not notes:
+        alerts.append(
+            {
+                "code": "missing_info",
+                "severity": "info",
+                "message": "Job detail is thin right now. Tighten the customer concern or summary so the next handoff is clearer.",
             }
         )
 

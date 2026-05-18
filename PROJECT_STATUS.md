@@ -98,6 +98,10 @@
   - `state/hermes_feedback.jsonl`
 - `Morning Briefing` now opens a visible modal instead of only replacing the Hermes summary area.
 - Added an `Ask Hermes` control directly in the Hermes panel so the board can be used as a working helper surface.
+- Saved communication / productivity / data actions now calm their matching helper cues on subsequent board refreshes by overlaying recent action-state evidence from:
+  - `state/board_actions.jsonl`
+- Added an `Afternoon Brief` endpoint and modal path for post-lunch rollover review.
+- Analytics now include a first-pass shop support score plus communication/productivity/data clear counts instead of only raw tallies.
 
 ### Immediate Intent
 

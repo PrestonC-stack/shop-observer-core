@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Flask, Response, jsonify, request
 
@@ -42,6 +42,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .hidden-panel { display: none; }
         .chip-button { transition: transform 0.15s ease, opacity 0.15s ease; }
         .chip-button:hover { transform: translateY(-1px); opacity: 0.95; }
+        .modal-shell { max-height: 90vh; overflow-y: auto; }
         @keyframes pulseBorder {
             0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45); }
             70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0.0); }
@@ -140,7 +141,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
 
         <div id="job-modal" class="hidden-panel fixed inset-0 z-50 bg-black/70 p-4">
-            <div class="mx-auto mt-6 max-w-4xl rounded-3xl border border-zinc-700 bg-zinc-950 p-6">
+            <div class="modal-shell mx-auto mt-2 max-w-4xl rounded-3xl border border-zinc-700 bg-zinc-950 p-6">
                 <div class="flex items-start justify-between gap-4">
                     <div>
                         <div id="modal-title" class="text-2xl font-black text-zinc-100"></div>
@@ -161,6 +162,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let currentPanel = "board-panel";
         let activeModalRo = "";
         let activeModalMode = "details";
+        let latestActionState = {};
 
         function escapeHtml(value) {
             return String(value ?? "")
@@ -213,6 +215,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             window.__toastTimer = window.setTimeout(() => { toast.style.display = "none"; }, 2600);
         }
 
+        function actionStateFor(job) {
+            return latestActionState[String(job.ro || "")] || {};
+        }
+
         function formatAlert(job) {
             const alerts = Array.isArray(job.alerts) ? job.alerts : [];
             if (!alerts.length) return "";
@@ -223,9 +229,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function actionIcons(job) {
             const alerts = Array.isArray(job.alerts) ? job.alerts : [];
-            const hasCommunication = alerts.some((alert) => alert.code === "customer_follow_up_due");
-            const hasClock = alerts.some((alert) => alert.code === "verify_tech_clock_in");
-            const hasData = alerts.some((alert) => alert.code === "missing_ro" || alert.code === "status_mapping_gap" || alert.code === "missing_tech_assignment");
+            const actionState = actionStateFor(job);
+            const hasCommunication = alerts.some((alert) => alert.code === "customer_follow_up_due") && !actionState.communication_cleared;
+            const hasClock = alerts.some((alert) => alert.code === "verify_tech_clock_in") && !actionState.productivity_cleared;
+            const hasData = alerts.some((alert) =>
+                alert.code === "missing_ro" ||
+                alert.code === "status_mapping_gap" ||
+                alert.code === "missing_tech_assignment" ||
+                alert.code === "missing_info"
+            ) && !actionState.data_cleared;
 
             const phoneCls = hasCommunication ? " blink-icon border-amber-400 text-amber-300" : " border-zinc-700 text-zinc-500";
             const clockCls = hasClock ? " blink-icon border-red-500 text-red-300" : " border-zinc-700 text-zinc-500";
@@ -369,6 +381,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const alerts = jobs.reduce((sum, job) => sum + ((job.alerts || []).length), 0);
             const review = jobs.filter((job) => job.waiting_on === "Needs Review").length;
             const clocks = jobs.filter((job) => (job.alerts || []).some((alert) => alert.code === "verify_tech_clock_in")).length;
+            const communicationNeeds = jobs.filter((job) => (job.alerts || []).some((alert) => alert.code === "customer_follow_up_due")).length;
+            const dataNeeds = jobs.filter((job) => (job.alerts || []).some((alert) =>
+                alert.code === "missing_ro" ||
+                alert.code === "status_mapping_gap" ||
+                alert.code === "missing_tech_assignment" ||
+                alert.code === "missing_info"
+            )).length;
+            const clearCommunication = Math.max(0, jobs.length - communicationNeeds);
+            const clearProductivity = Math.max(0, jobs.length - clocks);
+            const clearData = Math.max(0, jobs.length - dataNeeds);
+            const scoreBase = Math.max(jobs.length, 1);
+            const shopScore = Math.round(((clearCommunication + clearProductivity + clearData) / (scoreBase * 3)) * 100);
 
             document.getElementById("metric-p1").textContent = String(p1);
             document.getElementById("metric-alerts").textContent = String(alerts);
@@ -394,12 +418,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .map(([owner, count]) => '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">' + escapeHtml(owner) + ":</span> " + count + "</div>")
                 .join("");
 
-            document.getElementById("status-patterns").innerHTML = statusHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No status patterns available yet.</div>';
-            document.getElementById("ownership-patterns").innerHTML = ownerHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No ownership patterns available yet.</div>';
+            document.getElementById("status-patterns").innerHTML =
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Shop support score:</span> ' + shopScore + '%</div>' +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Communication clear:</span> ' + clearCommunication + ' / ' + jobs.length + '</div>' +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Productivity clear:</span> ' + clearProductivity + ' / ' + jobs.length + '</div>' +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Data clear:</span> ' + clearData + ' / ' + jobs.length + '</div>' +
+                (statusHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No status patterns available yet.</div>');
+            document.getElementById("ownership-patterns").innerHTML =
+                (ownerHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No ownership patterns available yet.</div>') +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Advisor support load:</span> Mitch actions ' + communicationNeeds + ', Drew checks ' + clocks + ', Data cleanups ' + dataNeeds + '</div>';
         }
 
         function renderBoardState(boardState) {
             latestBoardState = boardState;
+            latestActionState = boardState.action_state || {};
             document.getElementById("board-updated-at").textContent = boardState.generated_at || "__TIMESTAMP__";
             renderLanes(boardState);
             renderSnapshot(boardState);
@@ -527,7 +559,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Status</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.workflow_status || "unknown") + "</div></div>" +
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Risk</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.risk_level || "NORMAL") + "</div></div>" +
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Advisor</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.advisor || "Unknown") + "</div></div>" +
-                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Technician</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.technician || "Unassigned") + "</div></div>" +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Technician</div><div class="mt-2 text-lg font-bold ' + ((String(job.technician || "").toLowerCase() === "unassigned" || !String(job.technician || "").trim()) ? "text-amber-300" : "text-zinc-100") + '">' + escapeHtml(job.technician || "Unassigned") + "</div></div>" +
                 "</div>" +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Next Move</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.next_action || "Keep momentum moving.") + "</div></div>" +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Summary</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.summary || "No summary available.") + "</div></div>" +
@@ -536,6 +568,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
             document.getElementById("job-modal").style.display = "block";
             wireModalActions();
+            const note = document.getElementById("modal-note");
+            if (note) {
+                note.focus();
+                note.scrollIntoView({ block: "center", behavior: "smooth" });
+            }
         }
 
         function wireModalActions() {
@@ -602,13 +639,43 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .then((payload) => {
                     document.getElementById("modal-title").textContent = "Morning Briefing";
                     document.getElementById("modal-subtitle").textContent = "Quick team focal point for P1/P2 work and lunch reset planning.";
+                    const lines = String(payload.briefing || "No briefing available.").split(/\\n+/).filter(Boolean);
                     document.getElementById("modal-body").innerHTML =
-                        '<div class="rounded-2xl bg-zinc-900 p-5 text-sm leading-relaxed text-zinc-100 whitespace-pre-wrap">' + escapeHtml(payload.briefing || "No briefing available.") + "</div>" +
+                        '<div class="rounded-2xl bg-zinc-900 p-5 text-sm leading-relaxed text-zinc-100"><ol class="space-y-3 list-decimal pl-5">' +
+                        lines.map((line) => '<li>' + escapeHtml(line) + '</li>').join("") +
+                        '</ol></div>' +
+                        '<div class="flex flex-wrap gap-2">' +
+                        '<button id="print-briefing" class="rounded-2xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900" type="button">Print Briefing</button>' +
+                        '<button id="afternoon-briefing" class="rounded-2xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900" type="button">Afternoon Brief</button>' +
+                        '</div>' +
                         '<div class="rounded-2xl bg-zinc-900 p-5 text-xs text-zinc-400">Generated: ' + escapeHtml(payload.timestamp || "--") + "</div>";
                     document.getElementById("job-modal").style.display = "block";
+                    document.getElementById("print-briefing").addEventListener("click", () => window.print());
+                    document.getElementById("afternoon-briefing").addEventListener("click", loadAfternoonBriefing);
                     renderHermesSummary({ summary: payload.briefing || "No briefing available.", timestamp: payload.timestamp || "--" });
                 })
                 .catch(() => showToast("Morning briefing unavailable right now.", "error"));
+        }
+
+        function loadAfternoonBriefing() {
+            fetch("/api/afternoon-briefing", { cache: "no-store" })
+                .then((response) => {
+                    if (!response.ok) throw new Error("Request failed");
+                    return response.json();
+                })
+                .then((payload) => {
+                    const lines = String(payload.briefing || "No briefing available.").split(/\\n+/).filter(Boolean);
+                    document.getElementById("modal-title").textContent = "Afternoon Brief";
+                    document.getElementById("modal-subtitle").textContent = "Post-lunch rollover check for remaining P1/P2 pressure and closeout opportunities.";
+                    document.getElementById("modal-body").innerHTML =
+                        '<div class="rounded-2xl bg-zinc-900 p-5 text-sm leading-relaxed text-zinc-100"><ol class="space-y-3 list-decimal pl-5">' +
+                        lines.map((line) => '<li>' + escapeHtml(line) + '</li>').join("") +
+                        '</ol></div>' +
+                        '<div class="rounded-2xl bg-zinc-900 p-5 text-xs text-zinc-400">Generated: ' + escapeHtml(payload.timestamp || "--") + '</div>';
+                    document.getElementById("job-modal").style.display = "block";
+                    renderHermesSummary({ summary: payload.briefing || "No briefing available.", timestamp: payload.timestamp || "--" });
+                })
+                .catch(() => showToast("Afternoon brief unavailable right now.", "error"));
         }
 
         function openHermesAskModal() {
@@ -644,6 +711,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     if (panel) panel.textContent = payload.message || "Update saved.";
                     showToast(payload.message || "Update saved.");
                     note.value = "";
+                    refreshBoard();
                 })
                 .catch(() => showToast("Unable to save that update right now.", "error"));
         }
@@ -700,6 +768,83 @@ def _append_jsonl(path, payload):
         handle.write(json.dumps(payload) + "\n")
 
 
+def _read_jsonl(path):
+    if not os.path.exists(path):
+        return []
+    rows = []
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(payload, dict):
+                    rows.append(payload)
+    except Exception:
+        return []
+    return rows
+
+
+def _latest_action_state():
+    state = {}
+    horizon = datetime.now() - timedelta(hours=12)
+    for row in _read_jsonl(BOARD_ACTION_LOG_PATH):
+        ro = str(row.get("ro", "")).strip()
+        action_type = str(row.get("action_type", "")).strip()
+        if not ro or not action_type:
+            continue
+        try:
+            stamp = datetime.strptime(str(row.get("timestamp", "")), "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            stamp = datetime.now()
+        if stamp < horizon:
+            continue
+        entry = state.setdefault(ro, {})
+        entry[f"{action_type}_cleared"] = True
+        entry[f"{action_type}_updated_at"] = stamp.strftime("%Y-%m-%d %H:%M:%S")
+    return state
+
+
+def _apply_action_state(board_state):
+    if not isinstance(board_state, dict):
+        return board_state
+    action_state = _latest_action_state()
+    jobs = board_state.get("jobs", [])
+    if not isinstance(jobs, list):
+        board_state["action_state"] = action_state
+        return board_state
+
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        ro = str(job.get("ro", "")).strip()
+        ro_state = action_state.get(ro, {})
+        alerts = job.get("alerts", [])
+        if not isinstance(alerts, list):
+            alerts = []
+        filtered_alerts = []
+        for alert in alerts:
+            code = alert.get("code") if isinstance(alert, dict) else ""
+            if code == "customer_follow_up_due" and ro_state.get("communication_cleared"):
+                continue
+            if code == "verify_tech_clock_in" and ro_state.get("productivity_cleared"):
+                continue
+            if code in {"missing_ro", "status_mapping_gap", "missing_tech_assignment", "missing_info"} and ro_state.get("data_cleared"):
+                continue
+            filtered_alerts.append(alert)
+        job["alerts"] = filtered_alerts
+        if ro_state:
+            job["action_state"] = ro_state
+
+    board_state["open_alert_count"] = sum(len(job.get("alerts", [])) for job in jobs if isinstance(job, dict))
+    board_state["action_state"] = action_state
+    return board_state
+
+
 def _fallback_jobs_payload(reason="autoflow_unavailable"):
     return {
         "source": "fallback",
@@ -725,11 +870,11 @@ def _load_board_state():
         with open(BOARD_STATE_PATH, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
         if isinstance(payload, dict):
-            return payload
+            return _apply_action_state(payload)
     except Exception:
         pass
 
-    return {
+    return _apply_action_state({
         "source": "board_rules_v1",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "count": 0,
@@ -738,7 +883,7 @@ def _load_board_state():
         "waiting_on_counts": {"Mitch": 0, "Drew": 0, "Preston": 0, "External Hold": 0, "Needs Review": 0},
         "open_alert_count": 0,
         "message": "No board_state.json found. Run python scripts/build_board_state.py first.",
-    }
+    })
 
 
 def _find_job(ro):
@@ -943,6 +1088,31 @@ def api_morning_briefing():
         )
     if not p1_jobs and not p2_jobs:
         lines.append("No major fires right now. Keep momentum steady, protect customer trust, and prepare the next handoff early.")
+
+    return jsonify({"briefing": "\n".join(lines), "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+
+
+@app.route("/api/afternoon-briefing")
+def api_afternoon_briefing():
+    board_state = _load_board_state()
+    jobs = board_state.get("jobs", []) if isinstance(board_state, dict) else []
+    p1_jobs = [job for job in jobs if isinstance(job, dict) and job.get("priority_lane") == "P1"]
+    p2_jobs = [job for job in jobs if isinstance(job, dict) and job.get("priority_lane") == "P2"]
+    ready_jobs = [
+        job for job in jobs
+        if isinstance(job, dict) and job.get("workflow_status") in {"ready", "finished", "advisor_finalize_ro"}
+    ]
+    unresolved = [job for job in jobs if isinstance(job, dict) and job.get("waiting_on") == "Needs Review"]
+
+    lines = [
+        f"Afternoon rollover: {len(p1_jobs)} P1 job(s) and {len(p2_jobs)} P2 job(s) still need protection before close of day."
+    ]
+    if ready_jobs:
+        lines.append("Low-hanging closeouts: " + "; ".join(f"{job.get('ro', 'Unknown RO')} for {job.get('customer', 'Unknown Customer')}" for job in ready_jobs[:4]))
+    if unresolved:
+        lines.append(f"Cleanup watch: {len(unresolved)} job(s) still need stronger mapping or ownership cleanup before the late-day rush.")
+    if not ready_jobs and not unresolved:
+        lines.append("The afternoon board looks controlled. Keep customer promises tight and clear the final handoffs before close.")
 
     return jsonify({"briefing": "\n".join(lines), "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
 
