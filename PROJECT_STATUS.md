@@ -56,6 +56,32 @@
 3. Add explicit walkthrough / customer-contact / expectation-timer compliance checks
 4. Add technician productivity and drift analytics once the proper technician metrics export is wired in
 
+## Progress Update - May 18, 2026 - Board State Phase 2
+
+- Tightened board-state status mapping for current live AutoFlow statuses such as:
+  - `call_shop`
+  - `parts`
+  - `finished`
+  - `unknown`
+- Added a board-state-driven dashboard view that now reads `/api/board-state` directly instead of acting as a placeholder shell
+- Added Board / Mitch / Drew / Preston helper views in the dashboard UI
+- Added stronger helper cards for:
+  - `Action Now`
+  - `Incoming Soon`
+  - `All Jobs`
+  - `What Do I Do Next?`
+- Added more explicit alerts for:
+  - missing tech assignment on production-controlled work
+  - status-mapping gaps
+  - customer follow-up due
+  - verify tech clock-in
+- Hermes summary now reports:
+  - P1 action pressure
+  - P2 action gap
+  - productivity watch
+  - missing RO cleanup
+  - unresolved intelligence gaps
+
 ### Git / Branch
 
 - Active branch: `ai-build-stabilization`
