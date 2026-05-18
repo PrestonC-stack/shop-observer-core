@@ -36,6 +36,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .pill { border: 1px solid rgba(255,255,255,0.12); }
         .role-tab.active { background: #18181b; color: #fafafa; border-color: #3f3f46; }
         .pulse-card { animation: pulseBorder 1.6s infinite; }
+        .blink-icon { animation: pulseBorder 1.2s infinite; }
+        .hidden-panel { display: none; }
         @keyframes pulseBorder {
             0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45); }
             70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0.0); }
@@ -59,13 +61,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
 
         <div class="mt-5 flex flex-wrap gap-2">
+            <button class="top-tab active rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold" data-panel="board-panel">Board</button>
+            <button class="top-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-panel="analytics-panel">Analytics</button>
+            <button id="morning-briefing" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">Morning Briefing</button>
+        </div>
+
+        <div class="mt-3 flex flex-wrap gap-2">
             <button class="role-tab active rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold" data-role="board">Board</button>
             <button class="role-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-role="mitch">Mitch</button>
             <button class="role-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-role="drew">Drew</button>
             <button class="role-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-role="preston">Preston</button>
         </div>
 
-        <div class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <div id="board-panel" class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
             <section class="lg:col-span-8">
                 <div id="lane-grid" class="grid grid-cols-1 gap-4 xl:grid-cols-4"></div>
             </section>
@@ -91,11 +99,57 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
             </section>
         </div>
+
+        <div id="analytics-panel" class="mt-5 hidden-panel space-y-4">
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
+                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">P1 Jobs</div>
+                    <div id="metric-p1" class="mt-2 text-4xl font-black text-red-400">0</div>
+                </div>
+                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Open Alerts</div>
+                    <div id="metric-alerts" class="mt-2 text-4xl font-black text-amber-400">0</div>
+                </div>
+                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Needs Review</div>
+                    <div id="metric-review" class="mt-2 text-4xl font-black text-blue-400">0</div>
+                </div>
+                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Clock-In Checks</div>
+                    <div id="metric-clocks" class="mt-2 text-4xl font-black text-emerald-400">0</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+                    <h2 class="text-xl font-bold">Status Patterns</h2>
+                    <div id="status-patterns" class="mt-4 space-y-3"></div>
+                </div>
+                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+                    <h2 class="text-xl font-bold">Ownership Load</h2>
+                    <div id="ownership-patterns" class="mt-4 space-y-3"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="job-modal" class="hidden-panel fixed inset-0 z-50 bg-black/70 p-4">
+            <div class="mx-auto mt-8 max-w-3xl rounded-3xl border border-zinc-700 bg-zinc-950 p-6">
+                <div class="flex items-start justify-between gap-4">
+                    <div>
+                        <div id="modal-title" class="text-2xl font-black text-zinc-100"></div>
+                        <div id="modal-subtitle" class="mt-1 text-sm text-zinc-400"></div>
+                    </div>
+                    <button id="close-modal" class="rounded-2xl border border-zinc-700 px-3 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900">Close</button>
+                </div>
+                <div id="modal-body" class="mt-5 space-y-4"></div>
+            </div>
+        </div>
     </div>
 
     <script>
         let currentRole = "board";
         let latestBoardState = null;
+        let currentPanel = "board-panel";
 
         function escapeHtml(value) {
             return String(value ?? "")
@@ -114,6 +168,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 P4: { cls: "lane-p4", title: "P4", subtitle: "Stable • External hold" }
             };
             return map[lane] || map.P3;
+        }
+
+        function riskLight(level) {
+            const normalized = String(level || "NORMAL").toUpperCase();
+            if (normalized === "CRITICAL" || normalized === "RED") {
+                return { label: "Red", cls: "bg-red-500 text-white" };
+            }
+            if (normalized === "YELLOW") {
+                return { label: "Yellow", cls: "bg-amber-400 text-zinc-950" };
+            }
+            return { label: "Green", cls: "bg-emerald-500 text-zinc-950" };
         }
 
         function roleMatches(job) {
@@ -135,16 +200,38 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             '</div>';
         }
 
+        function actionIcons(job) {
+            const alerts = Array.isArray(job.alerts) ? job.alerts : [];
+            const hasCommunication = alerts.some((alert) => alert.code === "customer_follow_up_due");
+            const hasClock = alerts.some((alert) => alert.code === "verify_tech_clock_in");
+            const hasData = alerts.some((alert) => alert.code === "missing_ro" || alert.code === "status_mapping_gap");
+
+            const phoneCls = hasCommunication ? " blink-icon border-amber-400 text-amber-300" : " border-zinc-700 text-zinc-500";
+            const clockCls = hasClock ? " blink-icon border-red-500 text-red-300" : " border-zinc-700 text-zinc-500";
+            const dataCls = hasData ? " blink-icon border-blue-500 text-blue-300" : " border-zinc-700 text-zinc-500";
+
+            return (
+                '<div class="mt-3 flex flex-wrap gap-2">' +
+                    '<button class="rounded-full border px-3 py-1 text-xs font-semibold' + phoneCls + '" title="Customer communication helper">☎ Communication</button>' +
+                    '<button class="rounded-full border px-3 py-1 text-xs font-semibold' + clockCls + '" title="Productivity / clock-in helper">⏱ Productivity</button>' +
+                    '<button class="rounded-full border px-3 py-1 text-xs font-semibold' + dataCls + '" title="Data quality helper">🧠 Data</button>' +
+                '</div>'
+            );
+        }
+
         function renderJobCard(job) {
-            const pulse = (job.risk_level === "CRITICAL" || job.risk_level === "RED" || (job.alerts || []).length > 0) ? " pulse-card" : "";
+            const alerts = Array.isArray(job.alerts) ? job.alerts : [];
+            const alertCodes = alerts.map((alert) => alert.code || "");
+            const pulse = (alertCodes.includes("verify_tech_clock_in") || alertCodes.includes("missing_tech_assignment")) ? " pulse-card" : "";
             const incoming = job.incoming_soon && job.incoming_soon.active
                 ? '<div class="mt-3 rounded-xl bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">Incoming soon: ' +
                     escapeHtml(job.incoming_soon.next_stage || job.incoming_soon.reason || "Next handoff approaching.") +
                   '</div>'
                 : "";
+            const light = riskLight(job.risk_level);
 
             return (
-                '<article class="job-card rounded-2xl p-4' + pulse + '">' +
+                '<article class="job-card rounded-2xl p-4 cursor-pointer' + pulse + '" data-ro="' + escapeHtml(job.ro || "") + '">' +
                     '<div class="flex items-start justify-between gap-3">' +
                         '<div>' +
                             '<div class="text-lg font-black">' + escapeHtml(job.ro || "Unknown RO") + '</div>' +
@@ -152,12 +239,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                             '<div class="text-xs text-zinc-400">' + escapeHtml(job.vehicle || "Unknown Vehicle") + '</div>' +
                         '</div>' +
                         '<div class="space-y-1 text-right">' +
-                            '<div class="rounded-full pill px-2 py-1 text-[11px] font-bold text-zinc-100">' + escapeHtml(job.risk_level || "NORMAL") + '</div>' +
+                            '<div class="rounded-full pill px-2 py-1 text-[11px] font-bold ' + light.cls + '">' + escapeHtml(light.label) + '</div>' +
                             '<div class="text-[11px] text-zinc-400">Waiting on ' + escapeHtml(job.waiting_on || "Needs Review") + '</div>' +
                         '</div>' +
                     '</div>' +
                     '<div class="mt-3 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Status:</span> ' + escapeHtml(job.workflow_status || "unknown") + '</div>' +
                     '<div class="mt-2 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Next move:</span> ' + escapeHtml(job.next_action || "Keep momentum moving.") + '</div>' +
+                    actionIcons(job) +
                     formatAlert(job) +
                     incoming +
                 '</article>'
@@ -268,6 +356,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             renderLanes(boardState);
             renderSnapshot(boardState);
             renderNextActions(boardState);
+            renderAnalytics(boardState);
+            wireJobCards();
         }
 
         function renderHermesSummary(payload) {
@@ -314,6 +404,86 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             loadHermesSummary();
         }
 
+        function renderAnalytics(boardState) {
+            const jobs = Array.isArray(boardState.jobs) ? boardState.jobs : [];
+            const p1 = jobs.filter((job) => job.priority_lane === "P1").length;
+            const alerts = jobs.reduce((sum, job) => sum + ((job.alerts || []).length), 0);
+            const review = jobs.filter((job) => job.waiting_on === "Needs Review").length;
+            const clocks = jobs.filter((job) => (job.alerts || []).some((alert) => alert.code === "verify_tech_clock_in")).length;
+
+            document.getElementById("metric-p1").textContent = String(p1);
+            document.getElementById("metric-alerts").textContent = String(alerts);
+            document.getElementById("metric-review").textContent = String(review);
+            document.getElementById("metric-clocks").textContent = String(clocks);
+
+            const statusCounts = {};
+            const ownerCounts = {};
+            jobs.forEach((job) => {
+                const status = job.workflow_status || "unknown";
+                const owner = job.waiting_on || "Needs Review";
+                statusCounts[status] = (statusCounts[status] || 0) + 1;
+                ownerCounts[owner] = (ownerCounts[owner] || 0) + 1;
+            });
+
+            const statusHtml = Object.entries(statusCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8)
+                .map(([status, count]) => '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">' + escapeHtml(status) + ':</span> ' + count + '</div>')
+                .join("");
+            const ownerHtml = Object.entries(ownerCounts)
+                .sort((a, b) => b[1] - a[1])
+                .map(([owner, count]) => '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">' + escapeHtml(owner) + ':</span> ' + count + '</div>')
+                .join("");
+
+            document.getElementById("status-patterns").innerHTML = statusHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No status patterns available yet.</div>';
+            document.getElementById("ownership-patterns").innerHTML = ownerHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No ownership patterns available yet.</div>';
+        }
+
+        function wireJobCards() {
+            document.querySelectorAll("[data-ro]").forEach((card) => {
+                card.addEventListener("click", () => openJobModal(card.dataset.ro || ""));
+            });
+        }
+
+        function openJobModal(ro) {
+            if (!latestBoardState) return;
+            const job = (latestBoardState.jobs || []).find((item) => String(item.ro || "") === String(ro));
+            if (!job) return;
+
+            document.getElementById("modal-title").textContent = job.ro + " • " + (job.customer || "Unknown Customer");
+            document.getElementById("modal-subtitle").textContent = (job.vehicle || "Unknown Vehicle") + " • Waiting on " + (job.waiting_on || "Needs Review");
+
+            const alerts = (job.alerts || []).map((alert) =>
+                '<li class="mb-2">' + escapeHtml(alert.message || "Attention needed.") + '</li>'
+            ).join("");
+
+            document.getElementById("modal-body").innerHTML =
+                '<div class="grid grid-cols-1 gap-4 md:grid-cols-2">' +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Status</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.workflow_status || "unknown") + '</div></div>' +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Risk</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.risk_level || "NORMAL") + '</div></div>' +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Advisor</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.advisor || "Unknown") + '</div></div>' +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Technician</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.technician || "Unassigned") + '</div></div>' +
+                '</div>' +
+                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Next Move</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.next_action || "Keep momentum moving.") + '</div></div>' +
+                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Summary</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.summary || "No summary available.") + '</div></div>' +
+                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Helper Alerts</div><ul class="mt-2 text-zinc-100">' + (alerts || '<li>No active alerts.</li>') + '</ul></div>';
+
+            document.getElementById("job-modal").style.display = "block";
+        }
+
+        function closeJobModal() {
+            document.getElementById("job-modal").style.display = "none";
+        }
+
+        function setTopPanel(panelId) {
+            currentPanel = panelId;
+            document.querySelectorAll(".top-tab").forEach((button) => {
+                button.classList.toggle("active", button.dataset.panel === panelId);
+            });
+            document.getElementById("board-panel").style.display = panelId === "board-panel" ? "grid" : "none";
+            document.getElementById("analytics-panel").style.display = panelId === "analytics-panel" ? "block" : "none";
+        }
+
         function setRole(role) {
             currentRole = role;
             document.querySelectorAll(".role-tab").forEach((button) => {
@@ -324,10 +494,28 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }
 
+        function loadMorningBriefing() {
+            fetch("/api/morning-briefing", { cache: "no-store" })
+                .then((response) => {
+                    if (!response.ok) throw new Error("Request failed");
+                    return response.json();
+                })
+                .then((payload) => {
+                    renderHermesSummary({ summary: payload.briefing || "No briefing available.", timestamp: payload.timestamp || "--" });
+                    setTopPanel("board-panel");
+                })
+                .catch(() => renderHermesSummary({ summary: "Morning briefing unavailable.", timestamp: "--" }));
+        }
+
         document.addEventListener("DOMContentLoaded", () => {
             document.getElementById("refresh-jobs").addEventListener("click", refreshBoard);
+            document.getElementById("close-modal").addEventListener("click", closeJobModal);
+            document.getElementById("morning-briefing").addEventListener("click", loadMorningBriefing);
             document.querySelectorAll(".role-tab").forEach((button) => {
                 button.addEventListener("click", () => setRole(button.dataset.role || "board"));
+            });
+            document.querySelectorAll(".top-tab").forEach((button) => {
+                button.addEventListener("click", () => setTopPanel(button.dataset.panel || "board-panel"));
             });
             refreshBoard();
             window.setInterval(refreshBoard, 30000);
@@ -475,6 +663,31 @@ def api_hermes_summary():
         )
     except Exception:
         return jsonify({"summary": "Hermes temporarily unavailable.", "timestamp": "--"})
+
+
+@app.route("/api/morning-briefing")
+def api_morning_briefing():
+    board_state = _load_board_state()
+    jobs = board_state.get("jobs", []) if isinstance(board_state, dict) else []
+    p1_jobs = [job for job in jobs if isinstance(job, dict) and job.get("priority_lane") == "P1"]
+    p2_jobs = [job for job in jobs if isinstance(job, dict) and job.get("priority_lane") == "P2"]
+    clock_alerts = [
+        job for job in jobs
+        if isinstance(job, dict) and any(alert.get("code") == "verify_tech_clock_in" for alert in job.get("alerts", []))
+    ]
+
+    lines = []
+    lines.append(f"Morning focal point: {len(p1_jobs)} P1 job(s) and {len(p2_jobs)} P2 job(s) need the strongest attention from 8 to noon.")
+    if p1_jobs:
+        lines.append("Top fires: " + "; ".join(f"{job.get('ro', 'Unknown RO')} waiting on {job.get('waiting_on', 'Needs Review')}" for job in p1_jobs[:3]))
+    if p2_jobs:
+        lines.append("Action gap: " + "; ".join(f"{job.get('ro', 'Unknown RO')} in {job.get('workflow_status', 'unknown')}" for job in p2_jobs[:4]))
+    if clock_alerts:
+        lines.append(f"Productivity watch: {len(clock_alerts)} job(s) need a quick tech clock-in verification before the lunch reset.")
+    if not p1_jobs and not p2_jobs:
+        lines.append("No major fires right now. Keep momentum steady, protect customer trust, and prepare the next handoff early.")
+
+    return jsonify({"briefing": "\n".join(lines), "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
 
 
 if __name__ == "__main__":
