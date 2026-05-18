@@ -9,3 +9,5 @@ state/active_shop_state.jsoncloudflared.exe
 state/active_ros.json
 state/shop_state.json
 state/board_state.json
+state/board_actions.jsonl
+state/hermes_feedback.jsonl

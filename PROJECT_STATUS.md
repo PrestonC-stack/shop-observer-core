@@ -82,6 +82,33 @@
   - missing RO cleanup
   - unresolved intelligence gaps
 
+## Progress Update - May 18, 2026 - Working Helper Actions
+
+- The board helper cues are now interactive instead of display-only:
+  - `☎ Communication`
+  - `⏱ Productivity`
+  - `🧠 Data`
+- Clicking a helper cue now opens a job action modal with a mode-specific prompt.
+- Added a lightweight board action log endpoint:
+  - `POST /api/board-action`
+- Added a lightweight Hermes question / feedback endpoint:
+  - `POST /api/hermes-feedback`
+- Added local runtime logs:
+  - `state/board_actions.jsonl`
+  - `state/hermes_feedback.jsonl`
+- `Morning Briefing` now opens a visible modal instead of only replacing the Hermes summary area.
+- Added an `Ask Hermes` control directly in the Hermes panel so the board can be used as a working helper surface.
+
+### Immediate Intent
+
+- This is the first practical write-capable layer for the board.
+- It does **not** write back into AutoFlow or Tekmetric yet.
+- It gives the team a way to:
+  - log customer updates
+  - log productivity/floor checks
+  - flag board/data issues
+  - ask Hermes targeted next-step questions
+
 ### Git / Branch
 
 - Active branch: `ai-build-stabilization`
