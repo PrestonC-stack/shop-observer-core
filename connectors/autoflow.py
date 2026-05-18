@@ -391,9 +391,18 @@ def merge_work_order_and_dvi(
             _first_value(
                 work_order,
                 ("technician", "name"),
+                ("technician",),
                 ("assignedTech", "name"),
+                ("assignedTech",),
                 ("assigned_technician", "name"),
+                ("assigned_technician",),
                 ("technicianName",),
+                ("tech_name",),
+                ("assignedTechName",),
+                ("tech",),
+                ("assignedTo",),
+                ("assigned_to",),
+                ("labor", "technicianName"),
                 default="Unassigned",
             )
         ),

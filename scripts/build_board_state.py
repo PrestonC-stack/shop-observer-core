@@ -9,7 +9,14 @@ ROOT = Path(__file__).resolve().parents[1]
 STATE_DIR = ROOT / "state"
 SHOP_STATE_FILE = STATE_DIR / "shop_state.json"
 BOARD_STATE_FILE = STATE_DIR / "board_state.json"
-ACTIVE_TECHS = {"luis cervantes", "jonathan leithoff", "johnathanl", "tc charleston", "steve chubb"}
+ACTIVE_TECH_ALIASES = {
+    "luis cervantes": {"luis cervantes", "l cervantes", "cervantes", "l. cervantes"},
+    "jonathan leithoff": {"jonathan leithoff", "jonathan l", "jonathan l.", "johnathanl", "jon leithoff"},
+    "tc charleston": {"tc charleston", "t c charleston", "charleston"},
+    "steve chubb": {"steve chubb", "steve c", "steve c.", "chubb"},
+    "shop hitlist": {"shop hitlist", "shophitlist", "shop hit list"},
+    "di testing": {"di testing", "d i testing"},
+}
 ACTIVE_ADVISORS = {"mitch callahan", "drew mize", "admin user"}
 
 
@@ -83,6 +90,20 @@ def _split_people(value: Any) -> list[str]:
     if not text:
         return []
     return [_normalize_text(part, "") for part in text.split(",") if _normalize_text(part, "")]
+
+
+def _normalize_person_key(name: str) -> str:
+    return "".join(ch for ch in _normalize_text(name, "").lower() if ch.isalnum() or ch.isspace()).strip()
+
+
+def _is_active_tech_name(name: str) -> bool:
+    normalized = _normalize_person_key(name)
+    if not normalized:
+        return False
+    for aliases in ACTIVE_TECH_ALIASES.values():
+        if normalized in {_normalize_person_key(alias) for alias in aliases}:
+            return True
+    return False
 
 
 def _load_shop_state() -> dict[str, Any]:
@@ -179,7 +200,7 @@ def _collect_alerts(job: dict[str, Any], normalized_status: str, waiting_on: str
     alerts: list[dict[str, str]] = []
     ro = _normalize_text(job.get("ro"), "")
     technician_names = _split_people(job.get("technician", ""))
-    known_active_tech = any(name.lower() in ACTIVE_TECHS for name in technician_names)
+    known_active_tech = any(_is_active_tech_name(name) for name in technician_names)
     summary = _normalize_text(job.get("summary"), "")
     notes = _normalize_text(job.get("notes"), "")
     dvi_status = _normalize_text(job.get("dvi_status"), "").lower()
@@ -395,7 +416,7 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
             "dvi_status": _normalize_text(job.get("dvi_status"), "unknown"),
             "latest_activity": _normalize_text(job.get("latest_activity"), ""),
             "advisor_known": _normalize_text(job.get("advisor"), "").lower() in ACTIVE_ADVISORS,
-            "active_tech_detected": any(name.lower() in ACTIVE_TECHS for name in technicians),
+            "active_tech_detected": any(_is_active_tech_name(name) for name in technicians),
         },
     }
 
