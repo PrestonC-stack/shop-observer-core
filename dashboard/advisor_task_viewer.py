@@ -37,16 +37,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .alert-info { border-left: 4px solid #3b82f6; }
         .pill { border: 1px solid rgba(255,255,255,0.12); }
         .role-tab.active, .top-tab.active { background: #18181b; color: #fafafa; border-color: #3f3f46; }
-        .pulse-card { animation: pulseBorder 1.6s infinite; }
-        .blink-icon { animation: pulseBorder 1.2s infinite; }
+        .pulse-card { animation: pulseBorder 1.1s infinite; }
+        .blink-icon { animation: pulseBorder 0.9s infinite; }
         .hidden-panel { display: none; }
         .chip-button { transition: transform 0.15s ease, opacity 0.15s ease; }
         .chip-button:hover { transform: translateY(-1px); opacity: 0.95; }
         .modal-shell { max-height: 90vh; overflow-y: auto; }
+        .modal-mode-active { background: rgba(16, 185, 129, 0.18); border-color: rgb(16 185 129 / 0.95); color: #ecfdf5; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.22); }
         @keyframes pulseBorder {
-            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45); }
-            70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0.0); }
-            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.0); }
+            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.75), 0 0 18px rgba(245, 158, 11, 0.42); filter: brightness(1.05); }
+            50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.18), 0 0 24px rgba(245, 158, 11, 0.52); filter: brightness(1.18); }
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.0), 0 0 8px rgba(245, 158, 11, 0.18); filter: brightness(1.00); }
         }
     </style>
 </head>
@@ -69,6 +70,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <button class="top-tab active rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold" data-panel="board-panel">Board</button>
             <button class="top-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-panel="analytics-panel">Analytics</button>
             <button id="morning-briefing" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">Morning Briefing</button>
+            <a href="/bay-performance" target="_blank" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">Bay View</a>
         </div>
 
         <div class="mt-3 flex flex-wrap gap-2">
@@ -517,6 +519,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 communication: "Customer Update",
                 productivity: "Productivity Check",
                 data: "Board / Data Fix",
+                missing: "Missing Info",
                 hermes: "Ask Hermes",
                 details: "Quick Note"
             };
@@ -528,6 +531,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="communication" type="button">☎ Customer Update</button>' +
                         '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="productivity" type="button">⏱ Productivity Check</button>' +
                         '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="data" type="button">🧠 Board / Data Fix</button>' +
+                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="missing" type="button">⚠ Missing Info</button>' +
                         '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="hermes" type="button">Ask Hermes</button>' +
                     "</div>" +
                     '<div class="mt-4 text-sm font-semibold text-zinc-200" id="modal-mode-label">' + escapeHtml(labels[focusMode] || labels.details) + "</div>" +
@@ -591,6 +595,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 communication: "Customer Update",
                 productivity: "Productivity Check",
                 data: "Board / Data Fix",
+                missing: "Missing Info",
                 hermes: "Ask Hermes",
                 details: "Quick Note"
             };
@@ -598,6 +603,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 communication: "Log what was communicated to the customer, callback time, or new promise window.",
                 productivity: "Log what you found on the floor. Who is on it, is labor clocked, and what is blocking progress?",
                 data: "Log the board mismatch, missing RO, status cleanup, or data issue you want Hermes to learn from.",
+                missing: "Log what info is missing: technician assignment, customer concern detail, RO linkage, or anything else the board needs.",
                 hermes: "Ask Hermes a targeted question about this job, the blocker, or the next best move.",
                 details: "Log a quick support note so the board can help the next handoff."
             };
@@ -605,6 +611,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const note = document.getElementById("modal-note");
             if (label) label.textContent = labelMap[mode] || labelMap.details;
             if (note) note.placeholder = placeholderMap[mode] || placeholderMap.details;
+            document.querySelectorAll(".modal-mode").forEach((button) => {
+                button.classList.toggle("modal-mode-active", button.dataset.mode === mode);
+            });
         }
 
         function closeJobModal() {
@@ -687,6 +696,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }, "hermes");
             document.getElementById("job-modal").style.display = "block";
             wireModalActions();
+            setModalMode("hermes");
         }
 
         function submitBoardAction() {
@@ -912,6 +922,8 @@ def _hermes_answer(question, job=None, mode="general"):
             return lead + " On the floor, verify who is actively on it, whether labor is clocked, and what single blocker is keeping it from moving."
         if mode == "data":
             return lead + " Tighten the board evidence by fixing the RO linkage, status mapping, or ownership gap so the coaching becomes more precise."
+        if mode == "missing":
+            return lead + " The fastest win is to fill the missing operating info first: technician assignment, clearer concern detail, or a confirmed RO trail."
         if alerts:
             return lead + " Current helper alerts: " + " ".join(alerts[:2])
         return lead
@@ -971,6 +983,7 @@ def api_board_action():
         "communication": "Customer update saved. Keep the promise window visible and the next callback clear.",
         "productivity": "Productivity note saved. Advisors can now coach the next floor follow-up with context.",
         "data": "Board issue saved. This gives Hermes a cleaner trail to improve the board logic.",
+        "missing": "Missing-info note saved. The board can now coach the next cleanup step with more context.",
         "details": "Support note saved.",
     }
     return jsonify({"status": "received", "message": message_map.get(entry["action_type"], "Support note saved.")}), 200
@@ -1115,6 +1128,65 @@ def api_afternoon_briefing():
         lines.append("The afternoon board looks controlled. Keep customer promises tight and clear the final handoffs before close.")
 
     return jsonify({"briefing": "\n".join(lines), "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+
+
+@app.route("/bay-performance")
+def bay_performance():
+    board_state = _load_board_state()
+    jobs = board_state.get("jobs", []) if isinstance(board_state, dict) else []
+    p1 = len([job for job in jobs if isinstance(job, dict) and job.get("priority_lane") == "P1"])
+    communication_needs = len([
+        job for job in jobs
+        if isinstance(job, dict) and any(alert.get("code") == "customer_follow_up_due" for alert in job.get("alerts", []))
+    ])
+    productivity_needs = len([
+        job for job in jobs
+        if isinstance(job, dict) and any(alert.get("code") == "verify_tech_clock_in" for alert in job.get("alerts", []))
+    ])
+    data_needs = len([
+        job for job in jobs
+        if isinstance(job, dict) and any(alert.get("code") in {"missing_ro", "status_mapping_gap", "missing_tech_assignment", "missing_info"} for alert in job.get("alerts", []))
+    ])
+    total = max(len(jobs), 1)
+    support_score = round(((total - communication_needs) + (total - productivity_needs) + (total - data_needs)) / (total * 3) * 100)
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bay Performance Board</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen">
+    <div class="max-w-7xl mx-auto px-6 py-8">
+        <h1 class="text-5xl font-black tracking-wide">Bay Performance Board</h1>
+        <p class="mt-2 text-zinc-400">Live support view for technicians and shop momentum.</p>
+        <div class="mt-8 grid grid-cols-1 gap-6 md:grid-cols-4">
+            <div class="rounded-3xl border border-emerald-700 bg-emerald-950/30 p-6">
+                <div class="text-sm uppercase tracking-wide text-emerald-300">Shop Support Score</div>
+                <div class="mt-3 text-6xl font-black text-emerald-200">{support_score}%</div>
+            </div>
+            <div class="rounded-3xl border border-red-700 bg-red-950/30 p-6">
+                <div class="text-sm uppercase tracking-wide text-red-300">P1 Jobs</div>
+                <div class="mt-3 text-6xl font-black text-red-200">{p1}</div>
+            </div>
+            <div class="rounded-3xl border border-amber-700 bg-amber-950/30 p-6">
+                <div class="text-sm uppercase tracking-wide text-amber-300">Communication Needs</div>
+                <div class="mt-3 text-6xl font-black text-amber-200">{communication_needs}</div>
+            </div>
+            <div class="rounded-3xl border border-blue-700 bg-blue-950/30 p-6">
+                <div class="text-sm uppercase tracking-wide text-blue-300">Productivity / Data Needs</div>
+                <div class="mt-3 text-6xl font-black text-blue-200">{productivity_needs + data_needs}</div>
+            </div>
+        </div>
+        <div class="mt-8 rounded-3xl border border-zinc-800 bg-zinc-900 p-6">
+            <h2 class="text-2xl font-bold">Live Message</h2>
+            <p class="mt-4 text-2xl leading-relaxed text-zinc-200">Keep the bays moving, keep labor clocked, and help the front stay ahead of the next customer promise.</p>
+        </div>
+    </div>
+</body>
+</html>"""
+    return Response(html, mimetype="text/html")
 
 
 if __name__ == "__main__":
