@@ -7,7 +7,6 @@ from flask import Flask, Response, jsonify
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(CURRENT_DIR)
-ACTIVE_ROS_STATE_PATH = os.path.join(REPO_ROOT, "state", "active_ros.json")
 SHOP_STATE_PATH = os.path.join(REPO_ROOT, "state", "shop_state.json")
 BOARD_STATE_PATH = os.path.join(REPO_ROOT, "state", "board_state.json")
 
@@ -16,36 +15,6 @@ if REPO_ROOT not in sys.path:
 
 app = Flask(__name__)
 
-# ====================== HERMES SYSTEM PROMPT ======================
-HERMES_SYSTEM_PROMPT = """
-You are Hermes, Preston Callahan's operational intelligence layer for Callahan Auto & Diesel.
-
-Core Principles:
-- Momentum is everything. Never let jobs sit without a clear owner or next step.
-- Safety and liability come first.
-- Advisors must stay 3–5 steps ahead of technicians.
-- If the customer calls first, we already lost.
-- Technicians should not wait — move them to productive work immediately.
-- Near-complete jobs are high priority.
-- Document everything.
-
-Priority Rules:
-- P1: Near completion, promise time at risk, safety issue, money waiting, bay blocked.
-- P2: Missing information, no clear next step, DVI incomplete.
-- P3: Actively progressing under control.
-- P4: Legitimate external hold with customer updated.
-
-When recommending:
-- Best 2-3 jobs to attack next and why
-- Bottlenecks and how to clear them
-- Who owns the next move
-- Customer communication needed
-- When to escalate to Preston
-
-Tone: Direct, practical, confident. Speak like Preston.
-"""
-
-# ====================== WALLBOARD HTML ======================
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -55,106 +24,313 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; }
-        .p1 { border-left: 6px solid #ef4444; }
-        .p2 { border-left: 6px solid #f59e0b; }
-        .p3 { border-left: 6px solid #3b82f6; }
-        .p4 { border-left: 6px solid #6b7280; }
+        .lane-card { min-height: 24rem; }
+        .lane-p1 { border: 3px solid #dc2626; background: linear-gradient(180deg, rgba(127, 29, 29, 0.35), rgba(9, 9, 11, 1)); }
+        .lane-p2 { border: 3px solid #d97706; background: linear-gradient(180deg, rgba(120, 53, 15, 0.35), rgba(9, 9, 11, 1)); }
+        .lane-p3 { border: 3px solid #2563eb; background: linear-gradient(180deg, rgba(30, 64, 175, 0.30), rgba(9, 9, 11, 1)); }
+        .lane-p4 { border: 3px solid #16a34a; background: linear-gradient(180deg, rgba(20, 83, 45, 0.30), rgba(9, 9, 11, 1)); }
+        .job-card { border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(24, 24, 27, 0.92); }
+        .alert-action { border-left: 4px solid #dc2626; }
+        .alert-warning { border-left: 4px solid #f59e0b; }
+        .alert-info { border-left: 4px solid #3b82f6; }
+        .pill { border: 1px solid rgba(255,255,255,0.12); }
+        .role-tab.active { background: #18181b; color: #fafafa; border-color: #3f3f46; }
+        .pulse-card { animation: pulseBorder 1.6s infinite; }
+        @keyframes pulseBorder {
+            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45); }
+            70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0.0); }
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.0); }
+        }
     </style>
 </head>
 <body class="bg-zinc-950 text-zinc-100 min-h-screen">
-    <div class="max-w-screen-2xl mx-auto p-6">
-        <div class="flex justify-between items-center mb-8">
+    <div class="max-w-screen-2xl mx-auto px-4 py-6 md:px-6">
+        <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-                <h1 class="text-4xl font-bold">Country Club Advisor Command Board</h1>
-                <p class="text-zinc-400">Last Updated: __TIMESTAMP__</p>
+                <h1 class="text-4xl font-black tracking-wide">Shop Command Board</h1>
+                <p class="mt-1 text-sm text-zinc-400">Supportive AI copilot for momentum, customer trust, and handoff clarity.</p>
             </div>
-            <div class="flex items-center gap-3">
-                <button id="refresh-jobs" class="px-3 py-1 rounded-full text-sm font-medium bg-zinc-800 text-zinc-200 hover:bg-zinc-700" type="button">Refresh Jobs</button>
-                <span class="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-sm font-medium">● LIVE</span>
+            <div class="flex flex-wrap items-center gap-2">
+                <div class="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-300">
+                    Last Updated: <span id="board-updated-at">__TIMESTAMP__</span>
+                </div>
+                <button id="refresh-jobs" class="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-zinc-800" type="button">Refresh Board</button>
             </div>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <!-- P1–P4 Columns -->
-            <div class="lg:col-span-7 space-y-6">
-                <h2 class="text-2xl font-semibold mb-4">Jobs by Priority</h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="bg-zinc-900 rounded-xl p-5 p1">
-                        <h3 class="text-red-400 font-bold text-lg mb-3">🔴 P1 - Critical</h3>
-                        <div id="p1-jobs" class="space-y-3"></div>
-                    </div>
-                    <div class="bg-zinc-900 rounded-xl p-5 p2">
-                        <h3 class="text-amber-400 font-bold text-lg mb-3">🟠 P2 - High</h3>
-                        <div id="p2-jobs" class="space-y-3"></div>
-                    </div>
-                    <div class="bg-zinc-900 rounded-xl p-5 p3">
-                        <h3 class="text-blue-400 font-bold text-lg mb-3">🔵 P3 - Medium</h3>
-                        <div id="p3-jobs" class="space-y-3"></div>
-                    </div>
-                    <div class="bg-zinc-900 rounded-xl p-5 p4">
-                        <h3 class="text-zinc-400 font-bold text-lg mb-3">⚪ P4 - Low</h3>
-                        <div id="p4-jobs" class="space-y-3"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Sidebar -->
-            <div class="lg:col-span-5 space-y-6">
-                <div class="bg-zinc-900 rounded-xl p-5">
-                    <h3 class="font-bold text-lg mb-3">📋 Advisor Action Queue</h3>
-                    <div id="advisor-queue" class="space-y-2 text-sm"></div>
-                </div>
-                <div class="bg-zinc-900 rounded-xl p-5">
-                    <h3 class="font-bold text-lg mb-3">🔧 Technician Action Queue</h3>
-                    <div id="technician-queue" class="space-y-2 text-sm"></div>
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="bg-zinc-900 rounded-xl p-5">
-                        <h3 class="font-bold">Technician Load</h3>
-                        <div id="tech-load" class="text-4xl font-bold text-green-400">--</div>
-                    </div>
-                    <div class="bg-zinc-900 rounded-xl p-5">
-                        <h3 class="font-bold">Bay Utilization</h3>
-                        <div id="bay-utilization" class="text-4xl font-bold text-blue-400">--</div>
-                    </div>
-                </div>
-            </div>
+        <div class="mt-5 flex flex-wrap gap-2">
+            <button class="role-tab active rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold" data-role="board">Board</button>
+            <button class="role-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-role="mitch">Mitch</button>
+            <button class="role-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-role="drew">Drew</button>
+            <button class="role-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-role="preston">Preston</button>
         </div>
 
-        <div class="mt-6 bg-zinc-900 rounded-xl p-5">
-            <h3 class="font-bold text-lg mb-3">Hermes Intelligence</h3>
-            <div id="hermes-summary" class="bg-zinc-800 rounded-lg p-4 text-sm leading-relaxed min-h-[140px]">
-                Loading Hermes recommendations...
-            </div>
-            <div id="hermes-updated-at" class="mt-2 text-xs text-zinc-500"></div>
+        <div class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
+            <section class="lg:col-span-8">
+                <div id="lane-grid" class="grid grid-cols-1 gap-4 xl:grid-cols-4"></div>
+            </section>
+
+            <section class="space-y-4 lg:col-span-4">
+                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-xl font-bold">Helper Snapshot</h2>
+                        <span class="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300">Support Mode</span>
+                    </div>
+                    <div id="snapshot" class="mt-4 space-y-3 text-sm text-zinc-300"></div>
+                </div>
+
+                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+                    <h2 class="text-xl font-bold">What Do I Do Next?</h2>
+                    <div id="next-actions" class="mt-4 space-y-3"></div>
+                </div>
+
+                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+                    <h2 class="text-xl font-bold">Hermes Intelligence</h2>
+                    <div id="hermes-summary" class="mt-4 rounded-2xl bg-zinc-950 p-4 text-sm leading-relaxed text-zinc-200 min-h-[180px]">Loading Hermes recommendations...</div>
+                    <div id="hermes-updated-at" class="mt-3 text-xs text-zinc-500"></div>
+                </div>
+            </section>
         </div>
     </div>
 
     <script>
-        // Basic rendering functions (add your full JS if needed)
-        function loadJobs() {
-            fetch("/api/jobs", { cache: "no-store" })
-                .then(r => r.json())
-                .then(data => console.log("Jobs:", data))
-                .catch(err => console.error(err));
+        let currentRole = "board";
+        let latestBoardState = null;
+
+        function escapeHtml(value) {
+            return String(value ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/\\"/g, "&quot;")
+                .replace(/'/g, "&#39;");
+        }
+
+        function laneMeta(lane) {
+            const map = {
+                P1: { cls: "lane-p1", title: "P1", subtitle: "Critical • Action now" },
+                P2: { cls: "lane-p2", title: "P2", subtitle: "Needs action • Info gap" },
+                P3: { cls: "lane-p3", title: "P3", subtitle: "Monitor • Controlled flow" },
+                P4: { cls: "lane-p4", title: "P4", subtitle: "Stable • External hold" }
+            };
+            return map[lane] || map.P3;
+        }
+
+        function roleMatches(job) {
+            if (currentRole === "board") return true;
+            const waitingOn = String(job.waiting_on || "").toLowerCase();
+            if (currentRole === "mitch") return waitingOn === "mitch";
+            if (currentRole === "drew") return waitingOn === "drew";
+            if (currentRole === "preston") return waitingOn === "preston";
+            return true;
+        }
+
+        function formatAlert(job) {
+            const alerts = Array.isArray(job.alerts) ? job.alerts : [];
+            if (!alerts.length) return "";
+            const first = alerts[0];
+            return '<div class="mt-3 rounded-xl bg-zinc-950 px-3 py-2 text-xs text-zinc-300 ' +
+                'alert-' + escapeHtml(first.severity || "info") + '">' +
+                escapeHtml(first.message || "Attention needed.") +
+            '</div>';
+        }
+
+        function renderJobCard(job) {
+            const pulse = (job.risk_level === "CRITICAL" || job.risk_level === "RED" || (job.alerts || []).length > 0) ? " pulse-card" : "";
+            const incoming = job.incoming_soon && job.incoming_soon.active
+                ? '<div class="mt-3 rounded-xl bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">Incoming soon: ' +
+                    escapeHtml(job.incoming_soon.next_stage || job.incoming_soon.reason || "Next handoff approaching.") +
+                  '</div>'
+                : "";
+
+            return (
+                '<article class="job-card rounded-2xl p-4' + pulse + '">' +
+                    '<div class="flex items-start justify-between gap-3">' +
+                        '<div>' +
+                            '<div class="text-lg font-black">' + escapeHtml(job.ro || "Unknown RO") + '</div>' +
+                            '<div class="text-sm font-semibold text-zinc-200">' + escapeHtml(job.customer || "Unknown Customer") + '</div>' +
+                            '<div class="text-xs text-zinc-400">' + escapeHtml(job.vehicle || "Unknown Vehicle") + '</div>' +
+                        '</div>' +
+                        '<div class="space-y-1 text-right">' +
+                            '<div class="rounded-full pill px-2 py-1 text-[11px] font-bold text-zinc-100">' + escapeHtml(job.risk_level || "NORMAL") + '</div>' +
+                            '<div class="text-[11px] text-zinc-400">Waiting on ' + escapeHtml(job.waiting_on || "Needs Review") + '</div>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="mt-3 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Status:</span> ' + escapeHtml(job.workflow_status || "unknown") + '</div>' +
+                    '<div class="mt-2 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Next move:</span> ' + escapeHtml(job.next_action || "Keep momentum moving.") + '</div>' +
+                    formatAlert(job) +
+                    incoming +
+                '</article>'
+            );
+        }
+
+        function renderLaneSection(title, jobs, emptyText) {
+            if (!jobs.length) {
+                return '<div class="rounded-2xl border border-dashed border-white/10 bg-zinc-950/60 p-4 text-sm text-zinc-400">' + escapeHtml(emptyText) + '</div>';
+            }
+            return (
+                '<div class="space-y-3">' +
+                    '<div class="text-sm font-semibold uppercase tracking-wide text-white/90">' + escapeHtml(title) + '</div>' +
+                    jobs.map(renderJobCard).join("") +
+                '</div>'
+            );
+        }
+
+        function renderLanes(boardState) {
+            const laneGrid = document.getElementById("lane-grid");
+            if (!laneGrid) return;
+
+            const jobs = (boardState.jobs || []).filter(roleMatches);
+            const lanes = ["P1", "P2", "P3", "P4"];
+
+            laneGrid.innerHTML = lanes.map((lane) => {
+                const meta = laneMeta(lane);
+                const laneJobs = jobs.filter((job) => job.priority_lane === lane);
+                const actionNow = laneJobs.filter((job) => job.risk_level === "CRITICAL" || job.risk_level === "RED");
+                const incomingSoon = laneJobs.filter((job) => job.incoming_soon && job.incoming_soon.active);
+                const remaining = laneJobs.filter((job) => !actionNow.includes(job) && !incomingSoon.includes(job));
+
+                return (
+                    '<section class="lane-card rounded-3xl p-4 ' + meta.cls + '">' +
+                        '<div class="rounded-2xl bg-black/20 p-4">' +
+                            '<div class="flex items-center justify-between gap-3">' +
+                                '<div>' +
+                                    '<div class="text-4xl font-black">' + escapeHtml(meta.title) + '</div>' +
+                                    '<div class="text-sm uppercase tracking-wide text-zinc-200">' + escapeHtml(meta.subtitle) + '</div>' +
+                                '</div>' +
+                                '<div class="rounded-full bg-white/10 px-4 py-2 text-lg font-black text-white">' + laneJobs.length + '</div>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="mt-4 space-y-4">' +
+                            renderLaneSection("Action Now", actionNow, "No immediate pressure items.") +
+                            renderLaneSection("Incoming Soon", incomingSoon, "No incoming-soon items.") +
+                            renderLaneSection("All Jobs", remaining, "This operational lane is currently calm.") +
+                        '</div>' +
+                    '</section>'
+                );
+            }).join("");
+        }
+
+        function renderSnapshot(boardState) {
+            const snapshot = document.getElementById("snapshot");
+            if (!snapshot) return;
+
+            const jobs = (boardState.jobs || []).filter(roleMatches);
+            const alerts = jobs.flatMap((job) => Array.isArray(job.alerts) ? job.alerts : []);
+            const byOwner = {};
+            jobs.forEach((job) => {
+                const key = job.waiting_on || "Needs Review";
+                byOwner[key] = (byOwner[key] || 0) + 1;
+            });
+
+            const ownerText = Object.entries(byOwner)
+                .sort((a, b) => b[1] - a[1])
+                .map(([owner, count]) => owner + ": " + count)
+                .join(" • ");
+
+            snapshot.innerHTML =
+                '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Visible jobs:</span> ' + jobs.length + '</div>' +
+                '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Open helper alerts:</span> ' + alerts.length + '</div>' +
+                '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Current ownership load:</span> ' + escapeHtml(ownerText || "No jobs visible.") + '</div>' +
+                '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-300">This board is here to reduce memory burden, tighten handoffs, and keep customers from becoming a surprise.</div>';
+        }
+
+        function renderNextActions(boardState) {
+            const container = document.getElementById("next-actions");
+            if (!container) return;
+
+            const jobs = (boardState.jobs || [])
+                .filter(roleMatches)
+                .sort((a, b) => {
+                    const rank = { CRITICAL: 4, RED: 3, YELLOW: 2, NORMAL: 1 };
+                    return (rank[b.risk_level] || 0) - (rank[a.risk_level] || 0);
+                })
+                .slice(0, 5);
+
+            if (!jobs.length) {
+                container.innerHTML = '<div class="rounded-2xl bg-zinc-950 p-4 text-sm text-zinc-400">Nothing urgent right now. Keep working the system and stay ahead of the next handoff.</div>';
+                return;
+            }
+
+            container.innerHTML = jobs.map((job, index) => (
+                '<div class="rounded-2xl bg-zinc-950 p-4">' +
+                    '<div class="text-xs uppercase tracking-wide text-zinc-500">Next move ' + (index + 1) + '</div>' +
+                    '<div class="mt-1 text-lg font-black text-zinc-100">' + escapeHtml(job.ro || "Unknown RO") + '</div>' +
+                    '<div class="text-sm font-semibold text-zinc-300">' + escapeHtml(job.customer || "Unknown Customer") + '</div>' +
+                    '<div class="mt-2 text-sm text-zinc-200">' + escapeHtml(job.next_action || "Keep momentum moving.") + '</div>' +
+                '</div>'
+            )).join("");
+        }
+
+        function renderBoardState(boardState) {
+            latestBoardState = boardState;
+            document.getElementById("board-updated-at").textContent = boardState.generated_at || "__TIMESTAMP__";
+            renderLanes(boardState);
+            renderSnapshot(boardState);
+            renderNextActions(boardState);
+        }
+
+        function renderHermesSummary(payload) {
+            const target = document.getElementById("hermes-summary");
+            if (!target) return;
+            const lines = String(payload.summary || "No summary available.")
+                .split(/\\n+/)
+                .map((line) => line.trim())
+                .filter(Boolean);
+
+            target.innerHTML = lines.map((line) => (
+                '<div class="mb-3 rounded-2xl bg-zinc-900 px-4 py-3 text-sm text-zinc-100">' + escapeHtml(line) + '</div>'
+            )).join("") || '<div class="rounded-2xl bg-zinc-900 px-4 py-3 text-sm text-zinc-400">No summary available.</div>';
+
+            document.getElementById("hermes-updated-at").textContent = "Last Hermes update: " + (payload.timestamp || "--");
+        }
+
+        function loadBoardState() {
+            fetch("/api/board-state", { cache: "no-store" })
+                .then((response) => {
+                    if (!response.ok) throw new Error("Request failed");
+                    return response.json();
+                })
+                .then(renderBoardState)
+                .catch(() => renderBoardState({
+                    generated_at: "__TIMESTAMP__",
+                    jobs: [],
+                    message: "Board state unavailable."
+                }));
         }
 
         function loadHermesSummary() {
             fetch("/api/hermes-summary", { cache: "no-store" })
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById("hermes-summary").innerHTML = data.summary || "No summary available.";
-                    document.getElementById("hermes-updated-at").textContent = "Last update: " + (data.timestamp || "--");
+                .then((response) => {
+                    if (!response.ok) throw new Error("Request failed");
+                    return response.json();
                 })
-                .catch(() => {
-                    document.getElementById("hermes-summary").innerHTML = "Hermes temporarily unavailable.";
-                });
+                .then(renderHermesSummary)
+                .catch(() => renderHermesSummary({ summary: "Hermes summary unavailable.", timestamp: "--" }));
+        }
+
+        function refreshBoard() {
+            loadBoardState();
+            loadHermesSummary();
+        }
+
+        function setRole(role) {
+            currentRole = role;
+            document.querySelectorAll(".role-tab").forEach((button) => {
+                button.classList.toggle("active", button.dataset.role === role);
+            });
+            if (latestBoardState) {
+                renderBoardState(latestBoardState);
+            }
         }
 
         document.addEventListener("DOMContentLoaded", () => {
-            loadJobs();
-            loadHermesSummary();
-            setInterval(() => { loadJobs(); loadHermesSummary(); }, 30000);
+            document.getElementById("refresh-jobs").addEventListener("click", refreshBoard);
+            document.querySelectorAll(".role-tab").forEach((button) => {
+                button.addEventListener("click", () => setRole(button.dataset.role || "board"));
+            });
+            refreshBoard();
+            window.setInterval(refreshBoard, 30000);
         });
     </script>
 </body>
@@ -174,8 +350,8 @@ def _fallback_jobs_payload(reason="autoflow_unavailable"):
 
 def _load_jobs_from_autoflow():
     try:
-        with open(SHOP_STATE_PATH, "r", encoding="utf-8") as f:
-            payload = json.load(f)
+        with open(SHOP_STATE_PATH, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
         return payload
     except Exception:
         return _fallback_jobs_payload("shop_state_not_found")
@@ -183,12 +359,13 @@ def _load_jobs_from_autoflow():
 
 def _load_board_state():
     try:
-        with open(BOARD_STATE_PATH, "r", encoding="utf-8") as f:
-            payload = json.load(f)
+        with open(BOARD_STATE_PATH, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
         if isinstance(payload, dict):
             return payload
     except Exception:
         pass
+
     return {
         "source": "board_rules_v1",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -216,8 +393,7 @@ def healthz():
 @app.route("/api/jobs")
 def api_jobs():
     try:
-        payload = _load_jobs_from_autoflow()
-        return jsonify(payload), 200
+        return jsonify(_load_jobs_from_autoflow()), 200
     except Exception as exc:
         return jsonify(_fallback_jobs_payload(f"unexpected_error: {exc}")), 200
 
@@ -245,14 +421,25 @@ def api_hermes_summary():
         jobs = board_state.get("jobs", []) if isinstance(board_state, dict) else []
         p1_jobs = [job for job in jobs if isinstance(job, dict) and job.get("priority_lane") == "P1"]
         p2_jobs = [job for job in jobs if isinstance(job, dict) and job.get("priority_lane") == "P2"]
-        missing_ro_jobs = [job for job in jobs if isinstance(job, dict) and any(alert.get("code") == "missing_ro" for alert in job.get("alerts", []))]
-        clock_in_jobs = [job for job in jobs if isinstance(job, dict) and any(alert.get("code") == "verify_tech_clock_in" for alert in job.get("alerts", []))]
+        missing_ro_jobs = [
+            job
+            for job in jobs
+            if isinstance(job, dict) and any(alert.get("code") == "missing_ro" for alert in job.get("alerts", []))
+        ]
+        clock_in_jobs = [
+            job
+            for job in jobs
+            if isinstance(job, dict)
+            and any(alert.get("code") == "verify_tech_clock_in" for alert in job.get("alerts", []))
+        ]
+        needs_review_jobs = [job for job in jobs if isinstance(job, dict) and job.get("waiting_on") == "Needs Review"]
 
         recommendations = []
         if p1_jobs:
             top = p1_jobs[:3]
             recommendations.append(
-                "Best next actions: " + "; ".join(
+                "Best next actions: "
+                + "; ".join(
                     f"{job.get('ro', 'Unknown RO')} ({job.get('waiting_on', 'Needs Review')}): {job.get('next_action', '')}"
                     for job in top
                 )
@@ -269,8 +456,14 @@ def api_hermes_summary():
             recommendations.append(
                 f"Data quality: {len(missing_ro_jobs)} board item(s) are missing a confirmed RO and should be cleaned up before they drift."
             )
+        if needs_review_jobs:
+            recommendations.append(
+                f"Intelligence gap: {len(needs_review_jobs)} job(s) still need stronger status mapping so the board can coach more precisely."
+            )
         if not recommendations:
-            recommendations.append("Momentum looks steady right now. Keep advisors ahead of technicians and protect the next customer promise window.")
+            recommendations.append(
+                "Momentum looks steady right now. Keep advisors ahead of technicians and protect the next customer promise window."
+            )
 
         return jsonify(
             {
@@ -281,15 +474,9 @@ def api_hermes_summary():
             }
         )
     except Exception:
-        return jsonify({"summary": "Hermes temporarily unavailable."})
+        return jsonify({"summary": "Hermes temporarily unavailable.", "timestamp": "--"})
 
 
 if __name__ == "__main__":
     print("🚀 Starting Country Club Advisor Command Board on 127.0.0.1:5000")
-    app.run(
-        host="127.0.0.1",
-        port=5000,
-        debug=False,
-        threaded=True,
-        use_reloader=False,
-    )
+    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True, use_reloader=False)
