@@ -26,6 +26,7 @@ EVENT_LOG_PATH = REPO_ROOT / "data" / "autoflow_events" / "autoflow_events.jsonl
 BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_advisor_game_plan.py"
 ACTIVE_ROS_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_active_ros_state.py"
 SHOP_STATE_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_shop_state.py"
+BOARD_STATE_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_board_state.py"
 
 app = Flask(__name__)
 bridge = HermesWebhookBridge()   # ← Hermes Bridge
@@ -121,16 +122,20 @@ def _run_build_script(script_path: Path, label: str) -> tuple[bool, str]:
 def _rebuild_local_state() -> dict[str, Any]:
     active_ros_ok, active_ros_reason = _run_build_script(ACTIVE_ROS_BUILD_SCRIPT, "ACTIVE RO STATE")
     shop_state_ok, shop_state_reason = _run_build_script(SHOP_STATE_BUILD_SCRIPT, "SHOP STATE")
+    board_state_ok, board_state_reason = _run_build_script(BOARD_STATE_BUILD_SCRIPT, "BOARD STATE")
 
     failures = []
     if not active_ros_ok:
         failures.append({"step": "build_active_ros_state", "reason": active_ros_reason})
     if not shop_state_ok:
         failures.append({"step": "build_shop_state", "reason": shop_state_reason})
+    if not board_state_ok:
+        failures.append({"step": "build_board_state", "reason": board_state_reason})
 
     return {
         "active_ros_rebuilt": active_ros_ok,
         "shop_state_rebuilt": shop_state_ok,
+        "board_state_rebuilt": board_state_ok,
         "failures": failures,
     }
 
@@ -173,6 +178,7 @@ def receive_autoflow_webhook():
         "tasks_rebuilt": True,
         "active_ros_rebuilt": state_rebuild["active_ros_rebuilt"],
         "shop_state_rebuilt": state_rebuild["shop_state_rebuilt"],
+        "board_state_rebuilt": state_rebuild["board_state_rebuilt"],
         "state_rebuild_failures": state_rebuild["failures"],
     })
 

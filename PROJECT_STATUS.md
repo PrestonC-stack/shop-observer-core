@@ -3,6 +3,207 @@
 **Last Updated:** May 16, 2026  
 **Current Branch:** `ai-build-stabilization`  
 **Repo:** https://github.com/PrestonC-stack/shop-observer-core.git
+
+## Checkpoint - May 16, 2026 - Live Webhook State Loop
+
+## Progress Update - May 18, 2026 - Board State Phase 1
+
+### New Implementation Direction
+
+- The board is now being formalized as a three-layer system:
+  - `AutoFlow` provides raw facts and visible workflow status
+  - `board_state.json` provides deterministic helper logic and supportive operational alerts
+  - `Hermes` reads the processed board state and explains what matters next
+- This keeps the system supportive and coach-like for the team while still giving ownership visibility into drift and bottlenecks.
+
+### Board State Layer
+
+- Added `scripts/build_board_state.py`
+- New output file:
+  - `state/board_state.json`
+- `board_state.json` is derived from `state/shop_state.json`
+- First-pass derived fields now include:
+  - `priority_lane`
+  - `waiting_on`
+  - `risk_level`
+  - `incoming_soon`
+  - `alerts`
+  - `next_action`
+  - `source_evidence`
+
+### Phase 1 Rules Included
+
+- `Technical Advisement` and `Technical Overview` escalate toward Preston ownership
+- Advisor-side statuses like `Advisor Estimate`, `Waiting approval`, `Ordering Parts`, `Advisor Finalize RO`, and `Ready` are mapped toward Mitch ownership
+- Production-control statuses like `Ready for Tech`, `Testing`, `DVI updates`, `Awaiting tech`, `Servicing`, and `QC` are mapped toward Drew ownership
+- Stable external-hold statuses such as `Waiting parts`, `Scheduled-Not Here`, `DVI Only-Not Here`, and `APACHE JOB` remain visible but calm in `P4`
+- Missing RO linkage is treated as its own board alert
+- Missing active tech clock-in on live production statuses is treated as a helper alert for advisor verification
+
+### New Commands
+
+- `python scripts/build_board_state.py`
+
+### New Dashboard/API Path
+
+- Added `/api/board-state`
+- `/api/hermes-summary` now reads `board_state.json` and returns a first-pass operational summary based on current helper rules
+
+### Immediate Next Work
+
+1. Refine role-specific views for Mitch, Drew, and Preston from `board_state.json`
+2. Add supportive “What do I do next?” board actions
+3. Add explicit walkthrough / customer-contact / expectation-timer compliance checks
+4. Add technician productivity and drift analytics once the proper technician metrics export is wired in
+
+### Git / Branch
+
+- Active branch: `ai-build-stabilization`
+- Latest checkpoint commit before this status update: `77cdc03`
+- AI machine and GitHub are currently in sync
+- Working tree should be checked before additional edits
+
+### Confirmed Working Architecture
+
+`AutoFlow webhook/API -> data/autoflow_events/autoflow_events.jsonl -> state/active_ros.json -> state/shop_state.json -> /api/jobs -> dashboard`
+
+- Hermes reads and saves webhook evidence separately
+- Hermes is not on the dashboard page-load path
+- The local Rules + Evidence path is now the primary board data path
+
+### What Is Working Now
+
+#### Dashboard
+
+- Flask dashboard runs on `127.0.0.1:5000`
+- `/healthz` works
+- `/api/jobs` works
+- Dashboard reads `state/shop_state.json` first
+- Dashboard does not call Hermes on page load
+- Dashboard does not directly call live AutoFlow during normal page load when `shop_state.json` exists
+- Manual `Refresh Jobs` button exists
+- Dashboard auto-refreshes `/api/jobs` every 30 seconds using `window.setInterval(loadJobs, 30000)`
+- Auto-refresh updates job data only and does not reload the full page
+
+#### Webhook
+
+- Flask webhook receiver runs on `127.0.0.1:5055`
+- Public webhook URL is `https://autoflow-webhook.callahanautoaz.net/webhooks/autoflow`
+- Public health URL is `https://autoflow-webhook.callahanautoaz.net/health`
+- Cloudflare route is fixed and public POST now works
+- Webhook appends events to `data/autoflow_events/autoflow_events.jsonl`
+- Webhook now triggers:
+  - `python scripts/build_active_ros_state.py`
+  - `python scripts/build_shop_state.py`
+- Confirmed webhook response fields:
+  - `active_ros_rebuilt: true`
+  - `shop_state_rebuilt: true`
+  - `state_rebuild_failures: []`
+  - `hermes_saved: true`
+
+#### AutoFlow Enrichment
+
+- `/api/v1/work_orders/{RO}` works for known valid ROs
+- `/api/v1/dvi/{RO}` works for known valid ROs
+- AutoFlow currently enriches known ROs successfully
+- Confirmed real RO `13298` maps:
+  - advisor: `Mitch Callahan`
+  - customer: `Mitch Weber`
+  - vehicle: `2024 RAM 3500 Laramie`
+  - workflow_status: `finished`
+  - summary/notes: `EIN 97000375`
+  - priority: `P3`
+
+#### Active RO State
+
+- `scripts/build_active_ros_state.py` derives active ROs from webhook event evidence
+- Runtime state files are ignored by Git:
+  - `state/active_ros.json`
+  - `state/shop_state.json`
+- Current production filters exclude:
+  - `TEST`
+  - `DEMO`
+  - `SAMPLE`
+  - `RO-55555`
+  - `55555`
+  - numeric `99990` through `99999`
+- `active_ros.json` now contains valid active ROs discovered from webhook evidence
+
+#### Shop State
+
+- `scripts/build_shop_state.py` builds normalized `state/shop_state.json`
+- It uses `state/active_ros.json` as input
+- It enriches valid ROs through AutoFlow
+- One bad or invalid RO no longer poisons the whole state build
+- Failed ROs can be recorded under `skipped_ros`
+- It no longer falls back to 4 mock demo jobs when `active_ros` contains real IDs and one ID fails
+- Normalized shop-state source is now `rules_evidence`
+
+#### Hermes
+
+- Hermes is connected to the webhook receiver
+- Webhook tests confirmed `hermes_saved: true`
+- Hermes should treat `state/shop_state.json` as canonical operational evidence
+- Hermes remains advisory and analysis-only for now
+- No customer messaging
+- No AutoFlow or Tekmetric writebacks
+- No uncontrolled automation
+
+#### Cloudflare
+
+- Dashboard Cloudflare route works
+- Webhook Cloudflare route was fixed and public POST is working
+- Cloudflare Zero Trust public hostname must route:
+  - `autoflow-webhook.callahanautoaz.net -> http://127.0.0.1:5055`
+- Correct webhook path is `/webhooks/autoflow`
+- `GET /webhooks/autoflow` returns Method Not Allowed, which is expected because the endpoint is POST-only
+- Local `config.yml` was not the controlling factor because `cloudflared` is running through the service-token setup
+
+### Current Known Limits
+
+- Full automatic "all active ROs" sync is not solved yet
+- AutoFlow does not currently expose a confirmed authoritative list-all-open-work-orders endpoint
+- Tested list-style endpoints returned `404`:
+  - `/api/v1/work_orders`
+  - `/api/v1/tickets`
+  - `/api/v1/invoices`
+  - `/api/v1/repair_orders`
+  - `/api/v1/orders`
+- `/api/v1/appointments` works, but current payload does not expose true shop RO/invoice values that can serve as authoritative discovery
+- Webhook activity discovers active ROs event-by-event, not from a full shop snapshot
+- `connectors/tekmetric.py` is still mock-only and does not provide live active/open RO discovery
+
+### Immediate Technical Validation Still Needed
+
+- Confirm a real AutoFlow live-RO status movement triggers the full loop:
+  - webhook event received
+  - `active_ros.json` rebuilt
+  - `shop_state.json` rebuilt
+  - `/api/jobs` updated
+  - dashboard reflects the change within 30 seconds
+- Once that is confirmed, document it as the first fully working real-time board loop
+
+### Next Major Phase
+
+- Focus next on the Operational Intelligence layer, not more UI work
+
+Recommended sequence:
+
+1. Stabilize the current webhook -> state -> dashboard loop.
+2. Add a small `state/board_state.json` intelligence layer built from `shop_state.json`.
+3. Use `board_state.json` to calculate:
+   - stale jobs
+   - waiting too long
+   - advisor next action
+   - technician next action
+   - blockers
+   - priority explanations
+   - aging timers
+   - handoff ownership
+4. Keep Hermes advisory:
+   - Observe -> Analyze -> Prioritize -> Present
+5. Do not let Hermes write to AutoFlow, Tekmetric, or customers.
+
 ## Progress Update - May 16, 2026
 
 ## Progress Update - May 16, 2026 - Shop State Layer
