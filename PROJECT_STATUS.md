@@ -6,6 +6,56 @@
 
 ## Checkpoint - May 16, 2026 - Live Webhook State Loop
 
+## Progress Update - May 18, 2026 - Board State Phase 1
+
+### New Implementation Direction
+
+- The board is now being formalized as a three-layer system:
+  - `AutoFlow` provides raw facts and visible workflow status
+  - `board_state.json` provides deterministic helper logic and supportive operational alerts
+  - `Hermes` reads the processed board state and explains what matters next
+- This keeps the system supportive and coach-like for the team while still giving ownership visibility into drift and bottlenecks.
+
+### Board State Layer
+
+- Added `scripts/build_board_state.py`
+- New output file:
+  - `state/board_state.json`
+- `board_state.json` is derived from `state/shop_state.json`
+- First-pass derived fields now include:
+  - `priority_lane`
+  - `waiting_on`
+  - `risk_level`
+  - `incoming_soon`
+  - `alerts`
+  - `next_action`
+  - `source_evidence`
+
+### Phase 1 Rules Included
+
+- `Technical Advisement` and `Technical Overview` escalate toward Preston ownership
+- Advisor-side statuses like `Advisor Estimate`, `Waiting approval`, `Ordering Parts`, `Advisor Finalize RO`, and `Ready` are mapped toward Mitch ownership
+- Production-control statuses like `Ready for Tech`, `Testing`, `DVI updates`, `Awaiting tech`, `Servicing`, and `QC` are mapped toward Drew ownership
+- Stable external-hold statuses such as `Waiting parts`, `Scheduled-Not Here`, `DVI Only-Not Here`, and `APACHE JOB` remain visible but calm in `P4`
+- Missing RO linkage is treated as its own board alert
+- Missing active tech clock-in on live production statuses is treated as a helper alert for advisor verification
+
+### New Commands
+
+- `python scripts/build_board_state.py`
+
+### New Dashboard/API Path
+
+- Added `/api/board-state`
+- `/api/hermes-summary` now reads `board_state.json` and returns a first-pass operational summary based on current helper rules
+
+### Immediate Next Work
+
+1. Refine role-specific views for Mitch, Drew, and Preston from `board_state.json`
+2. Add supportive “What do I do next?” board actions
+3. Add explicit walkthrough / customer-contact / expectation-timer compliance checks
+4. Add technician productivity and drift analytics once the proper technician metrics export is wired in
+
 ### Git / Branch
 
 - Active branch: `ai-build-stabilization`
