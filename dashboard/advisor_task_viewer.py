@@ -3,12 +3,14 @@ import os
 import sys
 from datetime import datetime
 
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, request
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(CURRENT_DIR)
 SHOP_STATE_PATH = os.path.join(REPO_ROOT, "state", "shop_state.json")
 BOARD_STATE_PATH = os.path.join(REPO_ROOT, "state", "board_state.json")
+BOARD_ACTION_LOG_PATH = os.path.join(REPO_ROOT, "state", "board_actions.jsonl")
+HERMES_LOG_PATH = os.path.join(REPO_ROOT, "state", "hermes_feedback.jsonl")
 
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
@@ -34,10 +36,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .alert-warning { border-left: 4px solid #f59e0b; }
         .alert-info { border-left: 4px solid #3b82f6; }
         .pill { border: 1px solid rgba(255,255,255,0.12); }
-        .role-tab.active { background: #18181b; color: #fafafa; border-color: #3f3f46; }
+        .role-tab.active, .top-tab.active { background: #18181b; color: #fafafa; border-color: #3f3f46; }
         .pulse-card { animation: pulseBorder 1.6s infinite; }
         .blink-icon { animation: pulseBorder 1.2s infinite; }
         .hidden-panel { display: none; }
+        .chip-button { transition: transform 0.15s ease, opacity 0.15s ease; }
+        .chip-button:hover { transform: translateY(-1px); opacity: 0.95; }
         @keyframes pulseBorder {
             0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45); }
             70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0.0); }
@@ -93,7 +97,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
 
                 <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
-                    <h2 class="text-xl font-bold">Hermes Intelligence</h2>
+                    <div class="flex items-center justify-between gap-3">
+                        <h2 class="text-xl font-bold">Hermes Intelligence</h2>
+                        <button id="open-hermes-ask" class="rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800">Ask Hermes</button>
+                    </div>
                     <div id="hermes-summary" class="mt-4 rounded-2xl bg-zinc-950 p-4 text-sm leading-relaxed text-zinc-200 min-h-[180px]">Loading Hermes recommendations...</div>
                     <div id="hermes-updated-at" class="mt-3 text-xs text-zinc-500"></div>
                 </div>
@@ -133,7 +140,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
 
         <div id="job-modal" class="hidden-panel fixed inset-0 z-50 bg-black/70 p-4">
-            <div class="mx-auto mt-8 max-w-3xl rounded-3xl border border-zinc-700 bg-zinc-950 p-6">
+            <div class="mx-auto mt-6 max-w-4xl rounded-3xl border border-zinc-700 bg-zinc-950 p-6">
                 <div class="flex items-start justify-between gap-4">
                     <div>
                         <div id="modal-title" class="text-2xl font-black text-zinc-100"></div>
@@ -144,12 +151,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <div id="modal-body" class="mt-5 space-y-4"></div>
             </div>
         </div>
+
+        <div id="toast" class="hidden-panel fixed bottom-5 right-5 z-[60] rounded-2xl border border-emerald-700 bg-emerald-950/95 px-4 py-3 text-sm text-emerald-100"></div>
     </div>
 
     <script>
         let currentRole = "board";
         let latestBoardState = null;
         let currentPanel = "board-panel";
+        let activeModalRo = "";
+        let activeModalMode = "details";
 
         function escapeHtml(value) {
             return String(value ?? "")
@@ -184,37 +195,47 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function roleMatches(job) {
             if (currentRole === "board") return true;
             const waitingOn = String(job.waiting_on || "").toLowerCase();
-            if (currentRole === "mitch") return waitingOn === "mitch";
-            if (currentRole === "drew") return waitingOn === "drew";
-            if (currentRole === "preston") return waitingOn === "preston";
-            return true;
+            return waitingOn === currentRole;
+        }
+
+        function showToast(message, tone = "success") {
+            const toast = document.getElementById("toast");
+            if (!toast) return;
+            toast.textContent = message;
+            toast.style.display = "block";
+            toast.className = "fixed bottom-5 right-5 z-[60] rounded-2xl border px-4 py-3 text-sm";
+            if (tone === "error") {
+                toast.className += " border-red-700 bg-red-950/95 text-red-100";
+            } else {
+                toast.className += " border-emerald-700 bg-emerald-950/95 text-emerald-100";
+            }
+            window.clearTimeout(window.__toastTimer);
+            window.__toastTimer = window.setTimeout(() => { toast.style.display = "none"; }, 2600);
         }
 
         function formatAlert(job) {
             const alerts = Array.isArray(job.alerts) ? job.alerts : [];
             if (!alerts.length) return "";
             const first = alerts[0];
-            return '<div class="mt-3 rounded-xl bg-zinc-950 px-3 py-2 text-xs text-zinc-300 ' +
-                'alert-' + escapeHtml(first.severity || "info") + '">' +
-                escapeHtml(first.message || "Attention needed.") +
-            '</div>';
+            return '<div class="mt-3 rounded-xl bg-zinc-950 px-3 py-2 text-xs text-zinc-300 alert-' +
+                escapeHtml(first.severity || "info") + '">' + escapeHtml(first.message || "Attention needed.") + "</div>";
         }
 
         function actionIcons(job) {
             const alerts = Array.isArray(job.alerts) ? job.alerts : [];
             const hasCommunication = alerts.some((alert) => alert.code === "customer_follow_up_due");
             const hasClock = alerts.some((alert) => alert.code === "verify_tech_clock_in");
-            const hasData = alerts.some((alert) => alert.code === "missing_ro" || alert.code === "status_mapping_gap");
+            const hasData = alerts.some((alert) => alert.code === "missing_ro" || alert.code === "status_mapping_gap" || alert.code === "missing_tech_assignment");
 
             const phoneCls = hasCommunication ? " blink-icon border-amber-400 text-amber-300" : " border-zinc-700 text-zinc-500";
             const clockCls = hasClock ? " blink-icon border-red-500 text-red-300" : " border-zinc-700 text-zinc-500";
-            const dataCls = hasData ? " blink-icon border-blue-500 text-blue-300" : " border-zinc-700 text-zinc-500";
+            const dataCls = hasData ? " blink-icon border-blue-500 text-blue-300" : " border-zinc-700 text-blue-300";
 
             return (
                 '<div class="mt-3 flex flex-wrap gap-2">' +
-                    '<button class="rounded-full border px-3 py-1 text-xs font-semibold' + phoneCls + '" title="Customer communication helper">☎ Communication</button>' +
-                    '<button class="rounded-full border px-3 py-1 text-xs font-semibold' + clockCls + '" title="Productivity / clock-in helper">⏱ Productivity</button>' +
-                    '<button class="rounded-full border px-3 py-1 text-xs font-semibold' + dataCls + '" title="Data quality helper">🧠 Data</button>' +
+                    '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + phoneCls + '" data-helper="communication" data-ro="' + escapeHtml(job.ro || "") + '" type="button">☎ Communication</button>' +
+                    '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + clockCls + '" data-helper="productivity" data-ro="' + escapeHtml(job.ro || "") + '" type="button">⏱ Productivity</button>' +
+                    '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + dataCls + '" data-helper="data" data-ro="' + escapeHtml(job.ro || "") + '" type="button">🧠 Data</button>' +
                 '</div>'
             );
         }
@@ -226,48 +247,43 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const incoming = job.incoming_soon && job.incoming_soon.active
                 ? '<div class="mt-3 rounded-xl bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">Incoming soon: ' +
                     escapeHtml(job.incoming_soon.next_stage || job.incoming_soon.reason || "Next handoff approaching.") +
-                  '</div>'
+                  "</div>"
                 : "";
             const light = riskLight(job.risk_level);
 
             return (
                 '<article class="job-card rounded-2xl p-4 cursor-pointer' + pulse + '" data-ro="' + escapeHtml(job.ro || "") + '">' +
                     '<div class="flex items-start justify-between gap-3">' +
-                        '<div>' +
-                            '<div class="text-lg font-black">' + escapeHtml(job.ro || "Unknown RO") + '</div>' +
-                            '<div class="text-sm font-semibold text-zinc-200">' + escapeHtml(job.customer || "Unknown Customer") + '</div>' +
-                            '<div class="text-xs text-zinc-400">' + escapeHtml(job.vehicle || "Unknown Vehicle") + '</div>' +
-                        '</div>' +
+                        "<div>" +
+                            '<div class="text-lg font-black">' + escapeHtml(job.ro || "Unknown RO") + "</div>" +
+                            '<div class="text-sm font-semibold text-zinc-200">' + escapeHtml(job.customer || "Unknown Customer") + "</div>" +
+                            '<div class="text-xs text-zinc-400">' + escapeHtml(job.vehicle || "Unknown Vehicle") + "</div>" +
+                        "</div>" +
                         '<div class="space-y-1 text-right">' +
-                            '<div class="rounded-full pill px-2 py-1 text-[11px] font-bold ' + light.cls + '">' + escapeHtml(light.label) + '</div>' +
-                            '<div class="text-[11px] text-zinc-400">Waiting on ' + escapeHtml(job.waiting_on || "Needs Review") + '</div>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div class="mt-3 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Status:</span> ' + escapeHtml(job.workflow_status || "unknown") + '</div>' +
-                    '<div class="mt-2 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Next move:</span> ' + escapeHtml(job.next_action || "Keep momentum moving.") + '</div>' +
+                            '<div class="rounded-full pill px-2 py-1 text-[11px] font-bold ' + light.cls + '">' + escapeHtml(light.label) + "</div>" +
+                            '<div class="text-[11px] text-zinc-400">Waiting on ' + escapeHtml(job.waiting_on || "Needs Review") + "</div>" +
+                        "</div>" +
+                    "</div>" +
+                    '<div class="mt-3 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Status:</span> ' + escapeHtml(job.workflow_status || "unknown") + "</div>" +
+                    '<div class="mt-2 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Next move:</span> ' + escapeHtml(job.next_action || "Keep momentum moving.") + "</div>" +
                     actionIcons(job) +
                     formatAlert(job) +
                     incoming +
-                '</article>'
+                "</article>"
             );
         }
 
         function renderLaneSection(title, jobs, emptyText) {
             if (!jobs.length) {
-                return '<div class="rounded-2xl border border-dashed border-white/10 bg-zinc-950/60 p-4 text-sm text-zinc-400">' + escapeHtml(emptyText) + '</div>';
+                return '<div class="rounded-2xl border border-dashed border-white/10 bg-zinc-950/60 p-4 text-sm text-zinc-400">' + escapeHtml(emptyText) + "</div>";
             }
-            return (
-                '<div class="space-y-3">' +
-                    '<div class="text-sm font-semibold uppercase tracking-wide text-white/90">' + escapeHtml(title) + '</div>' +
-                    jobs.map(renderJobCard).join("") +
-                '</div>'
-            );
+            return '<div class="space-y-3"><div class="text-sm font-semibold uppercase tracking-wide text-white/90">' +
+                escapeHtml(title) + "</div>" + jobs.map(renderJobCard).join("") + "</div>";
         }
 
         function renderLanes(boardState) {
             const laneGrid = document.getElementById("lane-grid");
             if (!laneGrid) return;
-
             const jobs = (boardState.jobs || []).filter(roleMatches);
             const lanes = ["P1", "P2", "P3", "P4"];
 
@@ -275,26 +291,26 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const meta = laneMeta(lane);
                 const laneJobs = jobs.filter((job) => job.priority_lane === lane);
                 const actionNow = laneJobs.filter((job) => job.risk_level === "CRITICAL" || job.risk_level === "RED");
-                const incomingSoon = laneJobs.filter((job) => job.incoming_soon && job.incoming_soon.active);
+                const incomingSoon = laneJobs.filter((job) => job.incoming_soon && job.incoming_soon.active && !actionNow.includes(job));
                 const remaining = laneJobs.filter((job) => !actionNow.includes(job) && !incomingSoon.includes(job));
 
                 return (
                     '<section class="lane-card rounded-3xl p-4 ' + meta.cls + '">' +
                         '<div class="rounded-2xl bg-black/20 p-4">' +
                             '<div class="flex items-center justify-between gap-3">' +
-                                '<div>' +
-                                    '<div class="text-4xl font-black">' + escapeHtml(meta.title) + '</div>' +
-                                    '<div class="text-sm uppercase tracking-wide text-zinc-200">' + escapeHtml(meta.subtitle) + '</div>' +
-                                '</div>' +
-                                '<div class="rounded-full bg-white/10 px-4 py-2 text-lg font-black text-white">' + laneJobs.length + '</div>' +
-                            '</div>' +
-                        '</div>' +
+                                "<div>" +
+                                    '<div class="text-4xl font-black">' + escapeHtml(meta.title) + "</div>" +
+                                    '<div class="text-sm uppercase tracking-wide text-zinc-200">' + escapeHtml(meta.subtitle) + "</div>" +
+                                "</div>" +
+                                '<div class="rounded-full bg-white/10 px-4 py-2 text-lg font-black text-white">' + laneJobs.length + "</div>" +
+                            "</div>" +
+                        "</div>" +
                         '<div class="mt-4 space-y-4">' +
                             renderLaneSection("Action Now", actionNow, "No immediate pressure items.") +
                             renderLaneSection("Incoming Soon", incomingSoon, "No incoming-soon items.") +
                             renderLaneSection("All Jobs", remaining, "This operational lane is currently calm.") +
-                        '</div>' +
-                    '</section>'
+                        "</div>" +
+                    "</section>"
                 );
             }).join("");
         }
@@ -302,7 +318,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function renderSnapshot(boardState) {
             const snapshot = document.getElementById("snapshot");
             if (!snapshot) return;
-
             const jobs = (boardState.jobs || []).filter(roleMatches);
             const alerts = jobs.flatMap((job) => Array.isArray(job.alerts) ? job.alerts : []);
             const byOwner = {};
@@ -310,23 +325,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const key = job.waiting_on || "Needs Review";
                 byOwner[key] = (byOwner[key] || 0) + 1;
             });
-
             const ownerText = Object.entries(byOwner)
                 .sort((a, b) => b[1] - a[1])
                 .map(([owner, count]) => owner + ": " + count)
                 .join(" • ");
 
             snapshot.innerHTML =
-                '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Visible jobs:</span> ' + jobs.length + '</div>' +
-                '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Open helper alerts:</span> ' + alerts.length + '</div>' +
-                '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Current ownership load:</span> ' + escapeHtml(ownerText || "No jobs visible.") + '</div>' +
+                '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Visible jobs:</span> ' + jobs.length + "</div>" +
+                '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Open helper alerts:</span> ' + alerts.length + "</div>" +
+                '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Current ownership load:</span> ' + escapeHtml(ownerText || "No jobs visible.") + "</div>" +
                 '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-300">This board is here to reduce memory burden, tighten handoffs, and keep customers from becoming a surprise.</div>';
         }
 
         function renderNextActions(boardState) {
             const container = document.getElementById("next-actions");
             if (!container) return;
-
             const jobs = (boardState.jobs || [])
                 .filter(roleMatches)
                 .sort((a, b) => {
@@ -342,12 +355,47 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
             container.innerHTML = jobs.map((job, index) => (
                 '<div class="rounded-2xl bg-zinc-950 p-4">' +
-                    '<div class="text-xs uppercase tracking-wide text-zinc-500">Next move ' + (index + 1) + '</div>' +
-                    '<div class="mt-1 text-lg font-black text-zinc-100">' + escapeHtml(job.ro || "Unknown RO") + '</div>' +
-                    '<div class="text-sm font-semibold text-zinc-300">' + escapeHtml(job.customer || "Unknown Customer") + '</div>' +
-                    '<div class="mt-2 text-sm text-zinc-200">' + escapeHtml(job.next_action || "Keep momentum moving.") + '</div>' +
-                '</div>'
+                    '<div class="text-xs uppercase tracking-wide text-zinc-500">Next move ' + (index + 1) + "</div>" +
+                    '<div class="mt-1 text-lg font-black text-zinc-100">' + escapeHtml(job.ro || "Unknown RO") + "</div>" +
+                    '<div class="text-sm font-semibold text-zinc-300">' + escapeHtml(job.customer || "Unknown Customer") + "</div>" +
+                    '<div class="mt-2 text-sm text-zinc-200">' + escapeHtml(job.next_action || "Keep momentum moving.") + "</div>" +
+                "</div>"
             )).join("");
+        }
+
+        function renderAnalytics(boardState) {
+            const jobs = Array.isArray(boardState.jobs) ? boardState.jobs : [];
+            const p1 = jobs.filter((job) => job.priority_lane === "P1").length;
+            const alerts = jobs.reduce((sum, job) => sum + ((job.alerts || []).length), 0);
+            const review = jobs.filter((job) => job.waiting_on === "Needs Review").length;
+            const clocks = jobs.filter((job) => (job.alerts || []).some((alert) => alert.code === "verify_tech_clock_in")).length;
+
+            document.getElementById("metric-p1").textContent = String(p1);
+            document.getElementById("metric-alerts").textContent = String(alerts);
+            document.getElementById("metric-review").textContent = String(review);
+            document.getElementById("metric-clocks").textContent = String(clocks);
+
+            const statusCounts = {};
+            const ownerCounts = {};
+            jobs.forEach((job) => {
+                const status = job.workflow_status || "unknown";
+                const owner = job.waiting_on || "Needs Review";
+                statusCounts[status] = (statusCounts[status] || 0) + 1;
+                ownerCounts[owner] = (ownerCounts[owner] || 0) + 1;
+            });
+
+            const statusHtml = Object.entries(statusCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8)
+                .map(([status, count]) => '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">' + escapeHtml(status) + ":</span> " + count + "</div>")
+                .join("");
+            const ownerHtml = Object.entries(ownerCounts)
+                .sort((a, b) => b[1] - a[1])
+                .map(([owner, count]) => '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">' + escapeHtml(owner) + ":</span> " + count + "</div>")
+                .join("");
+
+            document.getElementById("status-patterns").innerHTML = statusHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No status patterns available yet.</div>';
+            document.getElementById("ownership-patterns").innerHTML = ownerHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No ownership patterns available yet.</div>';
         }
 
         function renderBoardState(boardState) {
@@ -358,6 +406,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             renderNextActions(boardState);
             renderAnalytics(boardState);
             wireJobCards();
+            wireHelperChips();
         }
 
         function renderHermesSummary(payload) {
@@ -369,7 +418,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .filter(Boolean);
 
             target.innerHTML = lines.map((line) => (
-                '<div class="mb-3 rounded-2xl bg-zinc-900 px-4 py-3 text-sm text-zinc-100">' + escapeHtml(line) + '</div>'
+                '<div class="mb-3 rounded-2xl bg-zinc-900 px-4 py-3 text-sm text-zinc-100">' + escapeHtml(line) + "</div>"
             )).join("") || '<div class="rounded-2xl bg-zinc-900 px-4 py-3 text-sm text-zinc-400">No summary available.</div>';
 
             document.getElementById("hermes-updated-at").textContent = "Last Hermes update: " + (payload.timestamp || "--");
@@ -404,71 +453,121 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             loadHermesSummary();
         }
 
-        function renderAnalytics(boardState) {
-            const jobs = Array.isArray(boardState.jobs) ? boardState.jobs : [];
-            const p1 = jobs.filter((job) => job.priority_lane === "P1").length;
-            const alerts = jobs.reduce((sum, job) => sum + ((job.alerts || []).length), 0);
-            const review = jobs.filter((job) => job.waiting_on === "Needs Review").length;
-            const clocks = jobs.filter((job) => (job.alerts || []).some((alert) => alert.code === "verify_tech_clock_in")).length;
-
-            document.getElementById("metric-p1").textContent = String(p1);
-            document.getElementById("metric-alerts").textContent = String(alerts);
-            document.getElementById("metric-review").textContent = String(review);
-            document.getElementById("metric-clocks").textContent = String(clocks);
-
-            const statusCounts = {};
-            const ownerCounts = {};
-            jobs.forEach((job) => {
-                const status = job.workflow_status || "unknown";
-                const owner = job.waiting_on || "Needs Review";
-                statusCounts[status] = (statusCounts[status] || 0) + 1;
-                ownerCounts[owner] = (ownerCounts[owner] || 0) + 1;
-            });
-
-            const statusHtml = Object.entries(statusCounts)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 8)
-                .map(([status, count]) => '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">' + escapeHtml(status) + ':</span> ' + count + '</div>')
-                .join("");
-            const ownerHtml = Object.entries(ownerCounts)
-                .sort((a, b) => b[1] - a[1])
-                .map(([owner, count]) => '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">' + escapeHtml(owner) + ':</span> ' + count + '</div>')
-                .join("");
-
-            document.getElementById("status-patterns").innerHTML = statusHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No status patterns available yet.</div>';
-            document.getElementById("ownership-patterns").innerHTML = ownerHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No ownership patterns available yet.</div>';
-        }
-
         function wireJobCards() {
-            document.querySelectorAll("[data-ro]").forEach((card) => {
-                card.addEventListener("click", () => openJobModal(card.dataset.ro || ""));
+            document.querySelectorAll("[data-ro].job-card").forEach((card) => {
+                card.addEventListener("click", () => openJobModal(card.dataset.ro || "", "details"));
             });
         }
 
-        function openJobModal(ro) {
-            if (!latestBoardState) return;
-            const job = (latestBoardState.jobs || []).find((item) => String(item.ro || "") === String(ro));
+        function wireHelperChips() {
+            document.querySelectorAll(".helper-chip").forEach((button) => {
+                button.addEventListener("click", (event) => {
+                    event.stopPropagation();
+                    openJobModal(button.dataset.ro || "", button.dataset.helper || "details");
+                });
+            });
+        }
+
+        function findJobByRo(ro) {
+            if (!latestBoardState) return null;
+            return (latestBoardState.jobs || []).find((item) => String(item.ro || "") === String(ro)) || null;
+        }
+
+        function buildActionPanel(job, focusMode) {
+            const placeholders = {
+                communication: "Log what was communicated to the customer, callback time, or new promise window.",
+                productivity: "Log what you found on the floor. Who is on it, is labor clocked, and what is blocking progress?",
+                data: "Log the board mismatch, missing RO, status cleanup, or data issue you want Hermes to learn from.",
+                hermes: "Ask Hermes a targeted question about this job, the blocker, or the next best move.",
+                details: "Log a quick support note so the board can help the next handoff."
+            };
+            const labels = {
+                communication: "Customer Update",
+                productivity: "Productivity Check",
+                data: "Board / Data Fix",
+                hermes: "Ask Hermes",
+                details: "Quick Note"
+            };
+
+            return (
+                '<div class="rounded-2xl bg-zinc-900 p-4">' +
+                    '<div class="text-xs uppercase tracking-wide text-zinc-500">Action Center</div>' +
+                    '<div class="mt-3 flex flex-wrap gap-2">' +
+                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="communication" type="button">☎ Customer Update</button>' +
+                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="productivity" type="button">⏱ Productivity Check</button>' +
+                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="data" type="button">🧠 Board / Data Fix</button>' +
+                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="hermes" type="button">Ask Hermes</button>' +
+                    "</div>" +
+                    '<div class="mt-4 text-sm font-semibold text-zinc-200" id="modal-mode-label">' + escapeHtml(labels[focusMode] || labels.details) + "</div>" +
+                    '<textarea id="modal-note" class="mt-2 min-h-[120px] w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none focus:border-emerald-500" placeholder="' + escapeHtml(placeholders[focusMode] || placeholders.details) + '"></textarea>' +
+                    '<div class="mt-3 flex flex-wrap gap-2">' +
+                        '<button id="submit-board-action" class="rounded-2xl border border-emerald-700 bg-emerald-900/40 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-900/70" type="button">Save Update</button>' +
+                        '<button id="submit-hermes-question" class="rounded-2xl border border-blue-700 bg-blue-900/40 px-4 py-2 text-sm font-semibold text-blue-100 hover:bg-blue-900/70" type="button">Send to Hermes</button>' +
+                    "</div>" +
+                    '<div id="modal-response" class="mt-4 rounded-2xl bg-zinc-950 p-4 text-sm text-zinc-300">Use this panel to log what happened, capture what was found, or ask Hermes what to do next.</div>' +
+                "</div>"
+            );
+        }
+
+        function openJobModal(ro, mode = "details") {
+            const job = findJobByRo(ro);
             if (!job) return;
+            activeModalRo = ro;
+            activeModalMode = mode;
 
             document.getElementById("modal-title").textContent = job.ro + " • " + (job.customer || "Unknown Customer");
             document.getElementById("modal-subtitle").textContent = (job.vehicle || "Unknown Vehicle") + " • Waiting on " + (job.waiting_on || "Needs Review");
 
             const alerts = (job.alerts || []).map((alert) =>
-                '<li class="mb-2">' + escapeHtml(alert.message || "Attention needed.") + '</li>'
+                "<li class=\\"mb-2\\">" + escapeHtml(alert.message || "Attention needed.") + "</li>"
             ).join("");
 
             document.getElementById("modal-body").innerHTML =
                 '<div class="grid grid-cols-1 gap-4 md:grid-cols-2">' +
-                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Status</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.workflow_status || "unknown") + '</div></div>' +
-                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Risk</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.risk_level || "NORMAL") + '</div></div>' +
-                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Advisor</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.advisor || "Unknown") + '</div></div>' +
-                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Technician</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.technician || "Unassigned") + '</div></div>' +
-                '</div>' +
-                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Next Move</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.next_action || "Keep momentum moving.") + '</div></div>' +
-                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Summary</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.summary || "No summary available.") + '</div></div>' +
-                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Helper Alerts</div><ul class="mt-2 text-zinc-100">' + (alerts || '<li>No active alerts.</li>') + '</ul></div>';
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Status</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.workflow_status || "unknown") + "</div></div>" +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Risk</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.risk_level || "NORMAL") + "</div></div>" +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Advisor</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.advisor || "Unknown") + "</div></div>" +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Technician</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.technician || "Unassigned") + "</div></div>" +
+                "</div>" +
+                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Next Move</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.next_action || "Keep momentum moving.") + "</div></div>" +
+                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Summary</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.summary || "No summary available.") + "</div></div>" +
+                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Helper Alerts</div><ul class="mt-2 text-zinc-100">' + (alerts || "<li>No active alerts.</li>") + "</ul></div>" +
+                buildActionPanel(job, mode);
 
             document.getElementById("job-modal").style.display = "block";
+            wireModalActions();
+        }
+
+        function wireModalActions() {
+            document.querySelectorAll(".modal-mode").forEach((button) => {
+                button.addEventListener("click", () => setModalMode(button.dataset.mode || "details"));
+            });
+            const actionButton = document.getElementById("submit-board-action");
+            const hermesButton = document.getElementById("submit-hermes-question");
+            if (actionButton) actionButton.addEventListener("click", submitBoardAction);
+            if (hermesButton) hermesButton.addEventListener("click", submitHermesQuestion);
+        }
+
+        function setModalMode(mode) {
+            activeModalMode = mode;
+            const labelMap = {
+                communication: "Customer Update",
+                productivity: "Productivity Check",
+                data: "Board / Data Fix",
+                hermes: "Ask Hermes",
+                details: "Quick Note"
+            };
+            const placeholderMap = {
+                communication: "Log what was communicated to the customer, callback time, or new promise window.",
+                productivity: "Log what you found on the floor. Who is on it, is labor clocked, and what is blocking progress?",
+                data: "Log the board mismatch, missing RO, status cleanup, or data issue you want Hermes to learn from.",
+                hermes: "Ask Hermes a targeted question about this job, the blocker, or the next best move.",
+                details: "Log a quick support note so the board can help the next handoff."
+            };
+            const label = document.getElementById("modal-mode-label");
+            const note = document.getElementById("modal-note");
+            if (label) label.textContent = labelMap[mode] || labelMap.details;
+            if (note) note.placeholder = placeholderMap[mode] || placeholderMap.details;
         }
 
         function closeJobModal() {
@@ -501,16 +600,86 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     return response.json();
                 })
                 .then((payload) => {
+                    document.getElementById("modal-title").textContent = "Morning Briefing";
+                    document.getElementById("modal-subtitle").textContent = "Quick team focal point for P1/P2 work and lunch reset planning.";
+                    document.getElementById("modal-body").innerHTML =
+                        '<div class="rounded-2xl bg-zinc-900 p-5 text-sm leading-relaxed text-zinc-100 whitespace-pre-wrap">' + escapeHtml(payload.briefing || "No briefing available.") + "</div>" +
+                        '<div class="rounded-2xl bg-zinc-900 p-5 text-xs text-zinc-400">Generated: ' + escapeHtml(payload.timestamp || "--") + "</div>";
+                    document.getElementById("job-modal").style.display = "block";
                     renderHermesSummary({ summary: payload.briefing || "No briefing available.", timestamp: payload.timestamp || "--" });
-                    setTopPanel("board-panel");
                 })
-                .catch(() => renderHermesSummary({ summary: "Morning briefing unavailable.", timestamp: "--" }));
+                .catch(() => showToast("Morning briefing unavailable right now.", "error"));
+        }
+
+        function openHermesAskModal() {
+            document.getElementById("modal-title").textContent = "Ask Hermes";
+            document.getElementById("modal-subtitle").textContent = "Ask a board question, flag a pattern, or request help with the next move.";
+            document.getElementById("modal-body").innerHTML = buildActionPanel({
+                ro: "",
+                customer: "General board question"
+            }, "hermes");
+            document.getElementById("job-modal").style.display = "block";
+            wireModalActions();
+        }
+
+        function submitBoardAction() {
+            const note = document.getElementById("modal-note");
+            if (!note || !note.value.trim()) {
+                showToast("Add a quick note first so the board knows what changed.", "error");
+                return;
+            }
+            fetch("/api/board-action", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ro: activeModalRo,
+                    action_type: activeModalMode,
+                    note: note.value.trim(),
+                    source: "dashboard"
+                })
+            })
+                .then((response) => response.json())
+                .then((payload) => {
+                    const panel = document.getElementById("modal-response");
+                    if (panel) panel.textContent = payload.message || "Update saved.";
+                    showToast(payload.message || "Update saved.");
+                    note.value = "";
+                })
+                .catch(() => showToast("Unable to save that update right now.", "error"));
+        }
+
+        function submitHermesQuestion() {
+            const note = document.getElementById("modal-note");
+            if (!note || !note.value.trim()) {
+                showToast("Type a question for Hermes first.", "error");
+                return;
+            }
+            fetch("/api/hermes-feedback", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ro: activeModalRo,
+                    mode: activeModalMode,
+                    question: note.value.trim(),
+                    source: "dashboard"
+                })
+            })
+                .then((response) => response.json())
+                .then((payload) => {
+                    const panel = document.getElementById("modal-response");
+                    const answer = payload.answer || payload.message || "Hermes acknowledged the note.";
+                    if (panel) panel.textContent = answer;
+                    renderHermesSummary({ summary: answer, timestamp: payload.timestamp || "--" });
+                    showToast("Hermes updated.");
+                })
+                .catch(() => showToast("Hermes could not respond right now.", "error"));
         }
 
         document.addEventListener("DOMContentLoaded", () => {
             document.getElementById("refresh-jobs").addEventListener("click", refreshBoard);
             document.getElementById("close-modal").addEventListener("click", closeJobModal);
             document.getElementById("morning-briefing").addEventListener("click", loadMorningBriefing);
+            document.getElementById("open-hermes-ask").addEventListener("click", openHermesAskModal);
             document.querySelectorAll(".role-tab").forEach((button) => {
                 button.addEventListener("click", () => setRole(button.dataset.role || "board"));
             });
@@ -523,6 +692,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </script>
 </body>
 </html>"""
+
+
+def _append_jsonl(path, payload):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload) + "\n")
 
 
 def _fallback_jobs_payload(reason="autoflow_unavailable"):
@@ -566,6 +741,39 @@ def _load_board_state():
     }
 
 
+def _find_job(ro):
+    board_state = _load_board_state()
+    jobs = board_state.get("jobs", []) if isinstance(board_state, dict) else []
+    for job in jobs:
+        if isinstance(job, dict) and str(job.get("ro", "")) == str(ro):
+            return job
+    return None
+
+
+def _hermes_answer(question, job=None, mode="general"):
+    question = str(question or "").strip()
+    if not question and not job:
+        return "Hermes needs a little more context. Ask what is blocked, what the next move is, or what customer expectation should be protected."
+
+    if job:
+        ro = job.get("ro", "Unknown RO")
+        waiting_on = job.get("waiting_on", "Needs Review")
+        next_action = job.get("next_action", "Keep momentum moving.")
+        alerts = [alert.get("message", "") for alert in job.get("alerts", []) if isinstance(alert, dict)]
+        lead = f"RO {ro} is currently waiting on {waiting_on}. {next_action}"
+        if mode == "communication":
+            return lead + " For customer contact, confirm the latest expectation, document the callback window, and keep trust ahead of the surprise."
+        if mode == "productivity":
+            return lead + " On the floor, verify who is actively on it, whether labor is clocked, and what single blocker is keeping it from moving."
+        if mode == "data":
+            return lead + " Tighten the board evidence by fixing the RO linkage, status mapping, or ownership gap so the coaching becomes more precise."
+        if alerts:
+            return lead + " Current helper alerts: " + " ".join(alerts[:2])
+        return lead
+
+    return "Hermes logged the board question. The next best move is to capture the blocker, the owner, and the promised follow-up so the system can coach the handoff instead of guessing."
+
+
 @app.route("/")
 def board():
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -602,6 +810,47 @@ def api_board_state():
         ), 200
 
 
+@app.route("/api/board-action", methods=["POST"])
+def api_board_action():
+    payload = request.get_json(silent=True) or {}
+    entry = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "ro": str(payload.get("ro", "")).strip(),
+        "action_type": str(payload.get("action_type", "details")).strip() or "details",
+        "note": str(payload.get("note", "")).strip(),
+        "source": str(payload.get("source", "dashboard")).strip() or "dashboard",
+    }
+    _append_jsonl(BOARD_ACTION_LOG_PATH, entry)
+
+    message_map = {
+        "communication": "Customer update saved. Keep the promise window visible and the next callback clear.",
+        "productivity": "Productivity note saved. Advisors can now coach the next floor follow-up with context.",
+        "data": "Board issue saved. This gives Hermes a cleaner trail to improve the board logic.",
+        "details": "Support note saved.",
+    }
+    return jsonify({"status": "received", "message": message_map.get(entry["action_type"], "Support note saved.")}), 200
+
+
+@app.route("/api/hermes-feedback", methods=["POST"])
+def api_hermes_feedback():
+    payload = request.get_json(silent=True) or {}
+    ro = str(payload.get("ro", "")).strip()
+    mode = str(payload.get("mode", "general")).strip() or "general"
+    question = str(payload.get("question", "")).strip()
+    job = _find_job(ro) if ro else None
+    answer = _hermes_answer(question, job=job, mode=mode)
+    entry = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "ro": ro,
+        "mode": mode,
+        "question": question,
+        "answer": answer,
+        "source": str(payload.get("source", "dashboard")).strip() or "dashboard",
+    }
+    _append_jsonl(HERMES_LOG_PATH, entry)
+    return jsonify({"status": "received", "answer": answer, "timestamp": entry["timestamp"]}), 200
+
+
 @app.route("/api/hermes-summary")
 def api_hermes_summary():
     try:
@@ -610,15 +859,12 @@ def api_hermes_summary():
         p1_jobs = [job for job in jobs if isinstance(job, dict) and job.get("priority_lane") == "P1"]
         p2_jobs = [job for job in jobs if isinstance(job, dict) and job.get("priority_lane") == "P2"]
         missing_ro_jobs = [
-            job
-            for job in jobs
+            job for job in jobs
             if isinstance(job, dict) and any(alert.get("code") == "missing_ro" for alert in job.get("alerts", []))
         ]
         clock_in_jobs = [
-            job
-            for job in jobs
-            if isinstance(job, dict)
-            and any(alert.get("code") == "verify_tech_clock_in" for alert in job.get("alerts", []))
+            job for job in jobs
+            if isinstance(job, dict) and any(alert.get("code") == "verify_tech_clock_in" for alert in job.get("alerts", []))
         ]
         needs_review_jobs = [job for job in jobs if isinstance(job, dict) and job.get("waiting_on") == "Needs Review"]
 
@@ -626,8 +872,8 @@ def api_hermes_summary():
         if p1_jobs:
             top = p1_jobs[:3]
             recommendations.append(
-                "Best next actions: "
-                + "; ".join(
+                "Best next actions: " +
+                "; ".join(
                     f"{job.get('ro', 'Unknown RO')} ({job.get('waiting_on', 'Needs Review')}): {job.get('next_action', '')}"
                     for job in top
                 )
@@ -676,14 +922,25 @@ def api_morning_briefing():
         if isinstance(job, dict) and any(alert.get("code") == "verify_tech_clock_in" for alert in job.get("alerts", []))
     ]
 
-    lines = []
-    lines.append(f"Morning focal point: {len(p1_jobs)} P1 job(s) and {len(p2_jobs)} P2 job(s) need the strongest attention from 8 to noon.")
+    lines = [
+        f"Morning focal point: {len(p1_jobs)} P1 job(s) and {len(p2_jobs)} P2 job(s) need the strongest attention from 8 to noon."
+    ]
     if p1_jobs:
-        lines.append("Top fires: " + "; ".join(f"{job.get('ro', 'Unknown RO')} waiting on {job.get('waiting_on', 'Needs Review')}" for job in p1_jobs[:3]))
+        lines.append(
+            "Top fires: " + "; ".join(
+                f"{job.get('ro', 'Unknown RO')} waiting on {job.get('waiting_on', 'Needs Review')}" for job in p1_jobs[:3]
+            )
+        )
     if p2_jobs:
-        lines.append("Action gap: " + "; ".join(f"{job.get('ro', 'Unknown RO')} in {job.get('workflow_status', 'unknown')}" for job in p2_jobs[:4]))
+        lines.append(
+            "Action gap: " + "; ".join(
+                f"{job.get('ro', 'Unknown RO')} in {job.get('workflow_status', 'unknown')}" for job in p2_jobs[:4]
+            )
+        )
     if clock_alerts:
-        lines.append(f"Productivity watch: {len(clock_alerts)} job(s) need a quick tech clock-in verification before the lunch reset.")
+        lines.append(
+            f"Productivity watch: {len(clock_alerts)} job(s) need a quick tech clock-in verification before the lunch reset."
+        )
     if not p1_jobs and not p2_jobs:
         lines.append("No major fires right now. Keep momentum steady, protect customer trust, and prepare the next handoff early.")
 
