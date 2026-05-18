@@ -113,6 +113,38 @@
   - flag board/data issues
   - ask Hermes targeted next-step questions
 
+## Progress Update - May 18, 2026 - Data Input / Training / Productivity Phase
+
+- Added two new top-level support surfaces to keep the main board lean:
+  - `Data Input`
+  - `Training`
+- `Data Input` is the board-facing replacement for a generic “fix-it” idea.
+  - It groups source-data correction needs into cleaner buckets such as:
+    - missing tech assignment
+    - weak/missing customer concern
+    - missing customer update
+    - missing completed DVI
+    - bad or unclear workflow status
+    - missing RO linkage
+- `Training` is now separated from raw correction work.
+  - It is designed to teach what keeps getting missed over time.
+  - It uses a coach/helpful tone first, then shifts firmer as repeated patterns stack up.
+  - It is structured around:
+    - Mitch
+    - Drew
+    - Preston
+    - Technician
+    - Overall Shop
+- Analytics were reweighted around the user’s priority order:
+  1. productivity
+  2. customer communication misses
+  3. jobs stuck too long
+  4. repeated DVI quality issues
+  5. support scores
+- The board now raises explicit DVI/customer-concern quality signals instead of treating everything as one generic data issue.
+- The bay-facing performance view now shows a friendlier front-of-house vs back-of-house score split for shop visibility.
+- Modal behavior was tightened so action flows open centered, highlight the active mode more clearly, and are easier to use across mixed screen sizes.
+
 ### Git / Branch
 
 - Active branch: `ai-build-stabilization`

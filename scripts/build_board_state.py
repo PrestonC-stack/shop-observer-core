@@ -182,6 +182,7 @@ def _collect_alerts(job: dict[str, Any], normalized_status: str, waiting_on: str
     known_active_tech = any(name.lower() in ACTIVE_TECHS for name in technician_names)
     summary = _normalize_text(job.get("summary"), "")
     notes = _normalize_text(job.get("notes"), "")
+    dvi_status = _normalize_text(job.get("dvi_status"), "").lower()
 
     if not ro or ro.lower() in {"unknown ro", "0", "unknown"}:
         alerts.append(
@@ -223,11 +224,29 @@ def _collect_alerts(job: dict[str, Any], normalized_status: str, waiting_on: str
     if not summary and not notes:
         alerts.append(
             {
-                "code": "missing_info",
-                "severity": "info",
-                "message": "Job detail is thin right now. Tighten the customer concern or summary so the next handoff is clearer.",
+                "code": "missing_customer_concern",
+                "severity": "warning" if lane in {"P1", "P2"} else "info",
+                "message": "Customer concern detail is thin right now. Tighten the concern or summary so the next handoff is clearer.",
             }
         )
+    elif len(summary) < 12 and len(notes) < 12:
+        alerts.append(
+            {
+                "code": "missing_customer_concern",
+                "severity": "info",
+                "message": "Customer concern detail is light. A clearer write-up would help the board coach the next move better.",
+            }
+        )
+
+    if normalized_status in {"dvi updates", "testing", "technical advisement", "advisor estimate", "waiting approval"}:
+        if dvi_status not in {"complete", "completed", "signed off", "complete multi point check", "passed"}:
+            alerts.append(
+                {
+                    "code": "missing_completed_dvi",
+                    "severity": "warning",
+                    "message": "Completed DVI evidence is missing or unclear. Confirm the inspection is finished and the findings are usable.",
+                }
+            )
 
     if waiting_on == "Mitch" and normalized_status in {"waiting approval", "advisor estimate", "ready", "advisor finalize ro"}:
         alerts.append(

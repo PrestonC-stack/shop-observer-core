@@ -42,8 +42,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .hidden-panel { display: none; }
         .chip-button { transition: transform 0.15s ease, opacity 0.15s ease; }
         .chip-button:hover { transform: translateY(-1px); opacity: 0.95; }
-        .modal-shell { max-height: 90vh; overflow-y: auto; }
+        .modal-shell { max-height: min(90vh, 980px); overflow-y: auto; width: min(100%, 1080px); }
         .modal-mode-active { background: rgba(16, 185, 129, 0.18); border-color: rgb(16 185 129 / 0.95); color: #ecfdf5; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.22); }
+        .metric-card { background: linear-gradient(180deg, rgba(24, 24, 27, 0.96), rgba(9, 9, 11, 0.96)); }
+        .panel-card { background: rgba(24, 24, 27, 0.92); }
         @keyframes pulseBorder {
             0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.75), 0 0 18px rgba(245, 158, 11, 0.42); filter: brightness(1.05); }
             50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.18), 0 0 24px rgba(245, 158, 11, 0.52); filter: brightness(1.18); }
@@ -69,7 +71,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="mt-5 flex flex-wrap gap-2">
             <button class="top-tab active rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold" data-panel="board-panel">Board</button>
             <button class="top-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-panel="analytics-panel">Analytics</button>
+            <button class="top-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-panel="data-input-panel">Data Input</button>
+            <button class="top-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-panel="training-panel">Training</button>
             <button id="morning-briefing" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">Morning Briefing</button>
+            <button id="afternoon-briefing-top" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">Afternoon Brief</button>
             <a href="/bay-performance" target="_blank" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">Bay View</a>
         </div>
 
@@ -112,38 +117,97 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         <div id="analytics-panel" class="mt-5 hidden-panel space-y-4">
             <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
-                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
-                    <div class="text-xs uppercase tracking-wide text-zinc-500">P1 Jobs</div>
-                    <div id="metric-p1" class="mt-2 text-4xl font-black text-red-400">0</div>
+                <div class="metric-card rounded-3xl border border-zinc-800 p-5">
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Shop Productivity Score</div>
+                    <div id="metric-shop-productivity" class="mt-2 text-4xl font-black text-emerald-400">0%</div>
                 </div>
-                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
-                    <div class="text-xs uppercase tracking-wide text-zinc-500">Open Alerts</div>
-                    <div id="metric-alerts" class="mt-2 text-4xl font-black text-amber-400">0</div>
+                <div class="metric-card rounded-3xl border border-zinc-800 p-5">
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Front Of House Score</div>
+                    <div id="metric-front-score" class="mt-2 text-4xl font-black text-cyan-300">0%</div>
                 </div>
-                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
-                    <div class="text-xs uppercase tracking-wide text-zinc-500">Needs Review</div>
-                    <div id="metric-review" class="mt-2 text-4xl font-black text-blue-400">0</div>
+                <div class="metric-card rounded-3xl border border-zinc-800 p-5">
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Back Of House Score</div>
+                    <div id="metric-back-score" class="mt-2 text-4xl font-black text-violet-300">0%</div>
                 </div>
-                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
-                    <div class="text-xs uppercase tracking-wide text-zinc-500">Clock-In Checks</div>
-                    <div id="metric-clocks" class="mt-2 text-4xl font-black text-emerald-400">0</div>
+                <div class="metric-card rounded-3xl border border-zinc-800 p-5">
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Support Score</div>
+                    <div id="metric-support-score" class="mt-2 text-4xl font-black text-amber-300">0%</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                <div class="panel-card rounded-3xl border border-zinc-800 p-5">
+                    <h2 class="text-xl font-bold">Productivity Pressure</h2>
+                    <div id="productivity-patterns" class="mt-4 space-y-3"></div>
+                </div>
+                <div class="panel-card rounded-3xl border border-zinc-800 p-5">
+                    <h2 class="text-xl font-bold">Customer Communication</h2>
+                    <div id="communication-patterns" class="mt-4 space-y-3"></div>
+                </div>
+                <div class="panel-card rounded-3xl border border-zinc-800 p-5">
+                    <h2 class="text-xl font-bold">Stuck Jobs</h2>
+                    <div id="stuck-patterns" class="mt-4 space-y-3"></div>
                 </div>
             </div>
 
             <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
-                    <h2 class="text-xl font-bold">Status Patterns</h2>
-                    <div id="status-patterns" class="mt-4 space-y-3"></div>
+                <div class="panel-card rounded-3xl border border-zinc-800 p-5">
+                    <h2 class="text-xl font-bold">DVI Quality Watch</h2>
+                    <div id="dvi-patterns" class="mt-4 space-y-3"></div>
                 </div>
-                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+                <div class="panel-card rounded-3xl border border-zinc-800 p-5">
                     <h2 class="text-xl font-bold">Ownership Load</h2>
                     <div id="ownership-patterns" class="mt-4 space-y-3"></div>
                 </div>
             </div>
         </div>
 
-        <div id="job-modal" class="hidden-panel fixed inset-0 z-50 bg-black/70 p-4">
-            <div class="modal-shell mx-auto mt-2 max-w-4xl rounded-3xl border border-zinc-700 bg-zinc-950 p-6">
+        <div id="data-input-panel" class="mt-5 hidden-panel space-y-4">
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div class="metric-card rounded-3xl border border-zinc-800 p-5">
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Data Input Issues</div>
+                    <div id="metric-data-issues" class="mt-2 text-4xl font-black text-blue-300">0</div>
+                </div>
+                <div class="metric-card rounded-3xl border border-zinc-800 p-5">
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">AutoFlow Cleanup Jobs</div>
+                    <div id="metric-data-jobs" class="mt-2 text-4xl font-black text-amber-300">0</div>
+                </div>
+                <div class="metric-card rounded-3xl border border-zinc-800 p-5">
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Most Common Miss</div>
+                    <div id="metric-data-top" class="mt-2 text-xl font-black text-zinc-100">None yet</div>
+                </div>
+            </div>
+
+            <div class="panel-card rounded-3xl border border-zinc-800 p-5">
+                <h2 class="text-xl font-bold">Grouped Data Input Correction</h2>
+                <p class="mt-2 text-sm text-zinc-400">Use this to fix what needs to be corrected in AutoFlow so the next pull gives the board cleaner evidence.</p>
+                <div id="data-input-groups" class="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2"></div>
+            </div>
+        </div>
+
+        <div id="training-panel" class="mt-5 hidden-panel space-y-4">
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-5">
+                <div class="metric-card rounded-3xl border border-zinc-800 p-5"><div class="text-xs uppercase tracking-wide text-zinc-500">Mitch</div><div id="metric-train-mitch" class="mt-2 text-3xl font-black text-zinc-100">0</div></div>
+                <div class="metric-card rounded-3xl border border-zinc-800 p-5"><div class="text-xs uppercase tracking-wide text-zinc-500">Drew</div><div id="metric-train-drew" class="mt-2 text-3xl font-black text-zinc-100">0</div></div>
+                <div class="metric-card rounded-3xl border border-zinc-800 p-5"><div class="text-xs uppercase tracking-wide text-zinc-500">Preston</div><div id="metric-train-preston" class="mt-2 text-3xl font-black text-zinc-100">0</div></div>
+                <div class="metric-card rounded-3xl border border-zinc-800 p-5"><div class="text-xs uppercase tracking-wide text-zinc-500">Technician</div><div id="metric-train-tech" class="mt-2 text-3xl font-black text-zinc-100">0</div></div>
+                <div class="metric-card rounded-3xl border border-zinc-800 p-5"><div class="text-xs uppercase tracking-wide text-zinc-500">Overall Shop</div><div id="metric-train-shop" class="mt-2 text-3xl font-black text-zinc-100">0</div></div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div class="panel-card rounded-3xl border border-zinc-800 p-5">
+                    <h2 class="text-xl font-bold">Coach The Repeats</h2>
+                    <div id="training-categories" class="mt-4 space-y-3"></div>
+                </div>
+                <div class="panel-card rounded-3xl border border-zinc-800 p-5">
+                    <h2 class="text-xl font-bold">Role Coaching</h2>
+                    <div id="training-roles" class="mt-4 space-y-3"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="job-modal" class="hidden-panel fixed inset-0 z-50 bg-black/70 p-4 md:flex md:items-center md:justify-center">
+            <div class="modal-shell mx-auto rounded-3xl border border-zinc-700 bg-zinc-950 p-6">
                 <div class="flex items-start justify-between gap-4">
                     <div>
                         <div id="modal-title" class="text-2xl font-black text-zinc-100"></div>
@@ -238,7 +302,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 alert.code === "missing_ro" ||
                 alert.code === "status_mapping_gap" ||
                 alert.code === "missing_tech_assignment" ||
-                alert.code === "missing_info"
+                alert.code === "missing_info" ||
+                alert.code === "missing_customer_concern" ||
+                alert.code === "missing_completed_dvi"
             ) && !actionState.data_cleared;
 
             const phoneCls = hasCommunication ? " blink-icon border-amber-400 text-amber-300" : " border-zinc-700 text-zinc-500";
@@ -377,29 +443,99 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             )).join("");
         }
 
+        function hasAlert(job, codes) {
+            const alerts = Array.isArray(job.alerts) ? job.alerts : [];
+            return alerts.some((alert) => codes.includes(alert.code));
+        }
+
+        function dataInputGroups(jobs) {
+            return [
+                {
+                    key: "missing_tech_assignment",
+                    label: "Missing tech assignment",
+                    detail: "Dispatch/ownership is not clear enough for the board to trust who is on the job.",
+                    jobs: jobs.filter((job) => hasAlert(job, ["missing_tech_assignment", "missing_info"]))
+                },
+                {
+                    key: "missing_customer_concern",
+                    label: "Weak or missing customer concern",
+                    detail: "Concern detail is too thin for strong handoffs and clean AI guidance.",
+                    jobs: jobs.filter((job) => hasAlert(job, ["missing_customer_concern"]))
+                },
+                {
+                    key: "customer_follow_up_due",
+                    label: "Missing customer update",
+                    detail: "Expectation or callback timing needs to be tightened in AutoFlow notes/workflow.",
+                    jobs: jobs.filter((job) => hasAlert(job, ["customer_follow_up_due"]))
+                },
+                {
+                    key: "missing_completed_dvi",
+                    label: "Missing completed DVI",
+                    detail: "DVI completion or usable inspection evidence is not clear enough yet.",
+                    jobs: jobs.filter((job) => hasAlert(job, ["missing_completed_dvi"]))
+                },
+                {
+                    key: "status_mapping_gap",
+                    label: "Bad or unclear workflow status",
+                    detail: "The visible status is too loose or mismatched for the board to coach cleanly.",
+                    jobs: jobs.filter((job) => hasAlert(job, ["status_mapping_gap"]) || job.waiting_on === "Needs Review")
+                },
+                {
+                    key: "missing_ro",
+                    label: "Missing RO linkage",
+                    detail: "RO linkage or board traceability needs to be corrected before drift grows.",
+                    jobs: jobs.filter((job) => hasAlert(job, ["missing_ro"]))
+                }
+            ];
+        }
+
+        function toneForCount(count) {
+            if (count >= 5) return { label: "Blunt but fair", cls: "text-red-300" };
+            if (count >= 3) return { label: "Firmer coaching", cls: "text-amber-300" };
+            return { label: "Coach / helpful", cls: "text-emerald-300" };
+        }
+
+        function roleTrainingCounts(jobs) {
+            const byRole = { Mitch: 0, Drew: 0, Preston: 0, Technician: 0, "Overall Shop": 0 };
+            jobs.forEach((job) => {
+                const count = Array.isArray(job.alerts) ? job.alerts.length : 0;
+                byRole["Overall Shop"] += count;
+                if (job.waiting_on === "Mitch") byRole.Mitch += count;
+                if (job.waiting_on === "Drew") byRole.Drew += count;
+                if (job.waiting_on === "Preston") byRole.Preston += count;
+                if (hasAlert(job, ["missing_tech_assignment", "verify_tech_clock_in", "missing_completed_dvi"])) {
+                    byRole.Technician += 1;
+                }
+            });
+            return byRole;
+        }
+
         function renderAnalytics(boardState) {
             const jobs = Array.isArray(boardState.jobs) ? boardState.jobs : [];
-            const p1 = jobs.filter((job) => job.priority_lane === "P1").length;
-            const alerts = jobs.reduce((sum, job) => sum + ((job.alerts || []).length), 0);
-            const review = jobs.filter((job) => job.waiting_on === "Needs Review").length;
             const clocks = jobs.filter((job) => (job.alerts || []).some((alert) => alert.code === "verify_tech_clock_in")).length;
             const communicationNeeds = jobs.filter((job) => (job.alerts || []).some((alert) => alert.code === "customer_follow_up_due")).length;
+            const stuckJobs = jobs.filter((job) => job.priority_lane === "P2" || job.waiting_on === "Needs Review").length;
+            const dviIssues = jobs.filter((job) => hasAlert(job, ["missing_completed_dvi"])).length;
             const dataNeeds = jobs.filter((job) => (job.alerts || []).some((alert) =>
                 alert.code === "missing_ro" ||
                 alert.code === "status_mapping_gap" ||
                 alert.code === "missing_tech_assignment" ||
-                alert.code === "missing_info"
+                alert.code === "missing_info" ||
+                alert.code === "missing_customer_concern" ||
+                alert.code === "missing_completed_dvi"
             )).length;
             const clearCommunication = Math.max(0, jobs.length - communicationNeeds);
             const clearProductivity = Math.max(0, jobs.length - clocks);
             const clearData = Math.max(0, jobs.length - dataNeeds);
             const scoreBase = Math.max(jobs.length, 1);
             const shopScore = Math.round(((clearCommunication + clearProductivity + clearData) / (scoreBase * 3)) * 100);
+            const frontScore = Math.round(((clearCommunication + Math.max(0, jobs.length - stuckJobs)) / (scoreBase * 2)) * 100);
+            const backScore = Math.round(((clearProductivity + Math.max(0, jobs.length - dviIssues)) / (scoreBase * 2)) * 100);
 
-            document.getElementById("metric-p1").textContent = String(p1);
-            document.getElementById("metric-alerts").textContent = String(alerts);
-            document.getElementById("metric-review").textContent = String(review);
-            document.getElementById("metric-clocks").textContent = String(clocks);
+            document.getElementById("metric-shop-productivity").textContent = shopScore + "%";
+            document.getElementById("metric-front-score").textContent = frontScore + "%";
+            document.getElementById("metric-back-score").textContent = backScore + "%";
+            document.getElementById("metric-support-score").textContent = Math.round((frontScore + backScore + shopScore) / 3) + "%";
 
             const statusCounts = {};
             const ownerCounts = {};
@@ -410,25 +546,103 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 ownerCounts[owner] = (ownerCounts[owner] || 0) + 1;
             });
 
-            const statusHtml = Object.entries(statusCounts)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 8)
-                .map(([status, count]) => '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">' + escapeHtml(status) + ":</span> " + count + "</div>")
-                .join("");
             const ownerHtml = Object.entries(ownerCounts)
                 .sort((a, b) => b[1] - a[1])
                 .map(([owner, count]) => '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">' + escapeHtml(owner) + ":</span> " + count + "</div>")
                 .join("");
 
-            document.getElementById("status-patterns").innerHTML =
-                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Shop support score:</span> ' + shopScore + '%</div>' +
-                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Communication clear:</span> ' + clearCommunication + ' / ' + jobs.length + '</div>' +
-                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Productivity clear:</span> ' + clearProductivity + ' / ' + jobs.length + '</div>' +
+            document.getElementById("productivity-patterns").innerHTML =
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Clock-in checks:</span> ' + clocks + '</div>' +
                 '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Data clear:</span> ' + clearData + ' / ' + jobs.length + '</div>' +
-                (statusHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No status patterns available yet.</div>');
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Front vs back:</span> front ' + frontScore + '% • back ' + backScore + '%</div>';
+            document.getElementById("communication-patterns").innerHTML =
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Communication misses:</span> ' + communicationNeeds + '</div>' +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Communication clear:</span> ' + clearCommunication + ' / ' + jobs.length + '</div>' +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Mitch-facing actions:</span> ' + (ownerCounts.Mitch || 0) + '</div>';
+            document.getElementById("stuck-patterns").innerHTML =
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Jobs stuck too long / needs movement:</span> ' + stuckJobs + '</div>' +
+                Object.entries(statusCounts)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 4)
+                    .map(([status, count]) => '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">' + escapeHtml(status) + ':</span> ' + count + '</div>')
+                    .join("");
+            document.getElementById("dvi-patterns").innerHTML =
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Repeated DVI quality issues:</span> ' + dviIssues + '</div>' +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Support score:</span> ' + shopScore + '%</div>' +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Data cleanups needed:</span> ' + dataNeeds + '</div>';
             document.getElementById("ownership-patterns").innerHTML =
                 (ownerHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No ownership patterns available yet.</div>') +
                 '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Advisor support load:</span> Mitch actions ' + communicationNeeds + ', Drew checks ' + clocks + ', Data cleanups ' + dataNeeds + '</div>';
+        }
+
+        function renderDataInput(boardState) {
+            const jobs = Array.isArray(boardState.jobs) ? boardState.jobs : [];
+            const groups = dataInputGroups(jobs);
+            const issueCount = groups.reduce((sum, group) => sum + group.jobs.length, 0);
+            const top = [...groups].sort((a, b) => b.jobs.length - a.jobs.length)[0];
+
+            document.getElementById("metric-data-issues").textContent = String(issueCount);
+            document.getElementById("metric-data-jobs").textContent = String(jobs.filter((job) => groupHasJobs(job, groups)).length);
+            document.getElementById("metric-data-top").textContent = top && top.jobs.length ? top.label : "None yet";
+
+            document.getElementById("data-input-groups").innerHTML = groups.map((group) => (
+                '<div class="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">' +
+                    '<div class="flex items-start justify-between gap-3">' +
+                        '<div><div class="text-lg font-black text-zinc-100">' + escapeHtml(group.label) + '</div><div class="mt-1 text-sm text-zinc-400">' + escapeHtml(group.detail) + '</div></div>' +
+                        '<div class="rounded-full bg-blue-500/10 px-3 py-1 text-sm font-bold text-blue-300">' + group.jobs.length + '</div>' +
+                    '</div>' +
+                    '<div class="mt-4 space-y-2">' +
+                        (group.jobs.length
+                            ? group.jobs.slice(0, 6).map((job) => '<button class="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 data-input-job" data-ro="' + escapeHtml(job.ro || "") + '">' + escapeHtml(job.ro || "Unknown RO") + ' • ' + escapeHtml(job.customer || "Unknown Customer") + ' • ' + escapeHtml(job.workflow_status || "unknown") + '</button>').join("")
+                            : '<div class="rounded-2xl border border-dashed border-zinc-800 px-4 py-3 text-sm text-zinc-500">Nothing in this correction bucket right now.</div>') +
+                    '</div>' +
+                '</div>'
+            )).join("");
+            wireDataInputJobs();
+        }
+
+        function groupHasJobs(job, groups) {
+            return groups.some((group) => group.jobs.some((item) => String(item.ro || "") === String(job.ro || "")));
+        }
+
+        function renderTraining(boardState) {
+            const jobs = Array.isArray(boardState.jobs) ? boardState.jobs : [];
+            const groups = dataInputGroups(jobs);
+            const roleCounts = roleTrainingCounts(jobs);
+
+            document.getElementById("metric-train-mitch").textContent = String(roleCounts.Mitch);
+            document.getElementById("metric-train-drew").textContent = String(roleCounts.Drew);
+            document.getElementById("metric-train-preston").textContent = String(roleCounts.Preston);
+            document.getElementById("metric-train-tech").textContent = String(roleCounts.Technician);
+            document.getElementById("metric-train-shop").textContent = String(roleCounts["Overall Shop"]);
+
+            document.getElementById("training-categories").innerHTML = groups
+                .filter((group) => group.jobs.length)
+                .sort((a, b) => b.jobs.length - a.jobs.length)
+                .map((group) => {
+                    const tone = toneForCount(group.jobs.length);
+                    return '<div class="rounded-2xl bg-zinc-950 px-4 py-4 text-sm text-zinc-200">' +
+                        '<div class="flex items-center justify-between gap-3"><div class="font-semibold">' + escapeHtml(group.label) + '</div><div class="text-xs font-bold ' + tone.cls + '">' + tone.label + '</div></div>' +
+                        '<div class="mt-2 text-zinc-400">Seen on ' + group.jobs.length + ' active job(s). Focus on the repeat so the board has better evidence next pull.</div>' +
+                        '<div class="mt-2 text-zinc-300">' + escapeHtml(group.detail) + '</div>' +
+                    '</div>';
+                }).join("") || '<div class="rounded-2xl bg-zinc-950 px-4 py-4 text-sm text-zinc-500">No repeating training rhythms are standing out right now.</div>';
+
+            const roleRows = [
+                ["Mitch", roleCounts.Mitch, "Customer updates, estimate handoffs, and closeout rhythm."],
+                ["Drew", roleCounts.Drew, "Dispatch clarity, floor checks, and production-control follow-through."],
+                ["Preston", roleCounts.Preston, "Escalation clarity and technical review capture."],
+                ["Technician", roleCounts.Technician, "Clock-in, DVI completion, and clear work ownership."],
+                ["Overall Shop", roleCounts["Overall Shop"], "Shared handoff discipline and better source data."]
+            ];
+            document.getElementById("training-roles").innerHTML = roleRows.map(([label, count, detail]) => {
+                const tone = toneForCount(count);
+                return '<div class="rounded-2xl bg-zinc-950 px-4 py-4 text-sm text-zinc-200">' +
+                    '<div class="flex items-center justify-between gap-3"><div class="font-semibold">' + escapeHtml(label) + '</div><div class="text-xs font-bold ' + tone.cls + '">' + tone.label + '</div></div>' +
+                    '<div class="mt-2 text-zinc-400">' + count + ' current coaching signal(s).</div>' +
+                    '<div class="mt-2 text-zinc-300">' + escapeHtml(detail) + '</div>' +
+                '</div>';
+            }).join("");
         }
 
         function renderBoardState(boardState) {
@@ -439,6 +653,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             renderSnapshot(boardState);
             renderNextActions(boardState);
             renderAnalytics(boardState);
+            renderDataInput(boardState);
+            renderTraining(boardState);
             wireJobCards();
             wireHelperChips();
         }
@@ -499,6 +715,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     event.stopPropagation();
                     openJobModal(button.dataset.ro || "", button.dataset.helper || "details");
                 });
+            });
+        }
+
+        function wireDataInputJobs() {
+            document.querySelectorAll(".data-input-job").forEach((button) => {
+                button.addEventListener("click", () => openJobModal(button.dataset.ro || "", "data"));
             });
         }
 
@@ -570,8 +792,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Helper Alerts</div><ul class="mt-2 text-zinc-100">' + (alerts || "<li>No active alerts.</li>") + "</ul></div>" +
                 buildActionPanel(job, mode);
 
-            document.getElementById("job-modal").style.display = "block";
+            document.getElementById("job-modal").style.display = "flex";
             wireModalActions();
+            setModalMode(mode);
             const note = document.getElementById("modal-note");
             if (note) {
                 note.focus();
@@ -627,6 +850,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             });
             document.getElementById("board-panel").style.display = panelId === "board-panel" ? "grid" : "none";
             document.getElementById("analytics-panel").style.display = panelId === "analytics-panel" ? "block" : "none";
+            document.getElementById("data-input-panel").style.display = panelId === "data-input-panel" ? "block" : "none";
+            document.getElementById("training-panel").style.display = panelId === "training-panel" ? "block" : "none";
         }
 
         function setRole(role) {
@@ -658,7 +883,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         '<button id="afternoon-briefing" class="rounded-2xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900" type="button">Afternoon Brief</button>' +
                         '</div>' +
                         '<div class="rounded-2xl bg-zinc-900 p-5 text-xs text-zinc-400">Generated: ' + escapeHtml(payload.timestamp || "--") + "</div>";
-                    document.getElementById("job-modal").style.display = "block";
+                    document.getElementById("job-modal").style.display = "flex";
                     document.getElementById("print-briefing").addEventListener("click", () => window.print());
                     document.getElementById("afternoon-briefing").addEventListener("click", loadAfternoonBriefing);
                     renderHermesSummary({ summary: payload.briefing || "No briefing available.", timestamp: payload.timestamp || "--" });
@@ -681,7 +906,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         lines.map((line) => '<li>' + escapeHtml(line) + '</li>').join("") +
                         '</ol></div>' +
                         '<div class="rounded-2xl bg-zinc-900 p-5 text-xs text-zinc-400">Generated: ' + escapeHtml(payload.timestamp || "--") + '</div>';
-                    document.getElementById("job-modal").style.display = "block";
+                    document.getElementById("job-modal").style.display = "flex";
                     renderHermesSummary({ summary: payload.briefing || "No briefing available.", timestamp: payload.timestamp || "--" });
                 })
                 .catch(() => showToast("Afternoon brief unavailable right now.", "error"));
@@ -694,7 +919,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 ro: "",
                 customer: "General board question"
             }, "hermes");
-            document.getElementById("job-modal").style.display = "block";
+            document.getElementById("job-modal").style.display = "flex";
             wireModalActions();
             setModalMode("hermes");
         }
@@ -757,6 +982,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             document.getElementById("refresh-jobs").addEventListener("click", refreshBoard);
             document.getElementById("close-modal").addEventListener("click", closeJobModal);
             document.getElementById("morning-briefing").addEventListener("click", loadMorningBriefing);
+            document.getElementById("afternoon-briefing-top").addEventListener("click", loadAfternoonBriefing);
             document.getElementById("open-hermes-ask").addEventListener("click", openHermesAskModal);
             document.querySelectorAll(".role-tab").forEach((button) => {
                 button.addEventListener("click", () => setRole(button.dataset.role || "board"));
@@ -843,7 +1069,7 @@ def _apply_action_state(board_state):
                 continue
             if code == "verify_tech_clock_in" and ro_state.get("productivity_cleared"):
                 continue
-            if code in {"missing_ro", "status_mapping_gap", "missing_tech_assignment", "missing_info"} and ro_state.get("data_cleared"):
+            if code in {"missing_ro", "status_mapping_gap", "missing_tech_assignment", "missing_info", "missing_customer_concern", "missing_completed_dvi"} and ro_state.get("data_cleared"):
                 continue
             filtered_alerts.append(alert)
         job["alerts"] = filtered_alerts
@@ -1024,6 +1250,10 @@ def api_hermes_summary():
             job for job in jobs
             if isinstance(job, dict) and any(alert.get("code") == "verify_tech_clock_in" for alert in job.get("alerts", []))
         ]
+        dvi_quality_jobs = [
+            job for job in jobs
+            if isinstance(job, dict) and any(alert.get("code") == "missing_completed_dvi" for alert in job.get("alerts", []))
+        ]
         needs_review_jobs = [job for job in jobs if isinstance(job, dict) and job.get("waiting_on") == "Needs Review"]
 
         recommendations = []
@@ -1043,6 +1273,10 @@ def api_hermes_summary():
         if clock_in_jobs:
             recommendations.append(
                 f"Productivity watch: {len(clock_in_jobs)} job(s) need a quick tech clock-in verification so advisors can trust the progress signal."
+            )
+        if dvi_quality_jobs:
+            recommendations.append(
+                f"DVI quality watch: {len(dvi_quality_jobs)} job(s) still need clearer completed inspection evidence before the repair story is fully trustworthy."
             )
         if missing_ro_jobs:
             recommendations.append(
@@ -1145,10 +1379,12 @@ def bay_performance():
     ])
     data_needs = len([
         job for job in jobs
-        if isinstance(job, dict) and any(alert.get("code") in {"missing_ro", "status_mapping_gap", "missing_tech_assignment", "missing_info"} for alert in job.get("alerts", []))
+        if isinstance(job, dict) and any(alert.get("code") in {"missing_ro", "status_mapping_gap", "missing_tech_assignment", "missing_info", "missing_customer_concern", "missing_completed_dvi"} for alert in job.get("alerts", []))
     ])
     total = max(len(jobs), 1)
     support_score = round(((total - communication_needs) + (total - productivity_needs) + (total - data_needs)) / (total * 3) * 100)
+    front_score = round((((total - communication_needs) + (total - len([job for job in jobs if isinstance(job, dict) and job.get("priority_lane") == "P2"]))) / (total * 2)) * 100)
+    back_score = round((((total - productivity_needs) + (total - len([job for job in jobs if isinstance(job, dict) and any(alert.get("code") == "missing_completed_dvi" for alert in job.get("alerts", []))]))) / (total * 2)) * 100)
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1161,18 +1397,22 @@ def bay_performance():
     <div class="max-w-7xl mx-auto px-6 py-8">
         <h1 class="text-5xl font-black tracking-wide">Bay Performance Board</h1>
         <p class="mt-2 text-zinc-400">Live support view for technicians and shop momentum.</p>
-        <div class="mt-8 grid grid-cols-1 gap-6 md:grid-cols-4">
+        <div class="mt-8 grid grid-cols-1 gap-6 md:grid-cols-5">
             <div class="rounded-3xl border border-emerald-700 bg-emerald-950/30 p-6">
                 <div class="text-sm uppercase tracking-wide text-emerald-300">Shop Support Score</div>
                 <div class="mt-3 text-6xl font-black text-emerald-200">{support_score}%</div>
             </div>
+            <div class="rounded-3xl border border-cyan-700 bg-cyan-950/30 p-6">
+                <div class="text-sm uppercase tracking-wide text-cyan-300">Front Of House</div>
+                <div class="mt-3 text-6xl font-black text-cyan-200">{front_score}%</div>
+            </div>
+            <div class="rounded-3xl border border-violet-700 bg-violet-950/30 p-6">
+                <div class="text-sm uppercase tracking-wide text-violet-300">Back Of House</div>
+                <div class="mt-3 text-6xl font-black text-violet-200">{back_score}%</div>
+            </div>
             <div class="rounded-3xl border border-red-700 bg-red-950/30 p-6">
                 <div class="text-sm uppercase tracking-wide text-red-300">P1 Jobs</div>
                 <div class="mt-3 text-6xl font-black text-red-200">{p1}</div>
-            </div>
-            <div class="rounded-3xl border border-amber-700 bg-amber-950/30 p-6">
-                <div class="text-sm uppercase tracking-wide text-amber-300">Communication Needs</div>
-                <div class="mt-3 text-6xl font-black text-amber-200">{communication_needs}</div>
             </div>
             <div class="rounded-3xl border border-blue-700 bg-blue-950/30 p-6">
                 <div class="text-sm uppercase tracking-wide text-blue-300">Productivity / Data Needs</div>
