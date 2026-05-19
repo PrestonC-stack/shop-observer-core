@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,14 @@ SHOP_STATE_FILE = STATE_DIR / "shop_state.json"
 BOARD_STATE_FILE = STATE_DIR / "board_state.json"
 ROSTER_FILE = CONFIG_DIR / "employee_roster.json"
 SOURCE_PRECEDENCE_FILE = CONFIG_DIR / "source_precedence.json"
+
+sys.path.insert(0, str(ROOT))
+try:
+    from scripts.scoring_engine import score_job as _score_job
+    SCORING_ENGINE_AVAILABLE = True
+except ImportError:
+    SCORING_ENGINE_AVAILABLE = False
+
 ACTIVE_TECH_ALIASES = {
     "luis cervantes": {"luis cervantes", "l cervantes", "cervantes", "l. cervantes", "lcervantes"},
     "jonathan leithoff": {"jonathan leithoff", "jonathan l", "jonathan l.", "johnathanl", "jon leithoff"},
@@ -183,14 +192,12 @@ def _load_shop_state() -> dict[str, Any]:
             "jobs": [],
             "message": "No shop_state.json found. Run python scripts/build_shop_state.py first.",
         }
-
     try:
         payload = json.loads(SHOP_STATE_FILE.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
             return payload
     except Exception:
         pass
-
     return {
         "source": "rules_evidence",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -202,33 +209,16 @@ def _load_shop_state() -> dict[str, Any]:
 
 def _waiting_on(job: dict[str, Any], normalized_status: str) -> str:
     advisor_owner = _normalize_owner_name(job.get("advisor", ""))
-
     if normalized_status in {"technical advisement", "technical overview"}:
         return "Preston"
-
     if normalized_status in {"advisor estimate", "waiting approval", "ordering parts", "advisor finalize ro", "ready"}:
         return "Mitch"
-
-    if normalized_status in {
-        "online stage",
-        "online  stage",
-        "ready for tech",
-        "testing",
-        "dvi updates",
-        "awaiting tech",
-        "servicing",
-        "qc",
-        "advisor qc review",
-        "drop off tow in",
-    }:
+    if normalized_status in {"online stage", "online  stage", "ready for tech", "testing", "dvi updates", "awaiting tech", "servicing", "qc", "advisor qc review", "drop off tow in"}:
         return "Drew"
-
     if normalized_status in {"waiting parts", "scheduled not here", "dvi only not here", "apache job"}:
         return "External Hold"
-
     if advisor_owner:
         return advisor_owner
-
     return "Needs Review"
 
 
@@ -236,31 +226,22 @@ def _priority_lane(job: dict[str, Any], normalized_status: str) -> str:
     progress = _to_int(job.get("progress_percent"), 0)
     labor_remaining = _to_float(job.get("labor_hours_remaining"), 0.0)
     complete = _to_bool(job.get("job_marked_complete")) or normalized_status in {"closed", "complete", "completed", "done"}
-
     if complete:
         return "P4"
-
     if normalized_status in {"waiting parts", "scheduled not here", "dvi only not here", "apache job", "appointment"}:
         return "P4"
-
     if normalized_status in {"technical advisement", "technical overview"}:
         return "P1"
-
     if normalized_status in {"advisor estimate", "waiting approval", "ordering parts", "dvi updates", "testing", "awaiting tech", "online stage", "drop off tow in"}:
         return "P2"
-
     if normalized_status in {"call shop", "unknown"}:
         return "P2"
-
     if progress >= 90 or (labor_remaining > 0 and labor_remaining <= 1):
         return "P1"
-
     if normalized_status in {"ready for tech", "servicing", "qc", "advisor qc review"}:
         return "P3"
-
     if normalized_status == "ready":
         return "P1"
-
     return "P3"
 
 
@@ -279,115 +260,43 @@ def _collect_alerts(job: dict[str, Any], normalized_status: str, waiting_on: str
     source_dvi_status = _normalize_text(job.get("source_dvi_status"), "unknown")
 
     if not ro or ro.lower() in {"unknown ro", "0", "unknown"}:
-        alerts.append(
-            {
-                "code": "missing_ro",
-                "severity": "warning",
-                "message": "Repair order number missing. Verify the AutoFlow item is linked to a real shop RO.",
-            }
-        )
+        alerts.append({"code": "missing_ro", "severity": "warning", "message": "Repair order number missing. Verify the AutoFlow item is linked to a real shop RO."})
 
     if waiting_on == "Drew" and normalized_status in {"ready for tech", "awaiting tech", "servicing", "testing", "dvi updates"}:
         if not _to_bool(job.get("clocked_in")):
-            alerts.append(
-                {
-                    "code": "verify_tech_clock_in",
-                    "severity": "warning" if lane == "P3" else "action",
-                    "message": "No active technician clock-in detected. Quick floor check recommended.",
-                }
-            )
+            alerts.append({"code": "verify_tech_clock_in", "severity": "warning" if lane == "P3" else "action", "message": "No active technician clock-in detected. Quick floor check recommended."})
 
     tech_required_statuses = {"ready for tech", "awaiting tech", "servicing", "testing", "dvi updates", "qc"}
 
     if waiting_on == "Drew" and normalized_status in tech_required_statuses and not (known_active_tech or known_active_candidate):
-        alerts.append(
-            {
-                "code": "missing_tech_assignment",
-                "severity": "warning",
-                "message": "No clear active technician assignment is available in the current evidence. Verify dispatch and ownership on the floor.",
-            }
-        )
+        alerts.append({"code": "missing_tech_assignment", "severity": "warning", "message": "No clear active technician assignment is available in the current evidence. Verify dispatch and ownership on the floor."})
 
     if normalized_status in tech_required_statuses and routing_bucket_present:
-        alerts.append(
-            {
-                "code": "routing_bucket_active",
-                "severity": "warning",
-                "message": "This job is sitting on a routing bucket instead of a real technician. Assign a live tech before treating it as active production.",
-            }
-        )
+        alerts.append({"code": "routing_bucket_active", "severity": "warning", "message": "This job is sitting on a routing bucket instead of a real technician. Assign a live tech before treating it as active production."})
 
     if not technician_names or _normalize_text(job.get("technician"), "").lower() in {"", "unassigned", "unknown"}:
-        alerts.append(
-            {
-                "code": "missing_info",
-                "severity": "info" if lane == "P4" else "warning",
-                "message": "Key operating info is incomplete. Confirm technician assignment and core ticket details.",
-            }
-        )
+        alerts.append({"code": "missing_info", "severity": "info" if lane == "P4" else "warning", "message": "Key operating info is incomplete. Confirm technician assignment and core ticket details."})
 
     if not summary and not notes:
-        alerts.append(
-            {
-                "code": "missing_customer_concern",
-                "severity": "warning" if lane in {"P1", "P2"} else "info",
-                "message": "Customer concern detail is thin right now. Tighten the concern or summary so the next handoff is clearer.",
-            }
-        )
+        alerts.append({"code": "missing_customer_concern", "severity": "warning" if lane in {"P1", "P2"} else "info", "message": "Customer concern detail is thin right now. Tighten the concern or summary so the next handoff is clearer."})
     elif len(summary) < 12 and len(notes) < 12:
-        alerts.append(
-            {
-                "code": "missing_customer_concern",
-                "severity": "info",
-                "message": "Customer concern detail is light. A clearer write-up would help the board coach the next move better.",
-            }
-        )
+        alerts.append({"code": "missing_customer_concern", "severity": "info", "message": "Customer concern detail is light. A clearer write-up would help the board coach the next move better."})
 
     if normalized_status in {"dvi updates", "testing", "technical advisement", "advisor estimate", "waiting approval"}:
         if dvi_status not in {"complete", "completed", "signed off", "complete multi point check", "passed"}:
-            alerts.append(
-                {
-                    "code": "missing_completed_dvi",
-                    "severity": "warning",
-                    "message": "Completed DVI evidence is missing or unclear. Confirm the inspection is finished and the findings are usable.",
-                }
-            )
+            alerts.append({"code": "missing_completed_dvi", "severity": "warning", "message": "Completed DVI evidence is missing or unclear. Confirm the inspection is finished and the findings are usable."})
 
     if waiting_on == "Mitch" and normalized_status in {"waiting approval", "advisor estimate", "ready", "advisor finalize ro"}:
-        alerts.append(
-            {
-                "code": "customer_follow_up_due",
-                "severity": "warning" if lane != "P1" else "action",
-                "message": "Customer communication may be due. Confirm expectation, callback time, or closeout plan.",
-            }
-        )
+        alerts.append({"code": "customer_follow_up_due", "severity": "warning" if lane != "P1" else "action", "message": "Customer communication may be due. Confirm expectation, callback time, or closeout plan."})
 
     if waiting_on == "External Hold" and lane == "P4":
-        alerts.append(
-            {
-                "code": "expectation_timer_needed",
-                "severity": "info",
-                "message": "External hold is acceptable, but it should carry a clear follow-up expectation.",
-            }
-        )
+        alerts.append({"code": "expectation_timer_needed", "severity": "info", "message": "External hold is acceptable, but it should carry a clear follow-up expectation."})
 
     if normalized_status == "unknown":
-        alerts.append(
-            {
-                "code": "status_mapping_gap",
-                "severity": "info",
-                "message": "The current status could not be mapped cleanly. Review the AutoFlow evidence and tighten the board rules.",
-            }
-        )
+        alerts.append({"code": "status_mapping_gap", "severity": "info", "message": "The current status could not be mapped cleanly. Review the AutoFlow evidence and tighten the board rules."})
 
     if source_work_order_status not in {"", "unknown"} and source_dvi_status not in {"", "unknown"} and source_work_order_status != source_dvi_status:
-        alerts.append(
-            {
-                "code": "source_status_conflict",
-                "severity": "warning",
-                "message": f"AutoFlow source conflict: work order shows '{source_work_order_status}' while DVI shows '{source_dvi_status}'. Verify which source should drive the live board.",
-            }
-        )
+        alerts.append({"code": "source_status_conflict", "severity": "warning", "message": f"AutoFlow source conflict: work order shows '{source_work_order_status}' while DVI shows '{source_dvi_status}'. Verify which source should drive the live board."})
 
     return alerts
 
@@ -406,31 +315,14 @@ def _incoming_soon(job: dict[str, Any], normalized_status: str, lane: str) -> di
     progress = _to_int(job.get("progress_percent"), 0)
     sold_hours = _to_float(job.get("sold_hours"), 0.0)
     labor_remaining = _to_float(job.get("labor_hours_remaining"), 0.0)
-
     if lane == "P4":
         return None
-
     if progress >= 75 or (sold_hours > 0 and labor_remaining <= 2) or (labor_remaining > 0 and labor_remaining <= 2):
-        return {
-            "active": True,
-            "reason": "Job appears to be within roughly two hours of its next handoff or completion.",
-            "next_stage": "Advisor closeout and customer expectation prep",
-        }
-
+        return {"active": True, "reason": "Job appears to be within roughly two hours of its next handoff or completion.", "next_stage": "Advisor closeout and customer expectation prep"}
     if normalized_status in {"testing", "dvi updates", "advisor estimate", "waiting approval"}:
-        return {
-            "active": True,
-            "reason": "Current status usually leads to an advisor handoff or customer conversation soon.",
-            "next_stage": "Prepare the next customer-facing or production-control move",
-        }
-
+        return {"active": True, "reason": "Current status usually leads to an advisor handoff or customer conversation soon.", "next_stage": "Prepare the next customer-facing or production-control move"}
     if normalized_status in {"ready", "advisor finalize ro", "qc"}:
-        return {
-            "active": True,
-            "reason": "This job is close to a customer-facing finish line and should be prepared before it becomes reactive.",
-            "next_stage": "Land the plane and protect the delivery experience",
-        }
-
+        return {"active": True, "reason": "This job is close to a customer-facing finish line and should be prepared before it becomes reactive.", "next_stage": "Land the plane and protect the delivery experience"}
     return None
 
 
@@ -443,13 +335,10 @@ def _next_action(job: dict[str, Any], waiting_on: str, lane: str, alerts: list[d
 
     if any(alert["code"] == "missing_ro" for alert in alerts):
         return "Link or confirm the RO number so the job can be tracked cleanly through the board."
-
     if any(alert["code"] == "verify_tech_clock_in" for alert in alerts):
         return "Touch base with the tech floor, verify who is actively on the job, and make sure labor is clocked."
-
     if waiting_on == "Preston":
         return "Provide a short escalation note so Preston can solve the blocker without a reactive phone call."
-
     if waiting_on == "Mitch":
         if normalized_status == "waiting approval":
             return "Prepare the next customer touch and tighten the approval plan before momentum drifts."
@@ -459,7 +348,6 @@ def _next_action(job: dict[str, Any], waiting_on: str, lane: str, alerts: list[d
             return "Get the parts plan locked in, set expectations clearly, and keep the repair from idling."
         if normalized_status in {"advisor finalize ro", "ready"}:
             return "Land the plane: finalize closeout, prep delivery, and protect customer trust."
-
     if waiting_on == "Drew":
         if normalized_status == "dvi updates":
             return "Run the DVI findings through the repair-planning flow and redispatch the next move quickly."
@@ -471,18 +359,14 @@ def _next_action(job: dict[str, Any], waiting_on: str, lane: str, alerts: list[d
             if sold_hours > 0:
                 return f"Check live progress against the labor story: about {completed_hours:.1f} of {sold_hours:.1f} sold hours look complete with roughly {labor_remaining:.1f} hour(s) left. Stay ahead of the next advisor handoff."
             return "Check live progress, confirm the labor story matches the floor reality, and stay ahead of the next advisor handoff."
-
     if incoming_soon:
         if sold_hours > 0:
             return f"Use the early warning to land the plane. The board sees about {completed_hours:.1f} of {sold_hours:.1f} labor hours complete with roughly {labor_remaining:.1f} remaining."
         return "Use the early warning to prepare the next handoff before the job becomes reactive."
-
     if lane == "P4":
         return "Keep the hold calm and documented, with a clear follow-up expectation."
-
     if sold_hours > 0 and progress >= 80 and labor_remaining <= 1.5:
         return f"This job looks close to cash-out: about {completed_hours:.1f} of {sold_hours:.1f} hours appear complete with roughly {labor_remaining:.1f} hour(s) left. Decide what it takes to get it to the advisor closeout line."
-
     return "Take the next small step that removes uncertainty and keeps momentum moving."
 
 
@@ -513,23 +397,11 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
     if source_tekmetric_status not in {"", "unknown"} and source_tekmetric_status != chosen_status:
         chosen_reason += f" A manually reported external view differs with '{source_tekmetric_status}', but the board cannot verify that automatically because AutoFlow is the only connected live source."
 
-    source_conflict = {
-        "has_conflict": False,
-        "summary": "",
-        "recommendation": "",
-    }
+    source_conflict = {"has_conflict": False, "summary": "", "recommendation": ""}
     if source_work_order_status not in {"", "unknown"} and source_dvi_status not in {"", "unknown"} and source_work_order_status != source_dvi_status:
-        source_conflict = {
-            "has_conflict": True,
-            "summary": f"AutoFlow internal conflict: work order shows '{source_work_order_status}' while DVI shows '{source_dvi_status}'.",
-            "recommendation": "Verify which AutoFlow status is truly current, then refresh the board so the chosen source and visible workflow line up.",
-        }
+        source_conflict = {"has_conflict": True, "summary": f"AutoFlow internal conflict: work order shows '{source_work_order_status}' while DVI shows '{source_dvi_status}'.", "recommendation": "Verify which AutoFlow status is truly current, then refresh the board so the chosen source and visible workflow line up."}
     elif source_tekmetric_status not in {"", "unknown"} and source_tekmetric_status != chosen_status:
-        source_conflict = {
-            "has_conflict": True,
-            "summary": f"Operator-reported external view shows '{source_tekmetric_status}' while current AutoFlow board evidence shows '{chosen_status}'.",
-            "recommendation": "Verify the ticket in AutoFlow first. If another screen shows something different, treat that as a manual reference until this board has a live connection to it.",
-        }
+        source_conflict = {"has_conflict": True, "summary": f"Operator-reported external view shows '{source_tekmetric_status}' while current AutoFlow board evidence shows '{chosen_status}'.", "recommendation": "Verify the ticket in AutoFlow first. If another screen shows something different, treat that as a manual reference until this board has a live connection to it."}
 
     reasons = []
     if normalized_status != raw_status:
@@ -552,7 +424,7 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
         reasons.append("Operator-reported external status: " + source_tekmetric_status + ".")
     reasons.append(chosen_reason)
 
-    return {
+    result = {
         "ro": _normalize_text(job.get("ro"), "Unknown RO"),
         "customer": _normalize_text(job.get("customer"), "Unknown Customer"),
         "vehicle": _normalize_text(job.get("vehicle"), "Unknown Vehicle"),
@@ -613,6 +485,43 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
         },
     }
 
+    if SCORING_ENGINE_AVAILABLE:
+        score_input = {
+            "ticket_reference": result["ro"],
+            "customer_name": result["customer"],
+            "vehicle": result["vehicle"],
+            "workflow_status": raw_status,
+            "current_status": raw_status,
+            "advisor_name": result["advisor"],
+            "technician": result["technician"],
+            "reason": " ".join([str(r) for r in result["reason_vehicle_is_here"]]) if result["reason_vehicle_is_here"] else result["summary"],
+            "customer_concern": result["summary"],
+            "dvi_completed": dvi_status in {"complete", "completed", "signed off", "complete multi point check", "passed"},
+            "dvi_signoff": dvi_status in {"complete", "completed", "signed off", "complete multi point check", "passed"},
+            "parts_ordered": normalized_status in {"ordering parts", "waiting parts"},
+            "parts_received": normalized_status not in {"ordering parts", "waiting parts"},
+            "approval_status": "approved" if normalized_status not in {"advisor estimate", "waiting approval"} else "pending",
+            "last_updated_at": job.get("generated_at") or job.get("last_updated_at"),
+        }
+        try:
+            scored = _score_job(score_input)
+            result["hermes_priority"] = scored.get("priority", "")
+            result["hermes_owner"] = scored.get("owner", "")
+            result["hermes_board_signal"] = scored.get("board_signal", "")
+            result["hermes_next_action"] = scored.get("next_action", "")
+            result["hermes_bay_message"] = scored.get("bay_message", "")
+            result["hermes_risk_flags"] = scored.get("risk_flags", [])
+            result["hermes_score_reason"] = scored.get("score_reason", "")
+            result["hermes_engine_active"] = True
+        except Exception as e:
+            result["hermes_engine_active"] = False
+            result["hermes_engine_error"] = str(e)
+    else:
+        result["hermes_engine_active"] = False
+        result["hermes_engine_error"] = "scoring_engine.py not found - run from repo root"
+
+    return result
+
 
 def build_board_state() -> dict[str, Any]:
     shop_state = _load_shop_state()
@@ -622,11 +531,14 @@ def build_board_state() -> dict[str, Any]:
     lane_counts = {lane: 0 for lane in ("P1", "P2", "P3", "P4")}
     owner_counts = {owner: 0 for owner in ("Mitch", "Drew", "Preston", "External Hold", "Needs Review")}
     open_alert_count = 0
+    hermes_active_count = 0
 
     for job in jobs:
         lane_counts[job["priority_lane"]] = lane_counts.get(job["priority_lane"], 0) + 1
         owner_counts[job["waiting_on"]] = owner_counts.get(job["waiting_on"], 0) + 1
         open_alert_count += len(job["alerts"])
+        if job.get("hermes_engine_active"):
+            hermes_active_count += 1
 
     return {
         "source": "board_rules_v1",
@@ -637,6 +549,8 @@ def build_board_state() -> dict[str, Any]:
         "lane_counts": lane_counts,
         "waiting_on_counts": owner_counts,
         "open_alert_count": open_alert_count,
+        "hermes_scoring_active": SCORING_ENGINE_AVAILABLE,
+        "hermes_scored_job_count": hermes_active_count,
         "message": shop_state.get("message", "") if isinstance(shop_state, dict) else "",
     }
 
@@ -647,6 +561,8 @@ def main() -> None:
     BOARD_STATE_FILE.write_text(json.dumps(board_state, indent=2), encoding="utf-8")
     print(BOARD_STATE_FILE)
     print(f"Jobs: {board_state['count']}")
+    print(f"Hermes scoring active: {board_state['hermes_scoring_active']}")
+    print(f"Jobs scored by Hermes engine: {board_state['hermes_scored_job_count']}")
 
 
 if __name__ == "__main__":
