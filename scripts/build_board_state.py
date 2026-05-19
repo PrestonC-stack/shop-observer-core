@@ -485,6 +485,7 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
         },
     }
 
+    dvi_status = _normalize_text(job.get("dvi_status"), "").lower()
     if SCORING_ENGINE_AVAILABLE:
         score_input = {
             "ticket_reference": result["ro"],
@@ -567,3 +568,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
