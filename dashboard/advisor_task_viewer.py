@@ -680,7 +680,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (conflictCount > 0) {
                 details.push("Active source/data conflicts: " + conflictCount);
             }
-            const lines = [header].concat(details).join("\n")
+            const lines = [header].concat(details).join("\\n")
                 .split(/\\n+/)
                 .map((line) => line.trim())
                 .filter(Boolean);
