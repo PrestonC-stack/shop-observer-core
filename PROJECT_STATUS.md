@@ -43,6 +43,22 @@
 - Added a deterministic Callie fast-path for status/explainer questions so “why is this in parts / waiting parts / technical advisement?” does not have to wait on the local model
 - These questions now answer directly from board evidence, source statuses, and current mapping logic when a matching RO is found
 
+## Progress Update - May 18, 2026 - Source Precedence + Evidence Panel
+
+- Added `config/source_precedence.json` so source trust and primary/fallback behavior are explicit instead of hidden in code
+- Board jobs now carry:
+  - `source_truths`
+  - `board_choice`
+  - `source_conflict`
+- Job modal now shows a stronger evidence panel:
+  - what AutoFlow says
+  - what TechMetric says when available
+  - what the board chose
+  - why it chose it
+  - what should be fixed next
+- Current honest limitation remains visible:
+  - TechMetric live status is not connected yet in this branch, so TechMetric disagreement can be modeled and displayed when present, but not auto-fetched yet
+
 ## Checkpoint - May 16, 2026 - Live Webhook State Loop
 
 ## Progress Update - May 18, 2026 - Board State Phase 1

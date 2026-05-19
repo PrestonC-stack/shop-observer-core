@@ -828,8 +828,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (job.source_evidence && job.source_evidence.dvi_status) sourceBits.push("DVI: " + job.source_evidence.dvi_status);
             if (job.source_evidence && job.source_evidence.source_work_order_status) sourceBits.push("WO status: " + job.source_evidence.source_work_order_status);
             if (job.source_evidence && job.source_evidence.source_dvi_status) sourceBits.push("DVI status: " + job.source_evidence.source_dvi_status);
+            if (job.source_evidence && job.source_evidence.source_tekmetric_status) sourceBits.push("TechMetric status: " + job.source_evidence.source_tekmetric_status);
             if (job.source_evidence && job.source_evidence.latest_activity) sourceBits.push("Latest activity: " + job.source_evidence.latest_activity);
             if (job.source_evidence && job.source_evidence.routing_bucket_detected) sourceBits.push("Routing bucket detected");
+            const sourceTruths = job.source_truths || {};
+            const boardChoice = job.board_choice || {};
+            const sourceConflict = job.source_conflict || {};
+            const trustScores = sourceTruths.trust_scores || {};
 
             document.getElementById("modal-body").innerHTML =
                 '<div class="grid grid-cols-1 gap-4 md:grid-cols-2">' +
@@ -842,6 +847,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Summary</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.summary || "No summary available.") + "</div></div>" +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Customer Concern Evidence</div><ul class="mt-2 text-zinc-100">' + (concerns || "<li>No DVI concern evidence found.</li>") + "</ul></div>" +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Technician Evidence</div><div class="mt-2 flex flex-wrap gap-2">' + techEvidence + '</div><div class="mt-3 text-xs text-zinc-400">' + escapeHtml(sourceBits.join(" • ") || "No extra source evidence available yet.") + '</div></div>' +
+                '<div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">' +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Source Truths</div><div class="mt-2 space-y-2 text-sm text-zinc-100">' +
+                        '<div>AutoFlow WO: <span class="text-zinc-300">' + escapeHtml(sourceTruths.autoflow_work_order_status || "unknown") + '</span></div>' +
+                        '<div>AutoFlow DVI: <span class="text-zinc-300">' + escapeHtml(sourceTruths.autoflow_dvi_status || "unknown") + '</span></div>' +
+                        '<div>TechMetric: <span class="text-zinc-300">' + escapeHtml(sourceTruths.techmetric_status || "unknown") + '</span></div>' +
+                        '<div class="pt-2 text-xs text-zinc-400">Primary source: ' + escapeHtml(sourceTruths.primary_source || "autoflow") + ' • Fallback: ' + escapeHtml(sourceTruths.fallback_source || "techmetric") + '</div>' +
+                        '<div class="text-xs text-zinc-500">Trust scores — AutoFlow: ' + escapeHtml(String(trustScores.autoflow || 85)) + ' • TechMetric: ' + escapeHtml(String(trustScores.techmetric || 70)) + '</div>' +
+                    '</div></div>' +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Board Decision</div><div class="mt-2 space-y-2 text-sm text-zinc-100">' +
+                        '<div>Chosen source: <span class="text-zinc-300">' + escapeHtml(boardChoice.chosen_source || "unknown") + '</span></div>' +
+                        '<div>Chosen status: <span class="text-zinc-300">' + escapeHtml(boardChoice.chosen_status || "unknown") + '</span></div>' +
+                        '<div>Canonical status: <span class="text-zinc-300">' + escapeHtml(boardChoice.canonical_status || "unknown") + '</span></div>' +
+                        '<div class="pt-2 text-xs text-zinc-400">' + escapeHtml(boardChoice.reason || "No board-choice explanation captured yet.") + '</div>' +
+                    '</div></div>' +
+                '</div>' +
+                '<div class="mt-4 rounded-2xl border ' + ((sourceConflict.has_conflict) ? 'border-amber-700 bg-amber-950/30' : 'border-zinc-800 bg-zinc-900') + ' p-4"><div class="text-xs uppercase tracking-wide ' + ((sourceConflict.has_conflict) ? 'text-amber-300' : 'text-zinc-500') + '">Source Conflict</div><div class="mt-2 text-zinc-100">' + escapeHtml(sourceConflict.summary || "No live source conflict is currently detected in the connected board evidence.") + '</div><div class="mt-3 text-xs text-zinc-400">' + escapeHtml(sourceConflict.recommendation || "If what you see on screen differs from the board, verify the upstream source system first.") + '</div></div>' +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Why The Board Put It Here</div><ul class="mt-2 text-zinc-100">' + (reasons || "<li>No board reasoning captured yet.</li>") + "</ul></div>" +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Helper Alerts</div><ul class="mt-2 text-zinc-100">' + (alerts || "<li>No active alerts.</li>") + "</ul></div>" +
                 buildActionPanel(job, mode);

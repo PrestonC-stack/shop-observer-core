@@ -11,6 +11,7 @@ CONFIG_DIR = ROOT / "config"
 SHOP_STATE_FILE = STATE_DIR / "shop_state.json"
 BOARD_STATE_FILE = STATE_DIR / "board_state.json"
 ROSTER_FILE = CONFIG_DIR / "employee_roster.json"
+SOURCE_PRECEDENCE_FILE = CONFIG_DIR / "source_precedence.json"
 ACTIVE_TECH_ALIASES = {
     "luis cervantes": {"luis cervantes", "l cervantes", "cervantes", "l. cervantes", "lcervantes"},
     "jonathan leithoff": {"jonathan leithoff", "jonathan l", "jonathan l.", "johnathanl", "jon leithoff"},
@@ -113,7 +114,30 @@ def _load_roster() -> dict[str, Any]:
     return {"people": []}
 
 
+def _load_source_precedence() -> dict[str, Any]:
+    if not SOURCE_PRECEDENCE_FILE.exists():
+        return {
+            "primary": "autoflow",
+            "fallback": "techmetric",
+            "trust_scores": {"autoflow": 85, "techmetric": 70},
+            "override_rules": {},
+        }
+    try:
+        payload = json.loads(SOURCE_PRECEDENCE_FILE.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        pass
+    return {
+        "primary": "autoflow",
+        "fallback": "techmetric",
+        "trust_scores": {"autoflow": 85, "techmetric": 70},
+        "override_rules": {},
+    }
+
+
 ROSTER = _load_roster()
+SOURCE_PRECEDENCE = _load_source_precedence()
 
 
 def _is_active_tech_name(name: str) -> bool:
@@ -459,6 +483,38 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
     incoming_soon = _incoming_soon(job, normalized_status, lane)
     technicians = _split_people(job.get("technician", ""))
     technician_candidates = [_normalize_text(name, "") for name in job.get("technician_candidates", []) if _normalize_text(name, "")]
+    source_work_order_status = _normalize_text(job.get("source_work_order_status"), "unknown")
+    source_dvi_status = _normalize_text(job.get("source_dvi_status"), "unknown")
+    source_tekmetric_status = _normalize_text(job.get("source_tekmetric_status"), "unknown")
+    primary_source = _normalize_text(SOURCE_PRECEDENCE.get("primary"), "autoflow")
+    fallback_source = _normalize_text(SOURCE_PRECEDENCE.get("fallback"), "techmetric")
+    trust_scores = SOURCE_PRECEDENCE.get("trust_scores", {}) if isinstance(SOURCE_PRECEDENCE.get("trust_scores"), dict) else {}
+    chosen_source = primary_source
+    chosen_status = source_dvi_status if source_dvi_status not in {"", "unknown"} else source_work_order_status
+    chosen_reason = "Board currently follows AutoFlow as the primary source for live status because TechMetric live status is not connected in this board yet."
+    if source_work_order_status not in {"", "unknown"} and source_dvi_status not in {"", "unknown"} and source_work_order_status != source_dvi_status:
+        chosen_reason = f"AutoFlow sources disagree internally, so the board currently follows DVI '{source_dvi_status}' over work order '{source_work_order_status}'."
+    if source_tekmetric_status not in {"", "unknown"} and source_tekmetric_status != chosen_status:
+        chosen_reason += f" TechMetric currently differs with '{source_tekmetric_status}', but TechMetric is not the live primary source in this board yet."
+
+    source_conflict = {
+        "has_conflict": False,
+        "summary": "",
+        "recommendation": "",
+    }
+    if source_work_order_status not in {"", "unknown"} and source_dvi_status not in {"", "unknown"} and source_work_order_status != source_dvi_status:
+        source_conflict = {
+            "has_conflict": True,
+            "summary": f"AutoFlow internal conflict: work order shows '{source_work_order_status}' while DVI shows '{source_dvi_status}'.",
+            "recommendation": "Verify which AutoFlow status is truly current, then refresh the board so the chosen source and visible workflow line up.",
+        }
+    elif source_tekmetric_status not in {"", "unknown"} and source_tekmetric_status != chosen_status:
+        source_conflict = {
+            "has_conflict": True,
+            "summary": f"Source mismatch: TechMetric shows '{source_tekmetric_status}' while current board-driving AutoFlow status shows '{chosen_status}'.",
+            "recommendation": "Verify the ticket in both systems and update the source-of-truth workflow status before trusting the lane placement.",
+        }
+
     reasons = []
     if normalized_status != raw_status:
         reasons.append(f"Status '{raw_status}' mapped to '{normalized_status}'.")
@@ -468,10 +524,13 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
         reasons.append("Technician evidence seen: " + ", ".join(technician_candidates[:4]) + ".")
     if job.get("reason_vehicle_is_here"):
         reasons.append("Customer concern evidence found in DVI reason-vehicle-is-here notes.")
-    if _normalize_text(job.get("source_work_order_status"), "unknown") not in {"", "unknown"}:
-        reasons.append("Work order source status: " + _normalize_text(job.get("source_work_order_status"), "unknown") + ".")
-    if _normalize_text(job.get("source_dvi_status"), "unknown") not in {"", "unknown"}:
-        reasons.append("DVI source status: " + _normalize_text(job.get("source_dvi_status"), "unknown") + ".")
+    if source_work_order_status not in {"", "unknown"}:
+        reasons.append("Work order source status: " + source_work_order_status + ".")
+    if source_dvi_status not in {"", "unknown"}:
+        reasons.append("DVI source status: " + source_dvi_status + ".")
+    if source_tekmetric_status not in {"", "unknown"}:
+        reasons.append("TechMetric source status: " + source_tekmetric_status + ".")
+    reasons.append(chosen_reason)
 
     return {
         "ro": _normalize_text(job.get("ro"), "Unknown RO"),
@@ -496,12 +555,31 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
         "alerts": alerts,
         "next_action": _next_action(job, waiting_on, lane, alerts, incoming_soon),
         "board_reasons": reasons,
+        "source_truths": {
+            "autoflow_work_order_status": source_work_order_status,
+            "autoflow_dvi_status": source_dvi_status,
+            "techmetric_status": source_tekmetric_status,
+            "primary_source": primary_source,
+            "fallback_source": fallback_source,
+            "trust_scores": {
+                "autoflow": _to_int(trust_scores.get("autoflow"), 85),
+                "techmetric": _to_int(trust_scores.get("techmetric"), 70),
+            },
+        },
+        "board_choice": {
+            "chosen_source": chosen_source,
+            "chosen_status": _normalize_text(chosen_status, "unknown"),
+            "canonical_status": normalized_status,
+            "reason": chosen_reason,
+        },
+        "source_conflict": source_conflict,
         "source_evidence": {
             "shop_state_generated_at": _normalize_text(job.get("generated_at"), ""),
             "location": _normalize_text(job.get("location"), "Unknown"),
             "dvi_status": _normalize_text(job.get("dvi_status"), "unknown"),
-            "source_work_order_status": _normalize_text(job.get("source_work_order_status"), "unknown"),
-            "source_dvi_status": _normalize_text(job.get("source_dvi_status"), "unknown"),
+            "source_work_order_status": source_work_order_status,
+            "source_dvi_status": source_dvi_status,
+            "source_tekmetric_status": source_tekmetric_status,
             "latest_activity": _normalize_text(job.get("latest_activity"), ""),
             "advisor_known": _normalize_text(job.get("advisor"), "").lower() in ACTIVE_ADVISORS,
             "active_tech_detected": any(_is_active_tech_name(name) for name in technicians),
