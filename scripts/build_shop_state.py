@@ -125,6 +125,9 @@ def _normalize_job(item: dict[str, Any]) -> dict[str, Any]:
         ),
         "Unassigned",
     )
+    technician_candidates = _as_list(_first_value(item, "technician_candidates", default=[]))
+    if technician == "Unassigned" and technician_candidates:
+        technician = _normalize_text(technician_candidates[0], "Unassigned")
 
     customer = _normalize_text(
         _first_value(item, "customer", "customer_name", "customerName", default=""),
@@ -160,17 +163,20 @@ def _normalize_job(item: dict[str, Any]) -> dict[str, Any]:
         _first_value(item, "summary", "issue", "concern", "description", default=""),
         notes or latest_activity or workflow_status.replace("_", " ").title(),
     )
+    reason_vehicle_is_here = _as_list(_first_value(item, "reason_vehicle_is_here", default=[]))
 
     normalized_job = {
         "ro": ro,
         "workflow_status": workflow_status,
         "advisor": advisor,
         "technician": technician,
+        "technician_candidates": technician_candidates,
         "customer": customer,
         "vehicle": vehicle,
         "bay": bay,
         "summary": summary,
         "notes": notes,
+        "reason_vehicle_is_here": reason_vehicle_is_here,
         "progress_percent": _to_int(
             _first_value(item, "progress_percent", "progressPercent", "percent_complete", default=0),
             0,

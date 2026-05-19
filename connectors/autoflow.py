@@ -117,6 +117,92 @@ def _normalize_status(value: Any, default: str = "unknown") -> str:
     return str(value).strip().lower().replace("-", "_").replace(" ", "_")
 
 
+def _normalize_text(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text if text else default
+
+
+def _dedupe_strings(values: Iterable[Any]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        text = _normalize_text(value, "")
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(text)
+    return result
+
+
+def _extract_reason_vehicle_is_here(dvi: dict[str, Any]) -> list[str]:
+    rows = _first_value(dvi, ("reason_vehicle_is_here",), default=[])
+    if not isinstance(rows, list):
+        return []
+    details = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        text = _normalize_text(row.get("details"), "")
+        if text:
+            details.append(text)
+    return _dedupe_strings(details)
+
+
+def _extract_technician_candidates(work_order: dict[str, Any], dvi: dict[str, Any]) -> list[str]:
+    candidates: list[str] = []
+    direct_candidates = [
+        _first_value(
+            work_order,
+            ("technician", "name"),
+            ("technician",),
+            ("assignedTech", "name"),
+            ("assignedTech",),
+            ("assigned_technician", "name"),
+            ("assigned_technician",),
+            ("technicianName",),
+            ("tech_name",),
+            ("assignedTechName",),
+            ("tech",),
+            ("assignedTo",),
+            ("assigned_to",),
+            ("labor", "technicianName"),
+            default="",
+        )
+    ]
+    candidates.extend(direct_candidates)
+
+    dvi_items = _first_value(work_order, ("dvi_items",), default=[])
+    if isinstance(dvi_items, list):
+        for item in dvi_items:
+            if not isinstance(item, dict):
+                continue
+            candidates.append(item.get("sms_user"))
+            candidates.append(item.get("added_by"))
+
+    dvis = _first_value(dvi, ("dvis",), default=[])
+    if isinstance(dvis, list):
+        for inspection in dvis:
+            if not isinstance(inspection, dict):
+                continue
+            candidates.append(inspection.get("completed_by"))
+            categories = inspection.get("dvi_category")
+            if isinstance(categories, list):
+                for category in categories:
+                    if not isinstance(category, dict):
+                        continue
+                    items = category.get("dvi_items")
+                    if isinstance(items, list):
+                        for dvi_item in items:
+                            if not isinstance(dvi_item, dict):
+                                continue
+    return _dedupe_strings(candidates)
+
+
 def _unwrap_response_envelope(response: Any) -> Any:
     if not isinstance(response, dict):
         return response
@@ -326,6 +412,10 @@ def merge_work_order_and_dvi(
         part for part in (vehicle_year, vehicle_make, vehicle_model, vehicle_submodel) if part
     ).strip()
 
+    reason_vehicle_is_here = _extract_reason_vehicle_is_here(dvi)
+    technician_candidates = _extract_technician_candidates(work_order, dvi)
+    technician_name = technician_candidates[0] if technician_candidates else "Unassigned"
+
     notes = str(
         _first_value(
             dvi,
@@ -347,6 +437,8 @@ def merge_work_order_and_dvi(
             ),
         )
     )
+    concern_summary = " | ".join(reason_vehicle_is_here[:2]).strip()
+    fallback_summary = concern_summary or notes or workflow_status.replace("_", " ").title()
 
     return {
         "ticket_reference": ticket_reference,
@@ -387,25 +479,8 @@ def merge_work_order_and_dvi(
         "advisor_name": advisor_name,
         "customer_name": customer_name,
         "vehicle": vehicle,
-        "technician_name": str(
-            _first_value(
-                work_order,
-                ("technician", "name"),
-                ("technician",),
-                ("assignedTech", "name"),
-                ("assignedTech",),
-                ("assigned_technician", "name"),
-                ("assigned_technician",),
-                ("technicianName",),
-                ("tech_name",),
-                ("assignedTechName",),
-                ("tech",),
-                ("assignedTo",),
-                ("assigned_to",),
-                ("labor", "technicianName"),
-                default="Unassigned",
-            )
-        ),
+        "technician_name": technician_name,
+        "technician_candidates": technician_candidates,
         "clocked_in": _to_bool(
             _first_value(
                 work_order,
@@ -468,6 +543,8 @@ def merge_work_order_and_dvi(
             )
         ),
         "notes": notes,
+        "summary": fallback_summary,
+        "reason_vehicle_is_here": reason_vehicle_is_here,
         "source_refs": {
             "ro_number": ticket_reference,
             "work_order_id": _first_value(

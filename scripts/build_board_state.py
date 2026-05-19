@@ -7,17 +7,22 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE_DIR = ROOT / "state"
+CONFIG_DIR = ROOT / "config"
 SHOP_STATE_FILE = STATE_DIR / "shop_state.json"
 BOARD_STATE_FILE = STATE_DIR / "board_state.json"
+ROSTER_FILE = CONFIG_DIR / "employee_roster.json"
 ACTIVE_TECH_ALIASES = {
-    "luis cervantes": {"luis cervantes", "l cervantes", "cervantes", "l. cervantes"},
+    "luis cervantes": {"luis cervantes", "l cervantes", "cervantes", "l. cervantes", "lcervantes"},
     "jonathan leithoff": {"jonathan leithoff", "jonathan l", "jonathan l.", "johnathanl", "jon leithoff"},
-    "tc charleston": {"tc charleston", "t c charleston", "charleston"},
+    "tc charleston": {"tc charleston", "t c charleston", "charleston", "marvin charleston"},
     "steve chubb": {"steve chubb", "steve c", "steve c.", "chubb"},
-    "shop hitlist": {"shop hitlist", "shophitlist", "shop hit list"},
-    "di testing": {"di testing", "d i testing"},
 }
-ACTIVE_ADVISORS = {"mitch callahan", "drew mize", "admin user"}
+ROUTING_BUCKET_ALIASES = {
+    "shop hitlist": {"shop hitlist", "shophitlist", "shop hit list", ".shophitlist"},
+    "diag testing": {"diag testing", "di testing", "dtesting", "d i testing"},
+    "admin routing": {"admin", "admin user"},
+}
+ACTIVE_ADVISORS = {"mitch callahan", "drew mize", "preston callahan"}
 
 
 def _normalize_text(value: Any, default: str = "") -> str:
@@ -96,12 +101,51 @@ def _normalize_person_key(name: str) -> str:
     return "".join(ch for ch in _normalize_text(name, "").lower() if ch.isalnum() or ch.isspace()).strip()
 
 
+def _load_roster() -> dict[str, Any]:
+    if not ROSTER_FILE.exists():
+        return {"people": []}
+    try:
+        payload = json.loads(ROSTER_FILE.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        pass
+    return {"people": []}
+
+
+ROSTER = _load_roster()
+
+
 def _is_active_tech_name(name: str) -> bool:
     normalized = _normalize_person_key(name)
     if not normalized:
         return False
     for aliases in ACTIVE_TECH_ALIASES.values():
         if normalized in {_normalize_person_key(alias) for alias in aliases}:
+            return True
+    for person in ROSTER.get("people", []):
+        if not isinstance(person, dict) or person.get("kind") != "person" or not person.get("active", False):
+            continue
+        if person.get("role_family") != "technician":
+            continue
+        aliases = person.get("aliases", [])
+        if normalized in {_normalize_person_key(alias) for alias in aliases if alias}:
+            return True
+    return False
+
+
+def _is_routing_bucket_name(name: str) -> bool:
+    normalized = _normalize_person_key(name)
+    if not normalized:
+        return False
+    for aliases in ROUTING_BUCKET_ALIASES.values():
+        if normalized in {_normalize_person_key(alias) for alias in aliases}:
+            return True
+    for person in ROSTER.get("people", []):
+        if not isinstance(person, dict) or person.get("kind") != "bucket":
+            continue
+        aliases = person.get("aliases", [])
+        if normalized in {_normalize_person_key(alias) for alias in aliases if alias}:
             return True
     return False
 
@@ -200,7 +244,10 @@ def _collect_alerts(job: dict[str, Any], normalized_status: str, waiting_on: str
     alerts: list[dict[str, str]] = []
     ro = _normalize_text(job.get("ro"), "")
     technician_names = _split_people(job.get("technician", ""))
+    technician_candidates = [_normalize_text(name, "") for name in job.get("technician_candidates", []) if _normalize_text(name, "")]
     known_active_tech = any(_is_active_tech_name(name) for name in technician_names)
+    known_active_candidate = any(_is_active_tech_name(name) for name in technician_candidates)
+    routing_bucket_present = any(_is_routing_bucket_name(name) for name in technician_names + technician_candidates)
     summary = _normalize_text(job.get("summary"), "")
     notes = _normalize_text(job.get("notes"), "")
     dvi_status = _normalize_text(job.get("dvi_status"), "").lower()
@@ -224,12 +271,23 @@ def _collect_alerts(job: dict[str, Any], normalized_status: str, waiting_on: str
                 }
             )
 
-    if waiting_on == "Drew" and normalized_status in {"servicing", "ready for tech", "awaiting tech"} and not known_active_tech:
+    tech_required_statuses = {"ready for tech", "awaiting tech", "servicing", "testing", "dvi updates", "qc"}
+
+    if waiting_on == "Drew" and normalized_status in tech_required_statuses and not (known_active_tech or known_active_candidate):
         alerts.append(
             {
                 "code": "missing_tech_assignment",
                 "severity": "warning",
                 "message": "No clear active technician assignment is available in the current evidence. Verify dispatch and ownership on the floor.",
+            }
+        )
+
+    if normalized_status in tech_required_statuses and routing_bucket_present:
+        alerts.append(
+            {
+                "code": "routing_bucket_active",
+                "severity": "warning",
+                "message": "This job is sitting on a routing bucket instead of a real technician. Assign a live tech before treating it as active production.",
             }
         )
 
@@ -389,6 +447,16 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
     alerts = _collect_alerts(job, normalized_status, waiting_on, lane)
     incoming_soon = _incoming_soon(job, normalized_status, lane)
     technicians = _split_people(job.get("technician", ""))
+    technician_candidates = [_normalize_text(name, "") for name in job.get("technician_candidates", []) if _normalize_text(name, "")]
+    reasons = []
+    if normalized_status != raw_status:
+        reasons.append(f"Status '{raw_status}' mapped to '{normalized_status}'.")
+    reasons.append(f"Waiting on {waiting_on} because the current workflow points to that ownership lane.")
+    reasons.append(f"Placed in {lane} from status, urgency, progress, and hold logic.")
+    if technician_candidates:
+        reasons.append("Technician evidence seen: " + ", ".join(technician_candidates[:4]) + ".")
+    if job.get("reason_vehicle_is_here"):
+        reasons.append("Customer concern evidence found in DVI reason-vehicle-is-here notes.")
 
     return {
         "ro": _normalize_text(job.get("ro"), "Unknown RO"),
@@ -399,8 +467,10 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
         "advisor": _normalize_text(job.get("advisor"), "Unknown"),
         "technician": _normalize_text(job.get("technician"), "Unassigned"),
         "technicians": technicians,
+        "technician_candidates": technician_candidates,
         "summary": _normalize_text(job.get("summary"), ""),
         "notes": _normalize_text(job.get("notes"), ""),
+        "reason_vehicle_is_here": job.get("reason_vehicle_is_here", []) if isinstance(job.get("reason_vehicle_is_here"), list) else [],
         "clocked_in": _to_bool(job.get("clocked_in")),
         "progress_percent": _to_int(job.get("progress_percent"), 0),
         "labor_hours_remaining": _to_float(job.get("labor_hours_remaining"), 0.0),
@@ -410,6 +480,7 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
         "incoming_soon": incoming_soon,
         "alerts": alerts,
         "next_action": _next_action(job, waiting_on, lane, alerts, incoming_soon),
+        "board_reasons": reasons,
         "source_evidence": {
             "shop_state_generated_at": _normalize_text(job.get("generated_at"), ""),
             "location": _normalize_text(job.get("location"), "Unknown"),
@@ -417,6 +488,7 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
             "latest_activity": _normalize_text(job.get("latest_activity"), ""),
             "advisor_known": _normalize_text(job.get("advisor"), "").lower() in ACTIVE_ADVISORS,
             "active_tech_detected": any(_is_active_tech_name(name) for name in technicians),
+            "routing_bucket_detected": any(_is_routing_bucket_name(name) for name in technicians + technician_candidates),
         },
     }
 
