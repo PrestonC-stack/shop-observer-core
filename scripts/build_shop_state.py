@@ -168,6 +168,8 @@ def _normalize_job(item: dict[str, Any]) -> dict[str, Any]:
     normalized_job = {
         "ro": ro,
         "workflow_status": workflow_status,
+        "source_work_order_status": _normalize_text(_first_value(item, "source_work_order_status", default="unknown"), "unknown"),
+        "source_dvi_status": _normalize_text(_first_value(item, "source_dvi_status", default="unknown"), "unknown"),
         "advisor": advisor,
         "technician": technician,
         "technician_candidates": technician_candidates,
