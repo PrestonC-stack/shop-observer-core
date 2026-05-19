@@ -727,6 +727,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             window.location.reload();
         }
 
+        function extractRoFromQuestion(question) {
+            const match = String(question || "").match(/\\b([0-9]{4,6})\\b/);
+            return match ? match[1] : "";
+        }
+
         function wireJobCards() {
             document.querySelectorAll("[data-ro].job-card").forEach((card) => {
                 card.addEventListener("click", () => openJobModal(card.dataset.ro || "", "details"));
@@ -1081,6 +1086,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
             const panel = document.getElementById("modal-response");
             const question = note.value.trim();
+            const inferredRo = extractRoFromQuestion(question);
+            const effectiveRo = activeModalRo || inferredRo || null;
             const sendButton = document.getElementById("submit-hermes-question");
             if (sendButton) sendButton.disabled = true;
             if (panel) {
@@ -1095,7 +1102,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    ro_number: activeModalRo || null,
+                    ro_number: effectiveRo,
                     mode: activeModalMode,
                     question: question,
                     source: "dashboard"
@@ -1440,6 +1447,22 @@ def _extract_ro_from_question(question):
     return ""
 
 
+def _is_status_explainer_question(question):
+    normalized = str(question or "").strip().lower()
+    triggers = [
+        "why is",
+        "why does",
+        "showing",
+        "status",
+        "auto flow",
+        "autoflow",
+        "technical advisement",
+        "waiting for parts",
+        "parts",
+    ]
+    return any(trigger in normalized for trigger in triggers)
+
+
 def _build_callie_prompt(question, job=None, mode="general"):
     insights = _load_callie_insights()
     prompt_lines = [
@@ -1487,7 +1510,7 @@ def _build_callie_prompt(question, job=None, mode="general"):
 
 def _call_ollama(question, job=None, mode="general"):
     prompt = _build_callie_prompt(question, job=job, mode=mode)
-    fallback_answer = _hermes_answer(question, job=job, mode=mode)
+    fallback_answer = _deterministic_callie_answer(question, job=job, mode=mode)
     if not shutil.which("ollama"):
         return {
             "response": fallback_answer + " Live model note: Ollama was not available on this machine, so Callie answered from the board evidence layer.",
@@ -1560,6 +1583,25 @@ def _hermes_answer(question, job=None, mode="general"):
         return lead
 
     return "Callie logged the board question. The next best move is to capture the blocker, the owner, and the promised follow-up so the system can coach the handoff instead of guessing."
+
+
+def _deterministic_callie_answer(question, job=None, mode="general"):
+    if job and _is_status_explainer_question(question):
+        source = job.get("source_evidence", {}) if isinstance(job.get("source_evidence"), dict) else {}
+        workflow_status = str(job.get("workflow_status", "unknown"))
+        canonical_status = str(job.get("canonical_status", "unknown"))
+        waiting_on = str(job.get("waiting_on", "Needs Review"))
+        source_wo = str(source.get("source_work_order_status", "unknown"))
+        source_dvi = str(source.get("source_dvi_status", "unknown"))
+        reasons = job.get("board_reasons", []) if isinstance(job.get("board_reasons"), list) else []
+        reason_text = " ".join(str(reason) for reason in reasons[:2]) if reasons else "The board is using the current mapped workflow evidence."
+        return (
+            f"RO {job.get('ro', 'Unknown RO')} is currently showing workflow status '{workflow_status}', "
+            f"which maps to '{canonical_status}' and currently routes to {waiting_on}. "
+            f"AutoFlow evidence shows WO '{source_wo}' and DVI '{source_dvi}'. "
+            f"{reason_text} If AutoFlow is visually showing something different, fix the source ticket first, then refresh the board so the status mapping can line up."
+        )
+    return _hermes_answer(question, job=job, mode=mode)
 
 
 @app.route("/")
@@ -1722,8 +1764,15 @@ def api_callie_ask():
         }
     else:
         job = _find_job(ro) if ro else None
-        live_reply = _call_ollama(question, job=job, mode=mode)
-        reply = live_reply
+        if job and _is_status_explainer_question(question):
+            reply = {
+                "response": _deterministic_callie_answer(question, job=job, mode=mode),
+                "confidence": 92,
+                "model": "fast-status-explainer",
+            }
+        else:
+            live_reply = _call_ollama(question, job=job, mode=mode)
+            reply = live_reply
         if is_board_level and not reply.get("response", "").strip():
             reply["response"] = _hermes_answer(question, job=None, mode="general")
 
