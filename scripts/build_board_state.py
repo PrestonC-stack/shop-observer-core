@@ -118,8 +118,8 @@ def _load_source_precedence() -> dict[str, Any]:
     if not SOURCE_PRECEDENCE_FILE.exists():
         return {
             "primary": "autoflow",
-            "fallback": "techmetric",
-            "trust_scores": {"autoflow": 85, "techmetric": 70},
+            "fallback": "manual_review",
+            "trust_scores": {"autoflow": 90, "manual_review": 40},
             "override_rules": {},
         }
     try:
@@ -130,8 +130,8 @@ def _load_source_precedence() -> dict[str, Any]:
         pass
     return {
         "primary": "autoflow",
-        "fallback": "techmetric",
-        "trust_scores": {"autoflow": 85, "techmetric": 70},
+        "fallback": "manual_review",
+        "trust_scores": {"autoflow": 90, "manual_review": 40},
         "override_rules": {},
     }
 
@@ -487,15 +487,15 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
     source_dvi_status = _normalize_text(job.get("source_dvi_status"), "unknown")
     source_tekmetric_status = _normalize_text(job.get("source_tekmetric_status"), "unknown")
     primary_source = _normalize_text(SOURCE_PRECEDENCE.get("primary"), "autoflow")
-    fallback_source = _normalize_text(SOURCE_PRECEDENCE.get("fallback"), "techmetric")
+    fallback_source = _normalize_text(SOURCE_PRECEDENCE.get("fallback"), "manual_review")
     trust_scores = SOURCE_PRECEDENCE.get("trust_scores", {}) if isinstance(SOURCE_PRECEDENCE.get("trust_scores"), dict) else {}
     chosen_source = primary_source
     chosen_status = source_dvi_status if source_dvi_status not in {"", "unknown"} else source_work_order_status
-    chosen_reason = "Board currently follows AutoFlow as the primary source for live status because TechMetric live status is not connected in this board yet."
+    chosen_reason = "Board currently follows AutoFlow as the only connected live status source in this board."
     if source_work_order_status not in {"", "unknown"} and source_dvi_status not in {"", "unknown"} and source_work_order_status != source_dvi_status:
         chosen_reason = f"AutoFlow sources disagree internally, so the board currently follows DVI '{source_dvi_status}' over work order '{source_work_order_status}'."
     if source_tekmetric_status not in {"", "unknown"} and source_tekmetric_status != chosen_status:
-        chosen_reason += f" TechMetric currently differs with '{source_tekmetric_status}', but TechMetric is not the live primary source in this board yet."
+        chosen_reason += f" A manually reported external view differs with '{source_tekmetric_status}', but the board cannot verify that automatically because AutoFlow is the only connected live source."
 
     source_conflict = {
         "has_conflict": False,
@@ -511,8 +511,8 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
     elif source_tekmetric_status not in {"", "unknown"} and source_tekmetric_status != chosen_status:
         source_conflict = {
             "has_conflict": True,
-            "summary": f"Source mismatch: TechMetric shows '{source_tekmetric_status}' while current board-driving AutoFlow status shows '{chosen_status}'.",
-            "recommendation": "Verify the ticket in both systems and update the source-of-truth workflow status before trusting the lane placement.",
+            "summary": f"Operator-reported external view shows '{source_tekmetric_status}' while current AutoFlow board evidence shows '{chosen_status}'.",
+            "recommendation": "Verify the ticket in AutoFlow first. If another screen shows something different, treat that as a manual reference until this board has a live connection to it.",
         }
 
     reasons = []
@@ -529,7 +529,7 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
     if source_dvi_status not in {"", "unknown"}:
         reasons.append("DVI source status: " + source_dvi_status + ".")
     if source_tekmetric_status not in {"", "unknown"}:
-        reasons.append("TechMetric source status: " + source_tekmetric_status + ".")
+        reasons.append("Operator-reported external status: " + source_tekmetric_status + ".")
     reasons.append(chosen_reason)
 
     return {
@@ -558,12 +558,12 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
         "source_truths": {
             "autoflow_work_order_status": source_work_order_status,
             "autoflow_dvi_status": source_dvi_status,
-            "techmetric_status": source_tekmetric_status,
+            "manual_external_status": source_tekmetric_status,
             "primary_source": primary_source,
             "fallback_source": fallback_source,
             "trust_scores": {
-                "autoflow": _to_int(trust_scores.get("autoflow"), 85),
-                "techmetric": _to_int(trust_scores.get("techmetric"), 70),
+                "autoflow": _to_int(trust_scores.get("autoflow"), 90),
+                "manual_review": _to_int(trust_scores.get("manual_review"), 40),
             },
         },
         "board_choice": {

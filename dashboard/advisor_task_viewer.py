@@ -73,7 +73,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
             <div class="flex flex-wrap items-center gap-2">
                 <div class="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-300">
-                    Last Updated: <span id="board-updated-at">__TIMESTAMP__</span>
+                    Board Generated: <span id="board-updated-at">__TIMESTAMP__</span>
+                </div>
+                <div class="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-500">
+                    Page Refreshed: <span id="board-refreshed-at">__TIMESTAMP__</span>
                 </div>
                 <button id="refresh-jobs" class="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-zinc-800" type="button">Refresh Board</button>
             </div>
@@ -129,19 +132,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div id="analytics-panel" class="mt-5 hidden-panel space-y-4">
             <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
                 <div class="metric-card rounded-3xl border border-zinc-800 p-5">
-                    <div class="text-xs uppercase tracking-wide text-zinc-500">Shop Productivity Score</div>
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Board Coverage Score</div>
                     <div id="metric-shop-productivity" class="mt-2 text-4xl font-black text-emerald-400">0%</div>
                 </div>
                 <div class="metric-card rounded-3xl border border-zinc-800 p-5">
-                    <div class="text-xs uppercase tracking-wide text-zinc-500">Front Of House Score</div>
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Front Coverage</div>
                     <div id="metric-front-score" class="mt-2 text-4xl font-black text-cyan-300">0%</div>
                 </div>
                 <div class="metric-card rounded-3xl border border-zinc-800 p-5">
-                    <div class="text-xs uppercase tracking-wide text-zinc-500">Back Of House Score</div>
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Back Coverage</div>
                     <div id="metric-back-score" class="mt-2 text-4xl font-black text-violet-300">0%</div>
                 </div>
                 <div class="metric-card rounded-3xl border border-zinc-800 p-5">
-                    <div class="text-xs uppercase tracking-wide text-zinc-500">Support Score</div>
+                    <div class="text-xs uppercase tracking-wide text-zinc-500">Open Helper Signals</div>
                     <div id="metric-support-score" class="mt-2 text-4xl font-black text-amber-300">0%</div>
                 </div>
             </div>
@@ -169,6 +172,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <div class="panel-card rounded-3xl border border-zinc-800 p-5">
                     <h2 class="text-xl font-bold">Ownership Load</h2>
                     <div id="ownership-patterns" class="mt-4 space-y-3"></div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div class="panel-card rounded-3xl border border-zinc-800 p-5">
+                    <h2 class="text-xl font-bold">Recent Source Activity</h2>
+                    <p class="mt-2 text-sm text-zinc-500">What the current AutoFlow-fed board most recently saw on active jobs.</p>
+                    <div id="activity-patterns" class="mt-4 space-y-3"></div>
+                </div>
+                <div class="panel-card rounded-3xl border border-zinc-800 p-5">
+                    <h2 class="text-xl font-bold">Recent AI / Support Log</h2>
+                    <p class="mt-2 text-sm text-zinc-500">Recent advisor notes, overrides, and Callie question trail.</p>
+                    <div id="ai-activity-patterns" class="mt-4 space-y-3"></div>
                 </div>
             </div>
         </div>
@@ -527,6 +543,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const communicationNeeds = jobs.filter((job) => (job.alerts || []).some((alert) => alert.code === "customer_follow_up_due")).length;
             const stuckJobs = jobs.filter((job) => job.priority_lane === "P2" || job.waiting_on === "Needs Review").length;
             const dviIssues = jobs.filter((job) => hasAlert(job, ["missing_completed_dvi"])).length;
+            const latestActivityJobs = jobs.filter((job) => String((((job.source_evidence || {}).latest_activity) || "")).trim()).length;
+            const activeTechKnown = jobs.filter((job) => Boolean((job.source_evidence || {}).active_tech_detected)).length;
+            const routingHolds = jobs.filter((job) => Boolean((job.source_evidence || {}).routing_bucket_detected)).length;
             const dataNeeds = jobs.filter((job) => (job.alerts || []).some((alert) =>
                 alert.code === "missing_ro" ||
                 alert.code === "status_mapping_gap" ||
@@ -546,7 +565,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             document.getElementById("metric-shop-productivity").textContent = shopScore + "%";
             document.getElementById("metric-front-score").textContent = frontScore + "%";
             document.getElementById("metric-back-score").textContent = backScore + "%";
-            document.getElementById("metric-support-score").textContent = Math.round((frontScore + backScore + shopScore) / 3) + "%";
+            document.getElementById("metric-support-score").textContent = String(boardState.open_alert_count || 0);
 
             const statusCounts = {};
             const ownerCounts = {};
@@ -563,9 +582,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .join("");
 
             document.getElementById("productivity-patterns").innerHTML =
-                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Clock-in checks:</span> ' + clocks + '</div>' +
-                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Data clear:</span> ' + clearData + ' / ' + jobs.length + '</div>' +
-                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Front vs back:</span> front ' + frontScore + '% • back ' + backScore + '%</div>';
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Important note:</span> this board does not have true sold-hours or labor-output productivity yet. These are support and floor-visibility signals from AutoFlow.</div>' +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Clock-in checks still open:</span> ' + clocks + '</div>' +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Jobs with active tech evidence:</span> ' + activeTechKnown + ' / ' + jobs.length + '</div>' +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Routing-bucket holds:</span> ' + routingHolds + '</div>' +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Front vs back coverage:</span> front ' + frontScore + '% • back ' + backScore + '%</div>';
             document.getElementById("communication-patterns").innerHTML =
                 '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Communication misses:</span> ' + communicationNeeds + '</div>' +
                 '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Communication clear:</span> ' + clearCommunication + ' / ' + jobs.length + '</div>' +
@@ -579,11 +600,35 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     .join("");
             document.getElementById("dvi-patterns").innerHTML =
                 '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Repeated DVI quality issues:</span> ' + dviIssues + '</div>' +
-                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Support score:</span> ' + shopScore + '%</div>' +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Board coverage score:</span> ' + shopScore + '%</div>' +
                 '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Data cleanups needed:</span> ' + dataNeeds + '</div>';
             document.getElementById("ownership-patterns").innerHTML =
                 (ownerHtml || '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-400">No ownership patterns available yet.</div>') +
                 '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Advisor support load:</span> Mitch actions ' + communicationNeeds + ', Drew checks ' + clocks + ', Data cleanups ' + dataNeeds + '</div>';
+
+            const recentSourceActivity = Array.isArray(boardState.activity_feed) ? boardState.activity_feed : [];
+            const recentAiActivity = Array.isArray(boardState.ai_activity_feed) ? boardState.ai_activity_feed : [];
+
+            document.getElementById("activity-patterns").innerHTML =
+                (recentSourceActivity.length
+                    ? recentSourceActivity.map((item) =>
+                        '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200">' +
+                            '<div class="font-semibold">' + escapeHtml(item.title || "Board activity") + '</div>' +
+                            '<div class="mt-1 text-zinc-400">' + escapeHtml(item.detail || "") + '</div>' +
+                        '</div>'
+                    ).join("")
+                    : '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-500">No recent AutoFlow-fed activity text is available yet. If this stays empty, the source payload is not giving us useful recent activity.</div>') +
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Jobs with source activity text:</span> ' + latestActivityJobs + ' / ' + jobs.length + '</div>';
+
+            document.getElementById("ai-activity-patterns").innerHTML =
+                (recentAiActivity.length
+                    ? recentAiActivity.map((item) =>
+                        '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200">' +
+                            '<div class="font-semibold">' + escapeHtml(item.title || "Support log") + '</div>' +
+                            '<div class="mt-1 text-zinc-400">' + escapeHtml(item.detail || "") + '</div>' +
+                        '</div>'
+                    ).join("")
+                    : '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-500">No recent support or Callie activity has been logged yet.</div>');
         }
 
         function renderDataInput(boardState) {
@@ -660,6 +705,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             latestBoardState = boardState;
             latestActionState = boardState.action_state || {};
             document.getElementById("board-updated-at").textContent = boardState.generated_at || "__TIMESTAMP__";
+            document.getElementById("board-refreshed-at").textContent = boardState.fetched_at || new Date().toLocaleString();
             renderLanes(boardState);
             renderSnapshot(boardState);
             renderNextActions(boardState);
@@ -828,7 +874,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (job.source_evidence && job.source_evidence.dvi_status) sourceBits.push("DVI: " + job.source_evidence.dvi_status);
             if (job.source_evidence && job.source_evidence.source_work_order_status) sourceBits.push("WO status: " + job.source_evidence.source_work_order_status);
             if (job.source_evidence && job.source_evidence.source_dvi_status) sourceBits.push("DVI status: " + job.source_evidence.source_dvi_status);
-            if (job.source_evidence && job.source_evidence.source_tekmetric_status) sourceBits.push("TechMetric status: " + job.source_evidence.source_tekmetric_status);
+            if (job.source_evidence && job.source_evidence.source_tekmetric_status) sourceBits.push("External status note: " + job.source_evidence.source_tekmetric_status);
             if (job.source_evidence && job.source_evidence.latest_activity) sourceBits.push("Latest activity: " + job.source_evidence.latest_activity);
             if (job.source_evidence && job.source_evidence.routing_bucket_detected) sourceBits.push("Routing bucket detected");
             const sourceTruths = job.source_truths || {};
@@ -851,9 +897,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Source Truths</div><div class="mt-2 space-y-2 text-sm text-zinc-100">' +
                         '<div>AutoFlow WO: <span class="text-zinc-300">' + escapeHtml(sourceTruths.autoflow_work_order_status || "unknown") + '</span></div>' +
                         '<div>AutoFlow DVI: <span class="text-zinc-300">' + escapeHtml(sourceTruths.autoflow_dvi_status || "unknown") + '</span></div>' +
-                        '<div>TechMetric: <span class="text-zinc-300">' + escapeHtml(sourceTruths.techmetric_status || "unknown") + '</span></div>' +
-                        '<div class="pt-2 text-xs text-zinc-400">Primary source: ' + escapeHtml(sourceTruths.primary_source || "autoflow") + ' • Fallback: ' + escapeHtml(sourceTruths.fallback_source || "techmetric") + '</div>' +
-                        '<div class="text-xs text-zinc-500">Trust scores — AutoFlow: ' + escapeHtml(String(trustScores.autoflow || 85)) + ' • TechMetric: ' + escapeHtml(String(trustScores.techmetric || 70)) + '</div>' +
+                        '<div>External / manual note: <span class="text-zinc-300">' + escapeHtml(sourceTruths.manual_external_status || "not connected") + '</span></div>' +
+                        '<div class="pt-2 text-xs text-zinc-400">Primary source: ' + escapeHtml(sourceTruths.primary_source || "autoflow") + ' • Fallback: ' + escapeHtml(sourceTruths.fallback_source || "manual_review") + '</div>' +
+                        '<div class="text-xs text-zinc-500">Trust scores — AutoFlow: ' + escapeHtml(String(trustScores.autoflow || 90)) + ' • Manual review: ' + escapeHtml(String(trustScores.manual_review || 40)) + '</div>' +
                     '</div></div>' +
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Board Decision</div><div class="mt-2 space-y-2 text-sm text-zinc-100">' +
                         '<div>Chosen source: <span class="text-zinc-300">' + escapeHtml(boardChoice.chosen_source || "unknown") + '</span></div>' +
@@ -1198,6 +1244,81 @@ def _read_jsonl(path):
     return rows
 
 
+def _recent_source_activity(jobs, limit=8):
+    items = []
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        ro = str(job.get("ro", "")).strip() or "Unknown RO"
+        customer = str(job.get("customer", "")).strip() or "Unknown Customer"
+        activity = str((((job.get("source_evidence") or {}).get("latest_activity")) or "")).strip()
+        status = str(job.get("workflow_status", "unknown")).strip() or "unknown"
+        if activity:
+            items.append({
+                "title": f"RO {ro} • {customer}",
+                "detail": f"{activity} Current AutoFlow status: {status}.",
+            })
+            continue
+        conflict = job.get("source_conflict", {}) if isinstance(job.get("source_conflict"), dict) else {}
+        if conflict.get("has_conflict"):
+            items.append({
+                "title": f"RO {ro} • source conflict",
+                "detail": str(conflict.get("summary", "")).strip(),
+            })
+    return items[:limit]
+
+
+def _recent_ai_activity(limit=8):
+    items = []
+    combined = []
+    for row in _read_jsonl(BOARD_ACTION_LOG_PATH):
+        if isinstance(row, dict):
+            combined.append(("board_action", row))
+    for row in _read_jsonl(BOARD_OVERRIDE_LOG_PATH):
+        if isinstance(row, dict):
+            combined.append(("override", row))
+    for row in _read_jsonl(HERMES_LOG_PATH):
+        if isinstance(row, dict):
+            combined.append(("callie", row))
+
+    def _stamp(entry):
+        payload = entry[1]
+        return str(payload.get("timestamp", ""))
+
+    for kind, row in sorted(combined, key=_stamp, reverse=True):
+        ro = str(row.get("ro", "")).strip()
+        ro_label = f"RO {ro}" if ro else "Board"
+        if kind == "board_action":
+            action_type = str(row.get("action_type", "details")).strip() or "details"
+            note = str(row.get("note", "")).strip() or "No note captured."
+            items.append({
+                "title": f"{ro_label} • {action_type.replace('_', ' ').title()} • {row.get('timestamp', '--')}",
+                "detail": note,
+            })
+        elif kind == "override":
+            changed = [label for label, key in (
+                ("lane", "priority_lane"),
+                ("owner", "waiting_on"),
+                ("technician", "technician"),
+                ("summary", "summary"),
+            ) if str(row.get(key, "")).strip()]
+            if changed:
+                items.append({
+                    "title": f"{ro_label} • override • {row.get('timestamp', '--')}",
+                    "detail": "Changed " + ", ".join(changed) + ". " + (str(row.get("note", "")).strip() or "No override note captured."),
+                })
+        else:
+            question = str(row.get("question", "")).strip() or "No question captured."
+            answer = str(row.get("answer", "")).strip() or "No answer captured."
+            items.append({
+                "title": f"{ro_label} • Callie • {row.get('timestamp', '--')}",
+                "detail": f"Q: {question} | A: {answer[:220]}",
+            })
+        if len(items) >= limit:
+            break
+    return items
+
+
 def _recount_board(board_state):
     if not isinstance(board_state, dict):
         return board_state
@@ -1355,11 +1476,16 @@ def _load_board_state():
         with open(BOARD_STATE_PATH, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
         if isinstance(payload, dict):
-            return _apply_action_state(_apply_override_state(payload))
+            board_state = _apply_action_state(_apply_override_state(payload))
+            jobs = board_state.get("jobs", []) if isinstance(board_state.get("jobs"), list) else []
+            board_state["fetched_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            board_state["activity_feed"] = _recent_source_activity(jobs)
+            board_state["ai_activity_feed"] = _recent_ai_activity()
+            return board_state
     except Exception:
         pass
 
-    return _apply_action_state(_apply_override_state({
+    board_state = _apply_action_state(_apply_override_state({
         "source": "board_rules_v1",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "count": 0,
@@ -1369,6 +1495,10 @@ def _load_board_state():
         "open_alert_count": 0,
         "message": "No board_state.json found. Run python scripts/build_board_state.py first.",
     }))
+    board_state["fetched_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    board_state["activity_feed"] = []
+    board_state["ai_activity_feed"] = _recent_ai_activity()
+    return board_state
 
 
 def _find_job(ro):
@@ -1989,15 +2119,15 @@ def bay_performance():
         <p class="mt-2 text-zinc-400">Live support view for technicians and shop momentum.</p>
         <div class="mt-8 grid grid-cols-1 gap-6 md:grid-cols-5">
             <div class="rounded-3xl border border-emerald-700 bg-emerald-950/30 p-6">
-                <div class="text-sm uppercase tracking-wide text-emerald-300">Shop Support Score</div>
+                <div class="text-sm uppercase tracking-wide text-emerald-300">Board Coverage Score</div>
                 <div class="mt-3 text-6xl font-black text-emerald-200">{support_score}%</div>
             </div>
             <div class="rounded-3xl border border-cyan-700 bg-cyan-950/30 p-6">
-                <div class="text-sm uppercase tracking-wide text-cyan-300">Front Of House</div>
+                <div class="text-sm uppercase tracking-wide text-cyan-300">Front Coverage</div>
                 <div class="mt-3 text-6xl font-black text-cyan-200">{front_score}%</div>
             </div>
             <div class="rounded-3xl border border-violet-700 bg-violet-950/30 p-6">
-                <div class="text-sm uppercase tracking-wide text-violet-300">Back Of House</div>
+                <div class="text-sm uppercase tracking-wide text-violet-300">Back Coverage</div>
                 <div class="mt-3 text-6xl font-black text-violet-200">{back_score}%</div>
             </div>
             <div class="rounded-3xl border border-red-700 bg-red-950/30 p-6">
@@ -2017,9 +2147,9 @@ def bay_performance():
             <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-6">
                 <h2 class="text-2xl font-bold">What The Scores Mean</h2>
                 <div class="mt-4 space-y-3 text-sm text-zinc-300">
-                    <div><span class="font-semibold text-zinc-100">Shop Support Score:</span> overall health across communication, productivity, and clean data signals.</div>
-                    <div><span class="font-semibold text-zinc-100">Front Of House:</span> customer updates staying ahead of the surprise and advisor-side action gaps staying under control.</div>
-                    <div><span class="font-semibold text-zinc-100">Back Of House:</span> tech clock-in visibility plus usable inspection/DVI evidence supporting production flow.</div>
+                    <div><span class="font-semibold text-zinc-100">Board Coverage Score:</span> this is not sold-hours productivity. It is a board health score across communication, floor visibility, and clean data signals.</div>
+                    <div><span class="font-semibold text-zinc-100">Front Coverage:</span> customer updates staying ahead of the surprise and advisor-side action gaps staying under control.</div>
+                    <div><span class="font-semibold text-zinc-100">Back Coverage:</span> tech clock-in visibility plus usable inspection/DVI evidence supporting production flow.</div>
                     <div><span class="font-semibold text-zinc-100">P1 Jobs:</span> true pressure items that need direct attention now.</div>
                     <div><span class="font-semibold text-zinc-100">Productivity / Data Needs:</span> combined count of jobs where the board still needs clearer floor evidence or cleaner source data.</div>
                 </div>
@@ -2027,9 +2157,9 @@ def bay_performance():
             <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-6">
                 <h2 class="text-2xl font-bold">How To Bring Them Up</h2>
                 <div class="mt-4 space-y-3 text-sm text-zinc-300">
-                    <div><span class="font-semibold text-zinc-100">Raise Front Of House:</span> log customer updates sooner, tighten callbacks, and clear waiting-approval drift early.</div>
-                    <div><span class="font-semibold text-zinc-100">Raise Back Of House:</span> keep labor clocked, finish DVI work cleanly, and tighten who is actively on each job.</div>
-                    <div><span class="font-semibold text-zinc-100">Raise Shop Support:</span> reduce flashing board helpers by correcting the real blocker instead of working around it.</div>
+                    <div><span class="font-semibold text-zinc-100">Raise Front Coverage:</span> log customer updates sooner, tighten callbacks, and clear waiting-approval drift early.</div>
+                    <div><span class="font-semibold text-zinc-100">Raise Back Coverage:</span> keep labor clocked, finish DVI work cleanly, and tighten who is actively on each job.</div>
+                    <div><span class="font-semibold text-zinc-100">Raise Board Coverage:</span> reduce flashing board helpers by correcting the real blocker instead of working around it.</div>
                     <div><span class="font-semibold text-zinc-100">Lower P1 count:</span> land the plane faster on ready jobs and remove unknowns before they turn into customer-trust issues.</div>
                     <div><span class="font-semibold text-zinc-100">Lower Productivity / Data Needs:</span> fix missing tech assignment, missing concern detail, missing DVI completion, and bad status usage.</div>
                 </div>

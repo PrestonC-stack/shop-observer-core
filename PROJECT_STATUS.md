@@ -1,8 +1,27 @@
 # Callahan AI - Shop Command Board
 
-**Last Updated:** May 16, 2026  
+**Last Updated:** May 18, 2026  
 **Current Branch:** `ai-build-stabilization`  
 **Repo:** https://github.com/PrestonC-stack/shop-observer-core.git
+
+## Progress Update - May 18, 2026 - Single Source Cleanup + Activity Analytics
+
+- Confirmed the current board has only one live machine-readable source: `AutoFlow`
+- Removed misleading wording that implied live TechMetric status was being pulled into the board
+- Reframed source evidence and conflict handling around:
+  - connected `AutoFlow` truth
+  - optional manual / operator-reported external status notes
+- Updated source precedence defaults so the board now clearly treats AutoFlow as the only connected live status source
+- Analytics labels were cleaned up to avoid implying true labor-output productivity that is not available from the current API feed
+- The main analytics view now exposes:
+  - board coverage instead of fake productivity scoring
+  - recent source activity from the AutoFlow-fed board evidence
+  - recent AI / support log activity from saved notes, overrides, and Callie questions
+- Added clearer timing on the board header:
+  - `Board Generated`
+  - `Page Refreshed`
+- Current honest limitation:
+  - true sold-hours / labor-output productivity is still not available from the current connected data, so the board should present support coverage and workflow visibility until richer metrics are wired in
 
 ## Progress Update - May 18, 2026 - Real Callie Intelligence Layer
 
@@ -52,12 +71,12 @@
   - `source_conflict`
 - Job modal now shows a stronger evidence panel:
   - what AutoFlow says
-  - what TechMetric says when available
+  - what manual external status notes say when available
   - what the board chose
   - why it chose it
   - what should be fixed next
 - Current honest limitation remains visible:
-  - TechMetric live status is not connected yet in this branch, so TechMetric disagreement can be modeled and displayed when present, but not auto-fetched yet
+  - external non-AutoFlow status is not connected live in this branch, so it can only be represented as a manual/operator-reported reference when present
 
 ## Checkpoint - May 16, 2026 - Live Webhook State Loop
 

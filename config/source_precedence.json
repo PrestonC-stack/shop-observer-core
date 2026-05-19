@@ -1,11 +1,11 @@
 {
   "primary": "autoflow",
-  "fallback": "techmetric",
+  "fallback": "manual_review",
   "trust_scores": {
-    "autoflow": 85,
-    "techmetric": 70
+    "autoflow": 90,
+    "manual_review": 40
   },
   "override_rules": {
-    "technical advisement": "prefer_techmetric_when_available"
+    "technical advisement": "manual_review_only_until_connected"
   }
 }
