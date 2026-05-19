@@ -26,6 +26,12 @@
 - Preserved job-aware context when Callie is opened from a specific RO card
 - Kept deterministic board logic separate from Callie augmentation
 
+## Progress Update - May 18, 2026 - Stronger Callie Greeting Guard
+
+- Strengthened the Callie greeting fast-path so greetings and very short general chat clear RO context before any model call
+- Added RO-like digit detection so short messages only stay job-aware when they actually reference a ticket
+- General `hello` / `hi` / `hey` style asks now return immediately and should not inherit the last job card context
+
 ## Checkpoint - May 16, 2026 - Live Webhook State Loop
 
 ## Progress Update - May 18, 2026 - Board State Phase 1
