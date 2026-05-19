@@ -722,6 +722,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             loadHermesSummary();
         }
 
+        function hardRefreshBoard() {
+            window.location.reload();
+        }
+
         function wireJobCards() {
             document.querySelectorAll("[data-ro].job-card").forEach((card) => {
                 card.addEventListener("click", () => openJobModal(card.dataset.ro || "", "details"));
@@ -1096,7 +1100,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         document.addEventListener("DOMContentLoaded", () => {
-            document.getElementById("refresh-jobs").addEventListener("click", refreshBoard);
+            document.getElementById("refresh-jobs").addEventListener("click", hardRefreshBoard);
             document.getElementById("close-modal").addEventListener("click", closeJobModal);
             document.getElementById("morning-briefing").addEventListener("click", loadMorningBriefing);
             document.getElementById("afternoon-briefing-top").addEventListener("click", loadAfternoonBriefing);
@@ -1414,10 +1418,11 @@ def _build_callie_prompt(question, job=None, mode="general"):
 
 def _call_ollama(question, job=None, mode="general"):
     prompt = _build_callie_prompt(question, job=job, mode=mode)
+    fallback_answer = _hermes_answer(question, job=job, mode=mode)
     if not shutil.which("ollama"):
         return {
-            "response": "Callie could not find Ollama on this machine. The board still works, but the live model layer is offline right now.",
-            "confidence": 35,
+            "response": fallback_answer + " Live model note: Ollama was not available on this machine, so Callie answered from the board evidence layer.",
+            "confidence": 45,
             "model": CALLIE_MODEL,
         }
 
@@ -1430,14 +1435,14 @@ def _call_ollama(question, job=None, mode="general"):
         )
     except subprocess.TimeoutExpired:
         return {
-            "response": f"Callie timed out reaching the local model after {CALLIE_TIMEOUT_SECONDS} seconds. The board stayed stable, but the live model took too long to answer.",
-            "confidence": 30,
+            "response": fallback_answer + f" Live model note: the local model took longer than {CALLIE_TIMEOUT_SECONDS} seconds, so Callie fell back to the fast board evidence layer.",
+            "confidence": 50,
             "model": CALLIE_MODEL,
         }
     except Exception as exc:
         return {
-            "response": f"Callie had trouble connecting to the local model: {str(exc)[:160]}",
-            "confidence": 30,
+            "response": fallback_answer + f" Live model note: Callie had trouble connecting to the local model ({str(exc)[:160]}), so this answer came from the fast board evidence layer.",
+            "confidence": 45,
             "model": CALLIE_MODEL,
         }
 
