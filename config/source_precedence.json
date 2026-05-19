@@ -1,0 +1,11 @@
+{
+  "primary": "autoflow",
+  "fallback": "techmetric",
+  "trust_scores": {
+    "autoflow": 85,
+    "techmetric": 70
+  },
+  "override_rules": {
+    "technical advisement": "prefer_techmetric_when_available"
+  }
+}
