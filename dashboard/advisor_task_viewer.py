@@ -19,6 +19,7 @@ BOARD_OVERRIDE_LOG_PATH = os.path.join(REPO_ROOT, "state", "board_overrides.json
 CALLIE_INSIGHTS_PATH = os.path.join(REPO_ROOT, "data", "callie_insights.json")
 CALLIE_MODEL = os.environ.get("CALLIE_MODEL", "qwen2.5-coder:7b")
 CALLIE_INSIGHTS_TTL_SECONDS = 90
+CALLIE_TIMEOUT_SECONDS = int(os.environ.get("CALLIE_TIMEOUT_SECONDS", "45"))
 _CALLIE_INSIGHTS_CACHE = {"expires_at": 0.0, "payload": None}
 
 if REPO_ROOT not in sys.path:
@@ -1359,11 +1360,18 @@ def _load_callie_insights(force=False):
     return fallback
 
 
+def _trim_text(value, limit=220):
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
 def _build_callie_prompt(question, job=None, mode="general"):
     insights = _load_callie_insights()
     prompt_lines = [
         "You are Callie — calm, practical, supportive air-traffic-control copilot for Callahan Auto & Diesel.",
-        f"Shop pulse: {insights.get('shop_summary', 'Busy shop')}",
+        f"Shop pulse: {_trim_text(insights.get('shop_summary', 'Busy shop'), 180)}",
         f"Interaction mode: {mode}",
     ]
     if job and isinstance(job, dict):
@@ -1382,21 +1390,21 @@ def _build_callie_prompt(question, job=None, mode="general"):
                 f"Waiting on: {job.get('waiting_on', '')}",
                 f"Workflow status: {job.get('workflow_status', '')}",
                 f"Technician: {job.get('technician', '')}",
-                f"Next action: {job.get('next_action', '')}",
-                f"Summary: {job.get('summary', '')}",
+                f"Next action: {_trim_text(job.get('next_action', ''), 180)}",
+                f"Summary: {_trim_text(job.get('summary', ''), 180)}",
                 f"Source WO status: {source.get('source_work_order_status', 'unknown')}",
                 f"Source DVI status: {source.get('source_dvi_status', 'unknown')}",
             ]
         )
         if alerts:
-            prompt_lines.append("Current alerts: " + " | ".join(alerts[:5]))
+            prompt_lines.append("Current alerts: " + " | ".join(_trim_text(alert, 140) for alert in alerts[:3]))
         reasons = job.get("board_reasons", []) if isinstance(job.get("board_reasons"), list) else []
         if reasons:
-            prompt_lines.append("Board reasons: " + " | ".join(str(reason) for reason in reasons[:5]))
+            prompt_lines.append("Board reasons: " + " | ".join(_trim_text(reason, 140) for reason in reasons[:3]))
         concern = job.get("reason_vehicle_is_here", []) if isinstance(job.get("reason_vehicle_is_here"), list) else []
         if concern:
-            prompt_lines.append("Customer concern evidence: " + " | ".join(str(line) for line in concern[:3]))
-    prompt_lines.append(f"User question: {question}")
+            prompt_lines.append("Customer concern evidence: " + " | ".join(_trim_text(line, 140) for line in concern[:2]))
+    prompt_lines.append(f"User question: {_trim_text(question, 240)}")
     prompt_lines.append(
         "Respond in short, actionable, coaching sentences. Tie back to evidence when possible. "
         "If the user is trying to change something that conflicts with AutoFlow evidence, say so clearly and tell them to fix AutoFlow first."
@@ -1418,11 +1426,11 @@ def _call_ollama(question, job=None, mode="general"):
             ["ollama", "run", CALLIE_MODEL, prompt],
             capture_output=True,
             text=True,
-            timeout=25,
+            timeout=CALLIE_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired:
         return {
-            "response": "Callie timed out reaching the local model. The board stayed stable, but the live model took too long to answer.",
+            "response": f"Callie timed out reaching the local model after {CALLIE_TIMEOUT_SECONDS} seconds. The board stayed stable, but the live model took too long to answer.",
             "confidence": 30,
             "model": CALLIE_MODEL,
         }
