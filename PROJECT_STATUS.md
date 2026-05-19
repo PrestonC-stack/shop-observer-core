@@ -32,6 +32,12 @@
 - Added RO-like digit detection so short messages only stay job-aware when they actually reference a ticket
 - General `hello` / `hi` / `hey` style asks now return immediately and should not inherit the last job card context
 
+## Progress Update - May 18, 2026 - Callie RO Extraction For Board-Level Questions
+
+- Board-level Ask Callie can now detect RO-like ticket numbers mentioned inside the question text
+- Questions like `why is 13379 showing parts when AutoFlow says technical advisement?` now attach to the matching live job instead of falling back to the generic board reply
+- Greeting and short-chat fast paths still bypass RO context and return immediately
+
 ## Checkpoint - May 16, 2026 - Live Webhook State Loop
 
 ## Progress Update - May 18, 2026 - Board State Phase 1
