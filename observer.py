@@ -6,6 +6,7 @@ from contextlib import redirect_stdout
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from flask import request
 
 from connectors.autoflow import get_dvi
 from connectors.autoflow import get_work_order
@@ -801,6 +802,105 @@ def main() -> None:
     print(report_text, end="")
     write_report_outputs(report_text)
 
+# ==================== REAL CALLIE (Hermes) ENDPOINT ====================
+import subprocess
+
+@app.route("/api/callie/ask", methods=["POST"])
+def api_callie_ask():
+    try:
+        data = request.get_json() or {}
+        question = data.get("question", "").strip()
+        ro_number = data.get("ro_number")
+        
+        insights = load_callie_insights()
+        
+        # Build grounded prompt for Qwen
+        prompt = f"""You are Callie, the supportive air-traffic-control copilot for Callahan Auto & Diesel.
+Shop pulse: {insights.get('shop_summary', 'Busy shop')}
+Current conflicts: {len(insights.get('conflicts', []))}
+User question: {question}
+RO: {ro_number or 'general board'}
+
+Respond in a calm, practical, coaching tone. Be brief, actionable, and tie back to evidence when possible.
+Do not hallucinate facts."""
+
+        # Call Ollama (Qwen) locally
+        result = subprocess.run([
+            "ollama", "run", "qwen2.5-coder:7b",
+            prompt
+        ], capture_output=True, text=True, timeout=30)
+
+        response_text = result.stdout.strip() or "Callie is thinking... (Ollama response empty)"
+
+        return jsonify({
+            "response": response_text,
+            "confidence": 75,
+            "timestamp": datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        return jsonify({
+            "response": f"Callie is having trouble connecting right now: {str(e)[:100]}",
+            "confidence": 30
+        }), 200
+
 
 if __name__ == "__main__":
     main()
+
+# ==================== CALLIE INTELLIGENCE LAYER (added by Grok) ====================
+import cachetools
+from pathlib import Path
+
+# Cache for stability over Cloudflare Tunnel
+insights_cache = cachetools.TTLCache(maxsize=32, ttl=90)  # 90-second cache
+
+def load_callie_insights():
+    """Load pre-generated Callie insights (deterministic + optional Hermes)"""
+    key = "insights"
+    if key in insights_cache:
+        return insights_cache[key]
+    
+    try:
+        path = Path("data") / "callie_insights.json"
+        if path.exists():
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+                insights_cache[key] = data
+                return data
+    except Exception:
+        pass
+    
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "shop_summary": "Callie insights loading... (run callie_engine.py if empty)",
+        "jobs": [],
+        "conflicts": [],
+        "shop_wide_alerts": []
+    }
+
+@app.route("/api/callie/insights")
+def api_callie_insights():
+    """Fast endpoint for the intelligence layer - used by the dashboard"""
+    return jsonify(load_callie_insights())
+
+# Optional: Add a visible Callie panel to your main board page
+# (Uncomment the next route if you want a simple box at the bottom for now)
+# @app.route("/callie")
+# def callie_page():
+#     insights = load_callie_insights()
+#     return f"""
+#     <h2>Callie Intelligence</h2>
+#     <pre>{json.dumps(insights, indent=2)}</pre>
+#     <a href="/">← Back to Main Board</a>
+#     """
+
+if __name__ == "__main__":
+    print("🚀 Starting Country Club Advisor Command Board with Callie Intelligence")
+    app.run(
+        host="127.0.0.1",
+        port=5000,
+        debug=False,
+        threaded=True,
+        use_reloader=False,
+    )
