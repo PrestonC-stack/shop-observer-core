@@ -1500,6 +1500,8 @@ def _call_ollama(question, job=None, mode="general"):
             ["ollama", "run", CALLIE_MODEL, prompt],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=CALLIE_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired:
