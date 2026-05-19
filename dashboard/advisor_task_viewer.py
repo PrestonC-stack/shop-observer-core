@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1431,6 +1432,14 @@ def _is_short_general_chat(question):
     return len(normalized) < 10 and not _has_ro_like_token(normalized)
 
 
+def _extract_ro_from_question(question):
+    text = str(question or "")
+    for match in re.findall(r"\b(\d{4,6})\b", text):
+        if _find_job(match):
+            return str(match)
+    return ""
+
+
 def _build_callie_prompt(question, job=None, mode="general"):
     insights = _load_callie_insights()
     prompt_lines = [
@@ -1692,9 +1701,14 @@ def api_callie_ask():
     mode = str(payload.get("mode", "general")).strip() or "general"
     is_greeting = _is_general_greeting(question)
     is_short_general = _is_short_general_chat(question)
+    inferred_ro = ""
 
     if is_greeting or is_short_general:
         ro = ""
+    elif not ro:
+        inferred_ro = _extract_ro_from_question(question)
+        if inferred_ro:
+            ro = inferred_ro
 
     is_board_level = not ro
 
