@@ -1411,6 +1411,26 @@ def _is_general_greeting(question):
     return normalized in greetings or len(normalized) < 8
 
 
+def _has_ro_like_token(question):
+    text = str(question or "")
+    digits = []
+    for char in text:
+        if char.isdigit():
+            digits.append(char)
+            if len(digits) >= 4:
+                return True
+        else:
+            digits = []
+    return False
+
+
+def _is_short_general_chat(question):
+    normalized = str(question or "").strip()
+    if not normalized:
+        return False
+    return len(normalized) < 10 and not _has_ro_like_token(normalized)
+
+
 def _build_callie_prompt(question, job=None, mode="general"):
     insights = _load_callie_insights()
     prompt_lines = [
@@ -1666,15 +1686,22 @@ def api_callie_insights():
 @app.route("/api/callie/ask", methods=["POST"])
 def api_callie_ask():
     payload = request.get_json(silent=True) or {}
-    question = str(payload.get("question", "")).strip()
+    raw_question = str(payload.get("question", "")).strip()
+    question = raw_question
     ro = str(payload.get("ro_number", payload.get("ro", ""))).strip()
     mode = str(payload.get("mode", "general")).strip() or "general"
+    is_greeting = _is_general_greeting(question)
+    is_short_general = _is_short_general_chat(question)
+
+    if is_greeting or is_short_general:
+        ro = ""
+
     is_board_level = not ro
 
-    if _is_general_greeting(question) and is_board_level:
+    if is_greeting or is_short_general:
         reply = {
-            "response": "Hello! I'm Callie, your shop's air-traffic-control copilot. Ask me about a specific job, the overall board, or what needs attention next.",
-            "confidence": 90,
+            "response": "Hello! I'm Callie, your shop's air-traffic-control copilot. How can I help today? You can ask me about a specific job, the overall board, priorities, or what needs attention next.",
+            "confidence": 95,
             "model": "fast-greeting",
         }
     else:
