@@ -4,6 +4,20 @@
 **Current Branch:** `ai-build-stabilization`  
 **Repo:** https://github.com/PrestonC-stack/shop-observer-core.git
 
+## Progress Update - May 18, 2026 - Real Callie Intelligence Layer
+
+- Real Callie intelligence layer added on top of the live wallboard
+- `Send to Callie` now calls the local Ollama model with RO-aware context when available
+- Added deterministic `callie_engine.py` to generate cached `data/callie_insights.json`
+- Added visible cached Callie insights feed for fast/stable board rendering over Cloudflare Tunnel
+- Preserved separation of concerns:
+  - board/rules/evidence remain deterministic
+  - Callie remains optional augmentation and fails soft if Ollama is unavailable
+- Next:
+  - refine prompt quality
+  - improve source-conflict coaching
+  - deepen Callie evidence reasoning and UI polish
+
 ## Checkpoint - May 16, 2026 - Live Webhook State Loop
 
 ## Progress Update - May 18, 2026 - Board State Phase 1
