@@ -1,7 +1,11 @@
 import json
 import os
+import shutil
+import subprocess
 import sys
+import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from flask import Flask, Response, jsonify, request
 
@@ -12,6 +16,10 @@ BOARD_STATE_PATH = os.path.join(REPO_ROOT, "state", "board_state.json")
 BOARD_ACTION_LOG_PATH = os.path.join(REPO_ROOT, "state", "board_actions.jsonl")
 HERMES_LOG_PATH = os.path.join(REPO_ROOT, "state", "hermes_feedback.jsonl")
 BOARD_OVERRIDE_LOG_PATH = os.path.join(REPO_ROOT, "state", "board_overrides.jsonl")
+CALLIE_INSIGHTS_PATH = os.path.join(REPO_ROOT, "data", "callie_insights.json")
+CALLIE_MODEL = os.environ.get("CALLIE_MODEL", "qwen2.5-coder:7b")
+CALLIE_INSIGHTS_TTL_SECONDS = 90
+_CALLIE_INSIGHTS_CACHE = {"expires_at": 0.0, "payload": None}
 
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
@@ -110,7 +118,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         <h2 class="text-xl font-bold">Callie Intelligence</h2>
                         <button id="open-hermes-ask" class="rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800">Ask Callie</button>
                     </div>
-                    <div id="hermes-summary" class="mt-4 rounded-2xl bg-zinc-950 p-4 text-sm leading-relaxed text-zinc-200 min-h-[180px]">Loading Hermes recommendations...</div>
+                    <div id="hermes-summary" class="mt-4 rounded-2xl bg-zinc-950 p-4 text-sm leading-relaxed text-zinc-200 min-h-[180px]">Loading Callie insights...</div>
                     <div id="hermes-updated-at" class="mt-3 text-xs text-zinc-500"></div>
                 </div>
             </section>
@@ -663,7 +671,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function renderHermesSummary(payload) {
             const target = document.getElementById("hermes-summary");
             if (!target) return;
-            const lines = String(payload.summary || "No summary available.")
+            const conflictCount = Number(payload.conflict_count || ((payload.conflicts || []).length) || 0);
+            const header = payload.shop_summary || payload.summary || "No summary available.";
+            const details = [];
+            if (payload.summary && payload.shop_summary && payload.summary !== payload.shop_summary) {
+                details.push(payload.summary);
+            }
+            if (conflictCount > 0) {
+                details.push("Active source/data conflicts: " + conflictCount);
+            }
+            const lines = [header].concat(details).join("\n")
                 .split(/\\n+/)
                 .map((line) => line.trim())
                 .filter(Boolean);
@@ -672,7 +689,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 '<div class="mb-3 rounded-2xl bg-zinc-900 px-4 py-3 text-sm text-zinc-100">' + escapeHtml(line) + "</div>"
             )).join("") || '<div class="rounded-2xl bg-zinc-900 px-4 py-3 text-sm text-zinc-400">No summary available.</div>';
 
-            document.getElementById("hermes-updated-at").textContent = "Last Hermes update: " + (payload.timestamp || "--");
+            document.getElementById("hermes-updated-at").textContent = "Last Callie update: " + (payload.timestamp || payload.generated_at || "--");
         }
 
         function loadBoardState() {
@@ -690,13 +707,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         function loadHermesSummary() {
-            fetch("/api/hermes-summary", { cache: "no-store" })
+            fetch("/api/callie/insights", { cache: "no-store" })
                 .then((response) => {
                     if (!response.ok) throw new Error("Request failed");
                     return response.json();
                 })
                 .then(renderHermesSummary)
-                .catch(() => renderHermesSummary({ summary: "Hermes summary unavailable.", timestamp: "--" }));
+                .catch(() => renderHermesSummary({ summary: "Callie insights unavailable.", timestamp: "--" }));
         }
 
         function refreshBoard() {
@@ -1054,11 +1071,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 showToast("Type a question for Callie first.", "error");
                 return;
             }
-            fetch("/api/hermes-feedback", {
+            fetch("/api/callie/ask", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    ro: activeModalRo,
+                    ro_number: activeModalRo,
                     mode: activeModalMode,
                     question: note.value.trim(),
                     source: "dashboard"
@@ -1067,7 +1084,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .then((response) => response.json())
                 .then((payload) => {
                     const panel = document.getElementById("modal-response");
-                    const answer = payload.answer || payload.message || "Callie acknowledged the note.";
+                    const answer = payload.response || payload.answer || payload.message || "Callie acknowledged the note.";
                     if (panel) {
                         panel.innerHTML = '<div class="font-semibold text-blue-300">Callie Response</div><div class="mt-2 text-zinc-200">' + escapeHtml(answer) + '</div>';
                     }
@@ -1306,6 +1323,129 @@ def _find_job(ro):
     return None
 
 
+def _load_callie_insights(force=False):
+    now = time.time()
+    cached_payload = _CALLIE_INSIGHTS_CACHE.get("payload")
+    expires_at = float(_CALLIE_INSIGHTS_CACHE.get("expires_at", 0.0) or 0.0)
+    if not force and cached_payload is not None and now < expires_at:
+        return cached_payload
+
+    fallback = {
+        "generated_at": datetime.now().isoformat(),
+        "shop_summary": "Callie insights are loading. Run python callie_engine.py to refresh the deterministic intelligence layer.",
+        "jobs": [],
+        "conflicts": [],
+        "metrics": {
+            "job_count": 0,
+            "critical_jobs": 0,
+            "near_term_jobs": 0,
+            "open_alert_count": 0,
+            "conflict_count": 0,
+        },
+    }
+    try:
+        path = Path(CALLIE_INSIGHTS_PATH)
+        if path.exists():
+            with path.open(encoding="utf-8") as handle:
+                payload = json.load(handle)
+            _CALLIE_INSIGHTS_CACHE["payload"] = payload
+            _CALLIE_INSIGHTS_CACHE["expires_at"] = now + CALLIE_INSIGHTS_TTL_SECONDS
+            return payload
+    except Exception:
+        pass
+
+    _CALLIE_INSIGHTS_CACHE["payload"] = fallback
+    _CALLIE_INSIGHTS_CACHE["expires_at"] = now + 10
+    return fallback
+
+
+def _build_callie_prompt(question, job=None, mode="general"):
+    insights = _load_callie_insights()
+    prompt_lines = [
+        "You are Callie — calm, practical, supportive air-traffic-control copilot for Callahan Auto & Diesel.",
+        f"Shop pulse: {insights.get('shop_summary', 'Busy shop')}",
+        f"Interaction mode: {mode}",
+    ]
+    if job and isinstance(job, dict):
+        source = job.get("source_evidence", {}) if isinstance(job.get("source_evidence"), dict) else {}
+        alerts = [
+            str(alert.get("message", "")).strip()
+            for alert in job.get("alerts", [])
+            if isinstance(alert, dict) and str(alert.get("message", "")).strip()
+        ]
+        prompt_lines.extend(
+            [
+                f"RO: {job.get('ro', 'Unknown RO')}",
+                f"Customer: {job.get('customer', '')}",
+                f"Vehicle: {job.get('vehicle', '')}",
+                f"Board lane: {job.get('priority_lane', '')}",
+                f"Waiting on: {job.get('waiting_on', '')}",
+                f"Workflow status: {job.get('workflow_status', '')}",
+                f"Technician: {job.get('technician', '')}",
+                f"Next action: {job.get('next_action', '')}",
+                f"Summary: {job.get('summary', '')}",
+                f"Source WO status: {source.get('source_work_order_status', 'unknown')}",
+                f"Source DVI status: {source.get('source_dvi_status', 'unknown')}",
+            ]
+        )
+        if alerts:
+            prompt_lines.append("Current alerts: " + " | ".join(alerts[:5]))
+        reasons = job.get("board_reasons", []) if isinstance(job.get("board_reasons"), list) else []
+        if reasons:
+            prompt_lines.append("Board reasons: " + " | ".join(str(reason) for reason in reasons[:5]))
+        concern = job.get("reason_vehicle_is_here", []) if isinstance(job.get("reason_vehicle_is_here"), list) else []
+        if concern:
+            prompt_lines.append("Customer concern evidence: " + " | ".join(str(line) for line in concern[:3]))
+    prompt_lines.append(f"User question: {question}")
+    prompt_lines.append(
+        "Respond in short, actionable, coaching sentences. Tie back to evidence when possible. "
+        "If the user is trying to change something that conflicts with AutoFlow evidence, say so clearly and tell them to fix AutoFlow first."
+    )
+    return "\n".join(prompt_lines)
+
+
+def _call_ollama(question, job=None, mode="general"):
+    prompt = _build_callie_prompt(question, job=job, mode=mode)
+    if not shutil.which("ollama"):
+        return {
+            "response": "Callie could not find Ollama on this machine. The board still works, but the live model layer is offline right now.",
+            "confidence": 35,
+            "model": CALLIE_MODEL,
+        }
+
+    try:
+        result = subprocess.run(
+            ["ollama", "run", CALLIE_MODEL, prompt],
+            capture_output=True,
+            text=True,
+            timeout=25,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "response": "Callie timed out reaching the local model. The board stayed stable, but the live model took too long to answer.",
+            "confidence": 30,
+            "model": CALLIE_MODEL,
+        }
+    except Exception as exc:
+        return {
+            "response": f"Callie had trouble connecting to the local model: {str(exc)[:160]}",
+            "confidence": 30,
+            "model": CALLIE_MODEL,
+        }
+
+    answer = (result.stdout or "").strip()
+    if not answer and result.stderr:
+        answer = f"Callie could not produce a live reply: {result.stderr.strip()[:220]}"
+    if not answer:
+        answer = "Callie is connected, but it returned an empty reply. Try asking with the RO, blocker, or expected next move."
+
+    return {
+        "response": answer[:1500],
+        "confidence": 75 if result.returncode == 0 else 45,
+        "model": CALLIE_MODEL,
+    }
+
+
 def _hermes_answer(question, job=None, mode="general"):
     question = str(question or "").strip()
     if not question and not job:
@@ -1434,7 +1574,8 @@ def api_hermes_feedback():
     mode = str(payload.get("mode", "general")).strip() or "general"
     question = str(payload.get("question", "")).strip()
     job = _find_job(ro) if ro else None
-    answer = _hermes_answer(question, job=job, mode=mode)
+    live_reply = _call_ollama(question, job=job, mode=mode)
+    answer = live_reply.get("response") or _hermes_answer(question, job=job, mode=mode)
     entry = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "ro": ro,
@@ -1444,12 +1585,63 @@ def api_hermes_feedback():
         "source": str(payload.get("source", "dashboard")).strip() or "dashboard",
     }
     _append_jsonl(HERMES_LOG_PATH, entry)
-    return jsonify({"status": "received", "answer": answer, "timestamp": entry["timestamp"]}), 200
+    return jsonify({
+        "status": "received",
+        "answer": answer,
+        "response": answer,
+        "confidence": live_reply.get("confidence", 40),
+        "timestamp": entry["timestamp"],
+    }), 200
+
+
+@app.route("/api/callie/insights")
+def api_callie_insights():
+    insights = _load_callie_insights()
+    conflicts = insights.get("conflicts", []) if isinstance(insights.get("conflicts"), list) else []
+    summary = insights.get("shop_summary", "Callie insights unavailable.")
+    return jsonify({
+        "summary": summary,
+        "shop_summary": summary,
+        "timestamp": insights.get("generated_at", datetime.now().isoformat()),
+        "generated_at": insights.get("generated_at", datetime.now().isoformat()),
+        "conflicts": conflicts[:8],
+        "conflict_count": len(conflicts),
+        "metrics": insights.get("metrics", {}),
+    }), 200
+
+
+@app.route("/api/callie/ask", methods=["POST"])
+def api_callie_ask():
+    payload = request.get_json(silent=True) or {}
+    question = str(payload.get("question", "")).strip()
+    ro = str(payload.get("ro_number", payload.get("ro", ""))).strip()
+    mode = str(payload.get("mode", "general")).strip() or "general"
+    job = _find_job(ro) if ro else None
+    live_reply = _call_ollama(question, job=job, mode=mode)
+
+    entry = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "ro": ro,
+        "mode": mode,
+        "question": question,
+        "answer": live_reply.get("response", ""),
+        "source": str(payload.get("source", "dashboard")).strip() or "dashboard",
+        "model": live_reply.get("model", CALLIE_MODEL),
+    }
+    _append_jsonl(HERMES_LOG_PATH, entry)
+    return jsonify({
+        "status": "received",
+        "response": live_reply.get("response", ""),
+        "confidence": live_reply.get("confidence", 40),
+        "timestamp": datetime.now().isoformat(),
+        "model": live_reply.get("model", CALLIE_MODEL),
+    }), 200
 
 
 @app.route("/api/hermes-summary")
 def api_hermes_summary():
     try:
+        insights = _load_callie_insights()
         board_state = _load_board_state()
         jobs = board_state.get("jobs", []) if isinstance(board_state, dict) else []
         p1_jobs = [job for job in jobs if isinstance(job, dict) and job.get("priority_lane") == "P1"]
@@ -1503,16 +1695,24 @@ def api_hermes_summary():
                 "Momentum looks steady right now. Keep advisors ahead of technicians and protect the next customer promise window."
             )
 
+        summary_text = "\n".join(recommendations)
+        if insights.get("shop_summary"):
+            summary_text = str(insights.get("shop_summary")).strip() + "\n" + summary_text
+
+        conflicts = insights.get("conflicts", []) if isinstance(insights.get("conflicts"), list) else []
         return jsonify(
             {
                 "source": "board_rules_v1",
                 "status": "ok",
-                "summary": "\n".join(recommendations),
+                "summary": summary_text,
+                "shop_summary": insights.get("shop_summary", ""),
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "conflicts": conflicts[:8],
+                "conflict_count": len(conflicts),
             }
         )
     except Exception:
-        return jsonify({"summary": "Hermes temporarily unavailable.", "timestamp": "--"})
+        return jsonify({"summary": "Callie temporarily unavailable.", "timestamp": "--"})
 
 
 @app.route("/api/morning-briefing")
