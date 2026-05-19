@@ -189,6 +189,22 @@
 - Added “Why the board put it here” evidence in the job modal so corrections can be made with clearer context.
 - Started shifting user-facing assistant wording from `Hermes` toward `Callie` in the live dashboard UI.
 
+## Progress Update - May 18, 2026 - Callie Response / Source Conflict Phase
+
+- Strengthened the board’s live-source explanation layer so it can now show:
+  - work-order source status
+  - DVI source status
+  - source-status conflicts when those disagree
+- Improved AutoFlow merge evidence so board issues can be traced back to which upstream signal is winning.
+- Tightened Callie response behavior in the modal:
+  - stronger visible response window
+  - clearer distinction between:
+    - saving a note / local correction
+    - sending a question to Callie
+- Added a conflict-warning response path for local overrides.
+  - If a user applies a board correction that conflicts with live AutoFlow evidence, the UI now warns that the source ticket likely needs to be fixed in AutoFlow too.
+- This is the first step toward preventing “override it and hush it up” behavior by making the system explain what the source truth currently says.
+
 ### Git / Branch
 
 - Active branch: `ai-build-stabilization`

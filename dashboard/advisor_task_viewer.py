@@ -758,6 +758,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="hermes" type="button">Ask Callie</button>' +
                     "</div>" +
                     '<div class="mt-4 text-sm font-semibold text-zinc-200" id="modal-mode-label">' + escapeHtml(labels[focusMode] || labels.details) + "</div>" +
+                    '<div class="mt-2 text-xs text-zinc-400">Green saves a note or applies a local correction. Blue sends the question to Callie and asks for a response.</div>' +
                     '<textarea id="modal-note" class="mt-2 min-h-[120px] w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none focus:border-emerald-500" placeholder="' + escapeHtml(placeholders[focusMode] || placeholders.details) + '"></textarea>' +
                     '<div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">' +
                         '<div><div class="mb-1 text-xs uppercase tracking-wide text-zinc-500">Override lane</div><select id="override-priority-lane" class="w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100"><option value="">No change</option><option value="P1">P1</option><option value="P2">P2</option><option value="P3">P3</option><option value="P4">P4</option></select></div>' +
@@ -766,10 +767,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         '<div><div class="mb-1 text-xs uppercase tracking-wide text-zinc-500">Override summary</div><input id="override-summary" class="w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none focus:border-emerald-500" placeholder="Clear concern / summary"></div>' +
                     '</div>' +
                     '<div class="mt-3 flex flex-wrap gap-2">' +
-                        '<button id="submit-board-action" class="rounded-2xl border border-emerald-700 bg-emerald-900/40 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-900/70" type="button">Save Update</button>' +
+                        '<button id="submit-board-action" class="rounded-2xl border border-emerald-700 bg-emerald-900/40 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-900/70" type="button">Save Note / Apply Correction</button>' +
                         '<button id="submit-hermes-question" class="rounded-2xl border border-blue-700 bg-blue-900/40 px-4 py-2 text-sm font-semibold text-blue-100 hover:bg-blue-900/70" type="button">Send to Callie</button>' +
                     "</div>" +
-                    '<div id="modal-response" class="mt-4 rounded-2xl bg-zinc-950 p-4 text-sm text-zinc-300">Use this panel to log what happened, capture what was found, or ask Hermes what to do next.</div>' +
+                    '<div id="modal-response" class="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-300">Use this panel to log what happened, capture what was found, or ask Callie what to do next.</div>' +
                 "</div>"
             );
         }
@@ -797,6 +798,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 : '<span class="text-zinc-500">No technician evidence found yet.</span>';
             const sourceBits = [];
             if (job.source_evidence && job.source_evidence.dvi_status) sourceBits.push("DVI: " + job.source_evidence.dvi_status);
+            if (job.source_evidence && job.source_evidence.source_work_order_status) sourceBits.push("WO status: " + job.source_evidence.source_work_order_status);
+            if (job.source_evidence && job.source_evidence.source_dvi_status) sourceBits.push("DVI status: " + job.source_evidence.source_dvi_status);
             if (job.source_evidence && job.source_evidence.latest_activity) sourceBits.push("Latest activity: " + job.source_evidence.latest_activity);
             if (job.source_evidence && job.source_evidence.routing_bucket_detected) sourceBits.push("Routing bucket detected");
 
@@ -1034,7 +1037,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .then((response) => response.json())
                 .then((payload) => {
                     const panel = document.getElementById("modal-response");
-                    if (panel) panel.textContent = payload.message || "Update saved.";
+                    if (panel) {
+                        panel.innerHTML = '<div class="font-semibold text-emerald-300">' + escapeHtml(payload.message || "Update saved.") + '</div>' +
+                            (payload.warning ? '<div class="mt-3 rounded-2xl border border-amber-600 bg-amber-950/50 px-4 py-3 text-amber-100"><div class="font-semibold">Warning</div><div class="mt-1">' + escapeHtml(payload.warning) + '</div></div>' : '');
+                    }
                     showToast(payload.message || "Update saved.");
                     note.value = "";
                     refreshBoard();
@@ -1062,7 +1068,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .then((payload) => {
                     const panel = document.getElementById("modal-response");
                     const answer = payload.answer || payload.message || "Callie acknowledged the note.";
-                    if (panel) panel.textContent = answer;
+                    if (panel) {
+                        panel.innerHTML = '<div class="font-semibold text-blue-300">Callie Response</div><div class="mt-2 text-zinc-200">' + escapeHtml(answer) + '</div>';
+                    }
                     renderHermesSummary({ summary: answer, timestamp: payload.timestamp || "--" });
                     showToast("Callie updated.");
                 })
@@ -1308,20 +1316,26 @@ def _hermes_answer(question, job=None, mode="general"):
         waiting_on = job.get("waiting_on", "Needs Review")
         next_action = job.get("next_action", "Keep momentum moving.")
         alerts = [alert.get("message", "") for alert in job.get("alerts", []) if isinstance(alert, dict)]
+        reasons = job.get("board_reasons", []) if isinstance(job, dict) else []
+        source_work_order_status = ((job.get("source_evidence") or {}).get("source_work_order_status", "unknown")) if isinstance(job, dict) else "unknown"
+        source_dvi_status = ((job.get("source_evidence") or {}).get("source_dvi_status", "unknown")) if isinstance(job, dict) else "unknown"
         lead = f"RO {ro} is currently waiting on {waiting_on}. {next_action}"
         if mode == "communication":
             return lead + " For customer contact, confirm the latest expectation, document the callback window, and keep trust ahead of the surprise."
         if mode == "productivity":
             return lead + " On the floor, verify who is actively on it, whether labor is clocked, and what single blocker is keeping it from moving."
         if mode == "data":
-            return lead + " Tighten the board evidence by fixing the RO linkage, status mapping, or ownership gap so the coaching becomes more precise."
+            return lead + f" AutoFlow evidence currently shows WO status '{source_work_order_status}' and DVI status '{source_dvi_status}'. Tighten the board evidence by fixing the RO linkage, status mapping, or ownership gap so the coaching becomes more precise."
         if mode == "missing":
             return lead + " The fastest win is to fill the missing operating info first: technician assignment, clearer concern detail, or a confirmed RO trail."
+        if question:
+            detail = " ".join(reasons[:2]) if reasons else "I can see the board is still missing some reliable evidence."
+            return lead + " " + detail + " If your correction conflicts with AutoFlow, fix AutoFlow first, then refresh the board so the source truth and the board stop fighting each other."
         if alerts:
             return lead + " Current helper alerts: " + " ".join(alerts[:2])
         return lead
 
-    return "Hermes logged the board question. The next best move is to capture the blocker, the owner, and the promised follow-up so the system can coach the handoff instead of guessing."
+    return "Callie logged the board question. The next best move is to capture the blocker, the owner, and the promised follow-up so the system can coach the handoff instead of guessing."
 
 
 @app.route("/")
@@ -1363,6 +1377,7 @@ def api_board_state():
 @app.route("/api/board-action", methods=["POST"])
 def api_board_action():
     payload = request.get_json(silent=True) or {}
+    current_job = _find_job(str(payload.get("ro", "")).strip())
     entry = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "ro": str(payload.get("ro", "")).strip(),
@@ -1393,7 +1408,22 @@ def api_board_action():
         "details": "Support note saved.",
     }
     if any(override_entry[key] for key in ("priority_lane", "waiting_on", "technician", "summary")):
-        return jsonify({"status": "received", "message": "Local board correction saved. The board will now show your override and keep the reason on file."}), 200
+        conflict_lines = []
+        if current_job and isinstance(current_job, dict):
+            source = current_job.get("source_evidence", {}) if isinstance(current_job.get("source_evidence", {}), dict) else {}
+            source_wo = str(source.get("source_work_order_status", "unknown"))
+            source_dvi = str(source.get("source_dvi_status", "unknown"))
+            if override_entry["priority_lane"] and current_job.get("priority_lane") != override_entry["priority_lane"]:
+                conflict_lines.append(f"Board currently chose {current_job.get('priority_lane')} from AutoFlow evidence.")
+            if override_entry["technician"] and str(current_job.get("technician", "")).strip().lower() != override_entry["technician"].strip().lower():
+                conflict_lines.append(f"Board currently sees technician '{current_job.get('technician', 'Unassigned')}'.")
+            if source_wo not in {"", "unknown"} or source_dvi not in {"", "unknown"}:
+                conflict_lines.append(f"AutoFlow source status is WO '{source_wo}' / DVI '{source_dvi}'.")
+        message = "Local board correction saved. The board will now show your override and keep the reason on file."
+        warning = ""
+        if conflict_lines:
+            warning = "Hold up: your correction conflicts with live AutoFlow evidence. " + " ".join(conflict_lines) + " Fix the ticket in AutoFlow too, then refresh the board so the source truth and the board line up."
+        return jsonify({"status": "received", "message": message, "warning": warning}), 200
     return jsonify({"status": "received", "message": message_map.get(entry["action_type"], "Support note saved.")}), 200
 
 

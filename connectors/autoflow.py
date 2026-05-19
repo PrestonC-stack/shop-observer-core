@@ -355,20 +355,18 @@ def merge_work_order_and_dvi(
         )
     )
 
-    workflow_status = _normalize_status(
+    raw_dvi_status = _normalize_status(_first_value(dvi, ("current_status",), default="unknown"))
+    raw_work_order_status = _normalize_status(
         _first_value(
-            dvi,
-            ("current_status",),
-            default=_first_value(
-                work_order,
-                ("workflow_status",),
-                ("workflowStatus",),
-                ("status",),
-                ("job_status",),
-                default="unknown",
-            ),
+            work_order,
+            ("workflow_status",),
+            ("workflowStatus",),
+            ("status",),
+            ("job_status",),
+            default="unknown",
         )
     )
+    workflow_status = raw_dvi_status if raw_dvi_status != "unknown" else raw_work_order_status
 
     customer_first = str(
         _first_value(
@@ -448,6 +446,8 @@ def merge_work_order_and_dvi(
         ),
         "dvi_id": str(_first_value(dvi, ("id",), ("dvi_id",), ("dviId",), default="")),
         "workflow_status": workflow_status,
+        "source_work_order_status": raw_work_order_status,
+        "source_dvi_status": raw_dvi_status,
         "job_marked_complete": _to_bool(
             _first_value(
                 work_order,

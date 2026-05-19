@@ -251,6 +251,8 @@ def _collect_alerts(job: dict[str, Any], normalized_status: str, waiting_on: str
     summary = _normalize_text(job.get("summary"), "")
     notes = _normalize_text(job.get("notes"), "")
     dvi_status = _normalize_text(job.get("dvi_status"), "").lower()
+    source_work_order_status = _normalize_text(job.get("source_work_order_status"), "unknown")
+    source_dvi_status = _normalize_text(job.get("source_dvi_status"), "unknown")
 
     if not ro or ro.lower() in {"unknown ro", "0", "unknown"}:
         alerts.append(
@@ -351,6 +353,15 @@ def _collect_alerts(job: dict[str, Any], normalized_status: str, waiting_on: str
                 "code": "status_mapping_gap",
                 "severity": "info",
                 "message": "The current status could not be mapped cleanly. Review the AutoFlow evidence and tighten the board rules.",
+            }
+        )
+
+    if source_work_order_status not in {"", "unknown"} and source_dvi_status not in {"", "unknown"} and source_work_order_status != source_dvi_status:
+        alerts.append(
+            {
+                "code": "source_status_conflict",
+                "severity": "warning",
+                "message": f"AutoFlow source conflict: work order shows '{source_work_order_status}' while DVI shows '{source_dvi_status}'. Verify which source should drive the live board.",
             }
         )
 
@@ -457,6 +468,10 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
         reasons.append("Technician evidence seen: " + ", ".join(technician_candidates[:4]) + ".")
     if job.get("reason_vehicle_is_here"):
         reasons.append("Customer concern evidence found in DVI reason-vehicle-is-here notes.")
+    if _normalize_text(job.get("source_work_order_status"), "unknown") not in {"", "unknown"}:
+        reasons.append("Work order source status: " + _normalize_text(job.get("source_work_order_status"), "unknown") + ".")
+    if _normalize_text(job.get("source_dvi_status"), "unknown") not in {"", "unknown"}:
+        reasons.append("DVI source status: " + _normalize_text(job.get("source_dvi_status"), "unknown") + ".")
 
     return {
         "ro": _normalize_text(job.get("ro"), "Unknown RO"),
@@ -485,6 +500,8 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
             "shop_state_generated_at": _normalize_text(job.get("generated_at"), ""),
             "location": _normalize_text(job.get("location"), "Unknown"),
             "dvi_status": _normalize_text(job.get("dvi_status"), "unknown"),
+            "source_work_order_status": _normalize_text(job.get("source_work_order_status"), "unknown"),
+            "source_dvi_status": _normalize_text(job.get("source_dvi_status"), "unknown"),
             "latest_activity": _normalize_text(job.get("latest_activity"), ""),
             "advisor_known": _normalize_text(job.get("advisor"), "").lower() in ACTIVE_ADVISORS,
             "active_tech_detected": any(_is_active_tech_name(name) for name in technicians),
