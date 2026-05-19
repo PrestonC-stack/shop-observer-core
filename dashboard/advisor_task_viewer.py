@@ -965,6 +965,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         function openHermesAskModal() {
+            activeModalRo = "";
+            activeModalMode = "hermes";
             document.getElementById("modal-title").textContent = "Ask Callie";
             document.getElementById("modal-subtitle").textContent = "Ask a board question, flag a pattern, or request help with the next move.";
             document.getElementById("modal-body").innerHTML = buildActionPanel({
@@ -1076,19 +1078,31 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 showToast("Type a question for Callie first.", "error");
                 return;
             }
+            const panel = document.getElementById("modal-response");
+            const question = note.value.trim();
+            const sendButton = document.getElementById("submit-hermes-question");
+            if (sendButton) sendButton.disabled = true;
+            if (panel) {
+                panel.innerHTML = '<div class="font-semibold text-blue-300">Callie Response</div><div class="mt-2 text-zinc-200">Callie is checking the board now...</div>';
+            }
+            const slowModelTimer = window.setTimeout(() => {
+                if (panel) {
+                    panel.innerHTML = '<div class="font-semibold text-amber-300">Callie Response</div><div class="mt-2 text-zinc-200">Callie is still working on it. If the live model stays slow, the fast board evidence layer will answer instead.</div>';
+                }
+            }, 8000);
             fetch("/api/callie/ask", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    ro_number: activeModalRo,
+                    ro_number: activeModalRo || null,
                     mode: activeModalMode,
-                    question: note.value.trim(),
+                    question: question,
                     source: "dashboard"
                 })
             })
                 .then((response) => response.json())
                 .then((payload) => {
-                    const panel = document.getElementById("modal-response");
+                    window.clearTimeout(slowModelTimer);
                     const answer = payload.response || payload.answer || payload.message || "Callie acknowledged the note.";
                     if (panel) {
                         panel.innerHTML = '<div class="font-semibold text-blue-300">Callie Response</div><div class="mt-2 text-zinc-200">' + escapeHtml(answer) + '</div>';
@@ -1096,7 +1110,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     renderHermesSummary({ summary: answer, timestamp: payload.timestamp || "--" });
                     showToast("Callie updated.");
                 })
-                .catch(() => showToast("Callie could not respond right now.", "error"));
+                .catch(() => {
+                    window.clearTimeout(slowModelTimer);
+                    if (panel) {
+                        panel.innerHTML = '<div class="font-semibold text-amber-300">Callie Response</div><div class="mt-2 text-zinc-200">Callie is a little slow right now. Try a simpler question or refresh the board and try again.</div>';
+                    }
+                    showToast("Callie could not respond right now.", "error");
+                })
+                .finally(() => {
+                    if (sendButton) sendButton.disabled = false;
+                });
         }
 
         document.addEventListener("DOMContentLoaded", () => {
@@ -1371,6 +1394,23 @@ def _trim_text(value, limit=220):
     return text[: max(0, limit - 3)].rstrip() + "..."
 
 
+def _is_general_greeting(question):
+    normalized = str(question or "").strip().lower()
+    if not normalized:
+        return False
+    greetings = {
+        "hello",
+        "hi",
+        "hey",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "status",
+        "help",
+    }
+    return normalized in greetings or len(normalized) < 8
+
+
 def _build_callie_prompt(question, job=None, mode="general"):
     insights = _load_callie_insights()
     prompt_lines = [
@@ -1629,25 +1669,37 @@ def api_callie_ask():
     question = str(payload.get("question", "")).strip()
     ro = str(payload.get("ro_number", payload.get("ro", ""))).strip()
     mode = str(payload.get("mode", "general")).strip() or "general"
-    job = _find_job(ro) if ro else None
-    live_reply = _call_ollama(question, job=job, mode=mode)
+    is_board_level = not ro
+
+    if _is_general_greeting(question) and is_board_level:
+        reply = {
+            "response": "Hello! I'm Callie, your shop's air-traffic-control copilot. Ask me about a specific job, the overall board, or what needs attention next.",
+            "confidence": 90,
+            "model": "fast-greeting",
+        }
+    else:
+        job = _find_job(ro) if ro else None
+        live_reply = _call_ollama(question, job=job, mode=mode)
+        reply = live_reply
+        if is_board_level and not reply.get("response", "").strip():
+            reply["response"] = _hermes_answer(question, job=None, mode="general")
 
     entry = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "ro": ro,
         "mode": mode,
         "question": question,
-        "answer": live_reply.get("response", ""),
+        "answer": reply.get("response", ""),
         "source": str(payload.get("source", "dashboard")).strip() or "dashboard",
-        "model": live_reply.get("model", CALLIE_MODEL),
+        "model": reply.get("model", CALLIE_MODEL),
     }
     _append_jsonl(HERMES_LOG_PATH, entry)
     return jsonify({
         "status": "received",
-        "response": live_reply.get("response", ""),
-        "confidence": live_reply.get("confidence", 40),
+        "response": reply.get("response", ""),
+        "confidence": reply.get("confidence", 40),
         "timestamp": datetime.now().isoformat(),
-        "model": live_reply.get("model", CALLIE_MODEL),
+        "model": reply.get("model", CALLIE_MODEL),
     }), 200
 
 
