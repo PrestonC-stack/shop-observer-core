@@ -18,6 +18,14 @@
   - improve source-conflict coaching
   - deepen Callie evidence reasoning and UI polish
 
+## Progress Update - May 18, 2026 - Callie Context Guard + General Chat Fix
+
+- Fixed board-level `Ask Callie` so it explicitly clears stale RO context before sending
+- Added a fast greeting/general-question path so simple asks like `hello` do not wait on the heavy local model path
+- Added visible loading / slow-model feedback in the Callie modal so users can see what is happening while the request is in flight
+- Preserved job-aware context when Callie is opened from a specific RO card
+- Kept deterministic board logic separate from Callie augmentation
+
 ## Checkpoint - May 16, 2026 - Live Webhook State Loop
 
 ## Progress Update - May 18, 2026 - Board State Phase 1
