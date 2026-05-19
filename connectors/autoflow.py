@@ -153,6 +153,47 @@ def _extract_reason_vehicle_is_here(dvi: dict[str, Any]) -> list[str]:
     return _dedupe_strings(details)
 
 
+def _extract_labor_totals(work_order: dict[str, Any]) -> dict[str, float]:
+    total_sold_hours = 0.0
+    dvi_items = _first_value(work_order, ("dvi_items",), default=[])
+    if isinstance(dvi_items, list):
+        for item in dvi_items:
+            if not isinstance(item, dict):
+                continue
+            labor_rows = item.get("labor")
+            if not isinstance(labor_rows, list):
+                continue
+            for labor_row in labor_rows:
+                if not isinstance(labor_row, dict):
+                    continue
+                total_sold_hours += _to_float(
+                    _first_value(
+                        labor_row,
+                        ("quantity",),
+                        ("hours",),
+                        ("sold_hours",),
+                        ("soldHours",),
+                        default=0.0,
+                    ),
+                    default=0.0,
+                )
+
+    if total_sold_hours <= 0:
+        total_sold_hours = _to_float(
+            _first_value(
+                work_order,
+                ("sold_hours",),
+                ("soldHours",),
+                ("labor", "soldHours"),
+                ("labor", "quantity"),
+                default=0.0,
+            ),
+            default=0.0,
+        )
+
+    return {"sold_hours": round(total_sold_hours, 2)}
+
+
 def _extract_technician_candidates(work_order: dict[str, Any], dvi: dict[str, Any]) -> list[str]:
     candidates: list[str] = []
     direct_candidates = [
@@ -413,6 +454,7 @@ def merge_work_order_and_dvi(
     reason_vehicle_is_here = _extract_reason_vehicle_is_here(dvi)
     technician_candidates = _extract_technician_candidates(work_order, dvi)
     technician_name = technician_candidates[0] if technician_candidates else "Unassigned"
+    labor_totals = _extract_labor_totals(work_order)
 
     notes = str(
         _first_value(
@@ -437,6 +479,40 @@ def merge_work_order_and_dvi(
     )
     concern_summary = " | ".join(reason_vehicle_is_here[:2]).strip()
     fallback_summary = concern_summary or notes or workflow_status.replace("_", " ").title()
+    progress_percent = _to_float(
+        _first_value(
+            dvi,
+            ("progress_percent",),
+            ("progressPercent",),
+            ("completionPercent",),
+            ("inspection", "progressPercent"),
+            ("summary", "completionPercent"),
+            ("percent_complete",),
+            default=_first_value(
+                work_order,
+                ("progress_percent",),
+                ("progressPercent",),
+                default=0,
+            ),
+        )
+    )
+    labor_hours_remaining = _to_float(
+        _first_value(
+            work_order,
+            ("labor_hours_remaining",),
+            ("laborHoursRemaining",),
+            ("labor", "hoursRemaining"),
+            ("estimatedHoursRemaining",),
+            ("remaining_labor_hours",),
+            default=0.0,
+        )
+    )
+    sold_hours = _to_float(labor_totals.get("sold_hours"), 0.0)
+    if sold_hours <= 0 and labor_hours_remaining > 0 and progress_percent > 0:
+        sold_hours = round(labor_hours_remaining / max(1.0 - (progress_percent / 100.0), 0.01), 2)
+    labor_hours_completed = max(round(sold_hours - labor_hours_remaining, 2), 0.0) if sold_hours > 0 else 0.0
+    if progress_percent <= 0 and sold_hours > 0 and labor_hours_remaining >= 0 and labor_hours_remaining <= sold_hours:
+        progress_percent = round((labor_hours_completed / sold_hours) * 100, 1) if sold_hours else 0.0
 
     return {
         "ticket_reference": ticket_reference,
@@ -491,34 +567,10 @@ def merge_work_order_and_dvi(
                 default=False,
             )
         ),
-        "progress_percent": _to_float(
-            _first_value(
-                dvi,
-                ("progress_percent",),
-                ("progressPercent",),
-                ("completionPercent",),
-                ("inspection", "progressPercent"),
-                ("summary", "completionPercent"),
-                ("percent_complete",),
-                default=_first_value(
-                    work_order,
-                    ("progress_percent",),
-                    ("progressPercent",),
-                    default=0,
-                ),
-            )
-        ),
-        "labor_hours_remaining": _to_float(
-            _first_value(
-                work_order,
-                ("labor_hours_remaining",),
-                ("laborHoursRemaining",),
-                ("labor", "hoursRemaining"),
-                ("estimatedHoursRemaining",),
-                ("remaining_labor_hours",),
-                default=0.0,
-            )
-        ),
+        "progress_percent": progress_percent,
+        "sold_hours": sold_hours,
+        "labor_hours_completed": labor_hours_completed,
+        "labor_hours_remaining": labor_hours_remaining,
         "dvi_completed": _to_bool(
             _first_value(
                 dvi,

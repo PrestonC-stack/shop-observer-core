@@ -881,6 +881,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const boardChoice = job.board_choice || {};
             const sourceConflict = job.source_conflict || {};
             const trustScores = sourceTruths.trust_scores || {};
+            const soldHours = Number(job.sold_hours || ((job.source_evidence || {}).sold_hours) || 0);
+            const completedHours = Number(job.labor_hours_completed || ((job.source_evidence || {}).labor_hours_completed) || 0);
+            const remainingHours = Number(job.labor_hours_remaining || ((job.source_evidence || {}).labor_hours_remaining) || 0);
+            const progressPercent = Number(job.progress_percent || ((job.source_evidence || {}).progress_percent) || 0);
+            const laborStory = soldHours > 0
+                ? (completedHours.toFixed(1) + " / " + soldHours.toFixed(1) + " hrs complete • " + remainingHours.toFixed(1) + " hrs left")
+                : (progressPercent > 0 || remainingHours > 0
+                    ? (progressPercent + "% complete • " + remainingHours.toFixed(1) + " hrs left")
+                    : "No usable labor-hour picture from AutoFlow yet.");
 
             document.getElementById("modal-body").innerHTML =
                 '<div class="grid grid-cols-1 gap-4 md:grid-cols-2">' +
@@ -889,6 +898,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Advisor</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.advisor || "Unknown") + "</div></div>" +
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Technician</div><div class="mt-2 text-lg font-bold ' + ((String(job.technician || "").toLowerCase() === "unassigned" || !String(job.technician || "").trim()) ? "text-amber-300" : "text-zinc-100") + '">' + escapeHtml(job.technician || "Unassigned") + "</div></div>" +
                 "</div>" +
+                '<div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">' +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Labor Sold</div><div class="mt-2 text-2xl font-black text-zinc-100">' + escapeHtml(soldHours > 0 ? soldHours.toFixed(1) + " hrs" : "--") + '</div></div>' +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Labor Complete</div><div class="mt-2 text-2xl font-black text-emerald-300">' + escapeHtml(soldHours > 0 ? completedHours.toFixed(1) + " hrs" : (progressPercent > 0 ? progressPercent + "%" : "--")) + '</div></div>' +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Labor Remaining</div><div class="mt-2 text-2xl font-black text-amber-300">' + escapeHtml(remainingHours > 0 || soldHours > 0 ? remainingHours.toFixed(1) + " hrs" : "--") + '</div></div>' +
+                '</div>' +
+                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Labor Story</div><div class="mt-2 text-zinc-100">' + escapeHtml(laborStory) + '</div></div>' +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Next Move</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.next_action || "Keep momentum moving.") + "</div></div>" +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Summary</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.summary || "No summary available.") + "</div></div>" +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Customer Concern Evidence</div><ul class="mt-2 text-zinc-100">' + (concerns || "<li>No DVI concern evidence found.</li>") + "</ul></div>" +

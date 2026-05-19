@@ -404,12 +404,13 @@ def _risk_level(lane: str, alerts: list[dict[str, str]]) -> str:
 
 def _incoming_soon(job: dict[str, Any], normalized_status: str, lane: str) -> dict[str, Any] | None:
     progress = _to_int(job.get("progress_percent"), 0)
+    sold_hours = _to_float(job.get("sold_hours"), 0.0)
     labor_remaining = _to_float(job.get("labor_hours_remaining"), 0.0)
 
     if lane == "P4":
         return None
 
-    if progress >= 75 or (labor_remaining > 0 and labor_remaining <= 2):
+    if progress >= 75 or (sold_hours > 0 and labor_remaining <= 2) or (labor_remaining > 0 and labor_remaining <= 2):
         return {
             "active": True,
             "reason": "Job appears to be within roughly two hours of its next handoff or completion.",
@@ -435,6 +436,10 @@ def _incoming_soon(job: dict[str, Any], normalized_status: str, lane: str) -> di
 
 def _next_action(job: dict[str, Any], waiting_on: str, lane: str, alerts: list[dict[str, str]], incoming_soon: dict[str, Any] | None) -> str:
     normalized_status = _canonical_status(_normalize_text(job.get("workflow_status"), "unknown"))
+    sold_hours = _to_float(job.get("sold_hours"), 0.0)
+    completed_hours = _to_float(job.get("labor_hours_completed"), 0.0)
+    labor_remaining = _to_float(job.get("labor_hours_remaining"), 0.0)
+    progress = _to_int(job.get("progress_percent"), 0)
 
     if any(alert["code"] == "missing_ro" for alert in alerts):
         return "Link or confirm the RO number so the job can be tracked cleanly through the board."
@@ -463,13 +468,20 @@ def _next_action(job: dict[str, Any], waiting_on: str, lane: str, alerts: list[d
         if normalized_status == "ready for tech":
             return "Verify staging is complete and make sure the technician has everything needed to start cleanly."
         if normalized_status == "servicing":
+            if sold_hours > 0:
+                return f"Check live progress against the labor story: about {completed_hours:.1f} of {sold_hours:.1f} sold hours look complete with roughly {labor_remaining:.1f} hour(s) left. Stay ahead of the next advisor handoff."
             return "Check live progress, confirm the labor story matches the floor reality, and stay ahead of the next advisor handoff."
 
     if incoming_soon:
+        if sold_hours > 0:
+            return f"Use the early warning to land the plane. The board sees about {completed_hours:.1f} of {sold_hours:.1f} labor hours complete with roughly {labor_remaining:.1f} remaining."
         return "Use the early warning to prepare the next handoff before the job becomes reactive."
 
     if lane == "P4":
         return "Keep the hold calm and documented, with a clear follow-up expectation."
+
+    if sold_hours > 0 and progress >= 80 and labor_remaining <= 1.5:
+        return f"This job looks close to cash-out: about {completed_hours:.1f} of {sold_hours:.1f} hours appear complete with roughly {labor_remaining:.1f} hour(s) left. Decide what it takes to get it to the advisor closeout line."
 
     return "Take the next small step that removes uncertainty and keeps momentum moving."
 
@@ -483,6 +495,10 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
     incoming_soon = _incoming_soon(job, normalized_status, lane)
     technicians = _split_people(job.get("technician", ""))
     technician_candidates = [_normalize_text(name, "") for name in job.get("technician_candidates", []) if _normalize_text(name, "")]
+    sold_hours = _to_float(job.get("sold_hours"), 0.0)
+    labor_hours_completed = _to_float(job.get("labor_hours_completed"), 0.0)
+    labor_hours_remaining = _to_float(job.get("labor_hours_remaining"), 0.0)
+    progress_percent = _to_int(job.get("progress_percent"), 0)
     source_work_order_status = _normalize_text(job.get("source_work_order_status"), "unknown")
     source_dvi_status = _normalize_text(job.get("source_dvi_status"), "unknown")
     source_tekmetric_status = _normalize_text(job.get("source_tekmetric_status"), "unknown")
@@ -522,6 +538,10 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
     reasons.append(f"Placed in {lane} from status, urgency, progress, and hold logic.")
     if technician_candidates:
         reasons.append("Technician evidence seen: " + ", ".join(technician_candidates[:4]) + ".")
+    if sold_hours > 0:
+        reasons.append(f"Labor picture: about {labor_hours_completed:.1f} of {sold_hours:.1f} sold hours complete with roughly {labor_hours_remaining:.1f} hours remaining.")
+    elif progress_percent > 0 or labor_hours_remaining > 0:
+        reasons.append(f"Progress evidence: {progress_percent}% complete with roughly {labor_hours_remaining:.1f} labor hours remaining.")
     if job.get("reason_vehicle_is_here"):
         reasons.append("Customer concern evidence found in DVI reason-vehicle-is-here notes.")
     if source_work_order_status not in {"", "unknown"}:
@@ -546,8 +566,10 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
         "notes": _normalize_text(job.get("notes"), ""),
         "reason_vehicle_is_here": job.get("reason_vehicle_is_here", []) if isinstance(job.get("reason_vehicle_is_here"), list) else [],
         "clocked_in": _to_bool(job.get("clocked_in")),
-        "progress_percent": _to_int(job.get("progress_percent"), 0),
-        "labor_hours_remaining": _to_float(job.get("labor_hours_remaining"), 0.0),
+        "progress_percent": progress_percent,
+        "sold_hours": sold_hours,
+        "labor_hours_completed": labor_hours_completed,
+        "labor_hours_remaining": labor_hours_remaining,
         "priority_lane": lane,
         "waiting_on": waiting_on,
         "risk_level": _risk_level(lane, alerts),
@@ -580,6 +602,10 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
             "source_work_order_status": source_work_order_status,
             "source_dvi_status": source_dvi_status,
             "source_tekmetric_status": source_tekmetric_status,
+            "sold_hours": sold_hours,
+            "labor_hours_completed": labor_hours_completed,
+            "labor_hours_remaining": labor_hours_remaining,
+            "progress_percent": progress_percent,
             "latest_activity": _normalize_text(job.get("latest_activity"), ""),
             "advisor_known": _normalize_text(job.get("advisor"), "").lower() in ACTIVE_ADVISORS,
             "active_tech_detected": any(_is_active_tech_name(name) for name in technicians),
