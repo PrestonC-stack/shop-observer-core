@@ -166,6 +166,29 @@
   - what each score means
   - what practical actions raise each score
 
+## Progress Update - May 18, 2026 - Upstream Tech Evidence / Local Override Phase
+
+- Confirmed that some live AutoFlow work orders do **not** expose a clean top-level technician field even when the DVI/work items clearly show who touched the job.
+- Upgraded upstream extraction so technician evidence can now be pulled from richer DVI/work-order activity such as:
+  - `completed_by`
+  - `sms_user`
+  - DVI/work item evidence
+- Improved summary generation so the system can prefer `reason_vehicle_is_here` concern text over weak placeholders like bare status labels or irrelevant IDs.
+- Added a tracked local roster file:
+  - `config/employee_roster.json`
+- The roster now distinguishes:
+  - real people
+  - routing buckets / holding buckets
+  - suspended users kept for knowledge but excluded from live role matching
+- `Shop HitList`, `DIAG TESTING`, and `Admin User` are now treated as routing buckets instead of real technicians.
+- Added the first local board override layer:
+  - lane override
+  - owner override
+  - technician override
+  - summary override
+- Added “Why the board put it here” evidence in the job modal so corrections can be made with clearer context.
+- Started shifting user-facing assistant wording from `Hermes` toward `Callie` in the live dashboard UI.
+
 ### Git / Branch
 
 - Active branch: `ai-build-stabilization`

@@ -11,6 +11,7 @@ SHOP_STATE_PATH = os.path.join(REPO_ROOT, "state", "shop_state.json")
 BOARD_STATE_PATH = os.path.join(REPO_ROOT, "state", "board_state.json")
 BOARD_ACTION_LOG_PATH = os.path.join(REPO_ROOT, "state", "board_actions.jsonl")
 HERMES_LOG_PATH = os.path.join(REPO_ROOT, "state", "hermes_feedback.jsonl")
+BOARD_OVERRIDE_LOG_PATH = os.path.join(REPO_ROOT, "state", "board_overrides.jsonl")
 
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
@@ -106,8 +107,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
                 <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
                     <div class="flex items-center justify-between gap-3">
-                        <h2 class="text-xl font-bold">Hermes Intelligence</h2>
-                        <button id="open-hermes-ask" class="rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800">Ask Hermes</button>
+                        <h2 class="text-xl font-bold">Callie Intelligence</h2>
+                        <button id="open-hermes-ask" class="rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800">Ask Callie</button>
                     </div>
                     <div id="hermes-summary" class="mt-4 rounded-2xl bg-zinc-950 p-4 text-sm leading-relaxed text-zinc-200 min-h-[180px]">Loading Hermes recommendations...</div>
                     <div id="hermes-updated-at" class="mt-3 text-xs text-zinc-500"></div>
@@ -742,7 +743,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 productivity: "Productivity Check",
                 data: "Board / Data Fix",
                 missing: "Missing Info",
-                hermes: "Ask Hermes",
+                hermes: "Ask Callie",
                 details: "Quick Note"
             };
 
@@ -754,13 +755,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="productivity" type="button">⏱ Productivity Check</button>' +
                         '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="data" type="button">🧠 Board / Data Fix</button>' +
                         '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="missing" type="button">⚠ Missing Info</button>' +
-                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="hermes" type="button">Ask Hermes</button>' +
+                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="hermes" type="button">Ask Callie</button>' +
                     "</div>" +
                     '<div class="mt-4 text-sm font-semibold text-zinc-200" id="modal-mode-label">' + escapeHtml(labels[focusMode] || labels.details) + "</div>" +
                     '<textarea id="modal-note" class="mt-2 min-h-[120px] w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none focus:border-emerald-500" placeholder="' + escapeHtml(placeholders[focusMode] || placeholders.details) + '"></textarea>' +
+                    '<div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">' +
+                        '<div><div class="mb-1 text-xs uppercase tracking-wide text-zinc-500">Override lane</div><select id="override-priority-lane" class="w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100"><option value="">No change</option><option value="P1">P1</option><option value="P2">P2</option><option value="P3">P3</option><option value="P4">P4</option></select></div>' +
+                        '<div><div class="mb-1 text-xs uppercase tracking-wide text-zinc-500">Override waiting on</div><select id="override-waiting-on" class="w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100"><option value="">No change</option><option value="Mitch">Mitch</option><option value="Drew">Drew</option><option value="Preston">Preston</option><option value="External Hold">External Hold</option><option value="Needs Review">Needs Review</option></select></div>' +
+                        '<div><div class="mb-1 text-xs uppercase tracking-wide text-zinc-500">Override technician</div><input id="override-technician" class="w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none focus:border-emerald-500" placeholder="Luis Cervantes, Jonathan L, TC Charleston..."></div>' +
+                        '<div><div class="mb-1 text-xs uppercase tracking-wide text-zinc-500">Override summary</div><input id="override-summary" class="w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none focus:border-emerald-500" placeholder="Clear concern / summary"></div>' +
+                    '</div>' +
                     '<div class="mt-3 flex flex-wrap gap-2">' +
                         '<button id="submit-board-action" class="rounded-2xl border border-emerald-700 bg-emerald-900/40 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-900/70" type="button">Save Update</button>' +
-                        '<button id="submit-hermes-question" class="rounded-2xl border border-blue-700 bg-blue-900/40 px-4 py-2 text-sm font-semibold text-blue-100 hover:bg-blue-900/70" type="button">Send to Hermes</button>' +
+                        '<button id="submit-hermes-question" class="rounded-2xl border border-blue-700 bg-blue-900/40 px-4 py-2 text-sm font-semibold text-blue-100 hover:bg-blue-900/70" type="button">Send to Callie</button>' +
                     "</div>" +
                     '<div id="modal-response" class="mt-4 rounded-2xl bg-zinc-950 p-4 text-sm text-zinc-300">Use this panel to log what happened, capture what was found, or ask Hermes what to do next.</div>' +
                 "</div>"
@@ -779,6 +786,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const alerts = (job.alerts || []).map((alert) =>
                 "<li class=\\"mb-2\\">" + escapeHtml(alert.message || "Attention needed.") + "</li>"
             ).join("");
+            const reasons = (job.board_reasons || []).map((reason) =>
+                "<li class=\\"mb-2\\">" + escapeHtml(reason) + "</li>"
+            ).join("");
+            const concerns = (job.reason_vehicle_is_here || []).map((item) =>
+                "<li class=\\"mb-2\\">" + escapeHtml(item) + "</li>"
+            ).join("");
+            const techEvidence = (job.technician_candidates || []).length
+                ? (job.technician_candidates || []).map((name) => '<span class="rounded-full border border-zinc-700 bg-zinc-950 px-3 py-1 text-xs text-zinc-200">' + escapeHtml(name) + '</span>').join("")
+                : '<span class="text-zinc-500">No technician evidence found yet.</span>';
+            const sourceBits = [];
+            if (job.source_evidence && job.source_evidence.dvi_status) sourceBits.push("DVI: " + job.source_evidence.dvi_status);
+            if (job.source_evidence && job.source_evidence.latest_activity) sourceBits.push("Latest activity: " + job.source_evidence.latest_activity);
+            if (job.source_evidence && job.source_evidence.routing_bucket_detected) sourceBits.push("Routing bucket detected");
 
             document.getElementById("modal-body").innerHTML =
                 '<div class="grid grid-cols-1 gap-4 md:grid-cols-2">' +
@@ -789,6 +809,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 "</div>" +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Next Move</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.next_action || "Keep momentum moving.") + "</div></div>" +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Summary</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.summary || "No summary available.") + "</div></div>" +
+                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Customer Concern Evidence</div><ul class="mt-2 text-zinc-100">' + (concerns || "<li>No DVI concern evidence found.</li>") + "</ul></div>" +
+                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Technician Evidence</div><div class="mt-2 flex flex-wrap gap-2">' + techEvidence + '</div><div class="mt-3 text-xs text-zinc-400">' + escapeHtml(sourceBits.join(" • ") || "No extra source evidence available yet.") + '</div></div>' +
+                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Why The Board Put It Here</div><ul class="mt-2 text-zinc-100">' + (reasons || "<li>No board reasoning captured yet.</li>") + "</ul></div>" +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Helper Alerts</div><ul class="mt-2 text-zinc-100">' + (alerts || "<li>No active alerts.</li>") + "</ul></div>" +
                 buildActionPanel(job, mode);
 
@@ -819,7 +842,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 productivity: "Productivity Check",
                 data: "Board / Data Fix",
                 missing: "Missing Info",
-                hermes: "Ask Hermes",
+                hermes: "Ask Callie",
                 details: "Quick Note"
             };
             const placeholderMap = {
@@ -827,7 +850,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 productivity: "Log what you found on the floor. Who is on it, is labor clocked, and what is blocking progress?",
                 data: "Log the board mismatch, missing RO, status cleanup, or data issue you want Hermes to learn from.",
                 missing: "Log what info is missing: technician assignment, customer concern detail, RO linkage, or anything else the board needs.",
-                hermes: "Ask Hermes a targeted question about this job, the blocker, or the next best move.",
+                hermes: "Ask Callie a targeted question about this job, the blocker, or the next best move.",
                 details: "Log a quick support note so the board can help the next handoff."
             };
             const label = document.getElementById("modal-mode-label");
@@ -917,7 +940,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         function openHermesAskModal() {
-            document.getElementById("modal-title").textContent = "Ask Hermes";
+            document.getElementById("modal-title").textContent = "Ask Callie";
             document.getElementById("modal-subtitle").textContent = "Ask a board question, flag a pattern, or request help with the next move.";
             document.getElementById("modal-body").innerHTML = buildActionPanel({
                 ro: "",
@@ -980,8 +1003,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function submitBoardAction() {
             const note = document.getElementById("modal-note");
-            if (!note || !note.value.trim()) {
-                showToast("Add a quick note first so the board knows what changed.", "error");
+            const laneOverride = document.getElementById("override-priority-lane");
+            const waitingOverride = document.getElementById("override-waiting-on");
+            const technicianOverride = document.getElementById("override-technician");
+            const summaryOverride = document.getElementById("override-summary");
+            const hasOverride = Boolean(
+                (laneOverride && laneOverride.value.trim()) ||
+                (waitingOverride && waitingOverride.value.trim()) ||
+                (technicianOverride && technicianOverride.value.trim()) ||
+                (summaryOverride && summaryOverride.value.trim())
+            );
+            if ((!note || !note.value.trim()) && !hasOverride) {
+                showToast("Add a note or an override so the board knows what changed.", "error");
                 return;
             }
             fetch("/api/board-action", {
@@ -990,7 +1023,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 body: JSON.stringify({
                     ro: activeModalRo,
                     action_type: activeModalMode,
-                    note: note.value.trim(),
+                    note: note ? note.value.trim() : "",
+                    override_priority_lane: laneOverride ? laneOverride.value.trim() : "",
+                    override_waiting_on: waitingOverride ? waitingOverride.value.trim() : "",
+                    override_technician: technicianOverride ? technicianOverride.value.trim() : "",
+                    override_summary: summaryOverride ? summaryOverride.value.trim() : "",
                     source: "dashboard"
                 })
             })
@@ -1008,7 +1045,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function submitHermesQuestion() {
             const note = document.getElementById("modal-note");
             if (!note || !note.value.trim()) {
-                showToast("Type a question for Hermes first.", "error");
+                showToast("Type a question for Callie first.", "error");
                 return;
             }
             fetch("/api/hermes-feedback", {
@@ -1024,12 +1061,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .then((response) => response.json())
                 .then((payload) => {
                     const panel = document.getElementById("modal-response");
-                    const answer = payload.answer || payload.message || "Hermes acknowledged the note.";
+                    const answer = payload.answer || payload.message || "Callie acknowledged the note.";
                     if (panel) panel.textContent = answer;
                     renderHermesSummary({ summary: answer, timestamp: payload.timestamp || "--" });
-                    showToast("Hermes updated.");
+                    showToast("Callie updated.");
                 })
-                .catch(() => showToast("Hermes could not respond right now.", "error"));
+                .catch(() => showToast("Callie could not respond right now.", "error"));
         }
 
         document.addEventListener("DOMContentLoaded", () => {
@@ -1079,6 +1116,31 @@ def _read_jsonl(path):
     return rows
 
 
+def _recount_board(board_state):
+    if not isinstance(board_state, dict):
+        return board_state
+    jobs = board_state.get("jobs", [])
+    if not isinstance(jobs, list):
+        return board_state
+    lane_counts = {"P1": 0, "P2": 0, "P3": 0, "P4": 0}
+    waiting_counts = {"Mitch": 0, "Drew": 0, "Preston": 0, "External Hold": 0, "Needs Review": 0}
+    open_alert_count = 0
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        lane = str(job.get("priority_lane", "P3"))
+        waiting = str(job.get("waiting_on", "Needs Review"))
+        lane_counts[lane] = lane_counts.get(lane, 0) + 1
+        waiting_counts[waiting] = waiting_counts.get(waiting, 0) + 1
+        alerts = job.get("alerts", [])
+        if isinstance(alerts, list):
+            open_alert_count += len(alerts)
+    board_state["lane_counts"] = lane_counts
+    board_state["waiting_on_counts"] = waiting_counts
+    board_state["open_alert_count"] = open_alert_count
+    return board_state
+
+
 def _latest_action_state():
     state = {}
     horizon = datetime.now() - timedelta(hours=12)
@@ -1097,6 +1159,58 @@ def _latest_action_state():
         entry[f"{action_type}_cleared"] = True
         entry[f"{action_type}_updated_at"] = stamp.strftime("%Y-%m-%d %H:%M:%S")
     return state
+
+
+def _latest_override_state():
+    state = {}
+    for row in _read_jsonl(BOARD_OVERRIDE_LOG_PATH):
+        ro = str(row.get("ro", "")).strip()
+        if not ro:
+            continue
+        state[ro] = row
+    return state
+
+
+def _apply_override_state(board_state):
+    if not isinstance(board_state, dict):
+        return board_state
+    override_state = _latest_override_state()
+    jobs = board_state.get("jobs", [])
+    if not isinstance(jobs, list):
+        board_state["override_state"] = override_state
+        return board_state
+
+    risk_by_lane = {"P1": "CRITICAL", "P2": "YELLOW", "P3": "YELLOW", "P4": "NORMAL"}
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        ro = str(job.get("ro", "")).strip()
+        override = override_state.get(ro)
+        if not override:
+            continue
+        if override.get("priority_lane"):
+            job["priority_lane"] = override["priority_lane"]
+            job["risk_level"] = risk_by_lane.get(job["priority_lane"], job.get("risk_level", "NORMAL"))
+            if job["priority_lane"] == "P4":
+                job["incoming_soon"] = None
+        if override.get("waiting_on"):
+            job["waiting_on"] = override["waiting_on"]
+        if override.get("technician"):
+            job["technician"] = override["technician"]
+            technicians = [part.strip() for part in str(override["technician"]).split(",") if part.strip()]
+            if technicians:
+                job["technicians"] = technicians
+        if override.get("summary"):
+            job["summary"] = override["summary"]
+        if override.get("note"):
+            reasons = job.get("board_reasons", [])
+            if not isinstance(reasons, list):
+                reasons = []
+            reasons.append("Local override applied: " + str(override["note"]))
+            job["board_reasons"] = reasons
+        job["override_state"] = override
+    board_state["override_state"] = override_state
+    return _recount_board(board_state)
 
 
 def _apply_action_state(board_state):
@@ -1130,9 +1244,8 @@ def _apply_action_state(board_state):
         if ro_state:
             job["action_state"] = ro_state
 
-    board_state["open_alert_count"] = sum(len(job.get("alerts", [])) for job in jobs if isinstance(job, dict))
     board_state["action_state"] = action_state
-    return board_state
+    return _recount_board(board_state)
 
 
 def _fallback_jobs_payload(reason="autoflow_unavailable"):
@@ -1160,11 +1273,11 @@ def _load_board_state():
         with open(BOARD_STATE_PATH, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
         if isinstance(payload, dict):
-            return _apply_action_state(payload)
+            return _apply_action_state(_apply_override_state(payload))
     except Exception:
         pass
 
-    return _apply_action_state({
+    return _apply_action_state(_apply_override_state({
         "source": "board_rules_v1",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "count": 0,
@@ -1173,7 +1286,7 @@ def _load_board_state():
         "waiting_on_counts": {"Mitch": 0, "Drew": 0, "Preston": 0, "External Hold": 0, "Needs Review": 0},
         "open_alert_count": 0,
         "message": "No board_state.json found. Run python scripts/build_board_state.py first.",
-    })
+    }))
 
 
 def _find_job(ro):
@@ -1259,6 +1372,19 @@ def api_board_action():
     }
     _append_jsonl(BOARD_ACTION_LOG_PATH, entry)
 
+    override_entry = {
+        "timestamp": entry["timestamp"],
+        "ro": entry["ro"],
+        "priority_lane": str(payload.get("override_priority_lane", "")).strip(),
+        "waiting_on": str(payload.get("override_waiting_on", "")).strip(),
+        "technician": str(payload.get("override_technician", "")).strip(),
+        "summary": str(payload.get("override_summary", "")).strip(),
+        "note": entry["note"],
+        "source": entry["source"],
+    }
+    if any(override_entry[key] for key in ("priority_lane", "waiting_on", "technician", "summary")):
+        _append_jsonl(BOARD_OVERRIDE_LOG_PATH, override_entry)
+
     message_map = {
         "communication": "Customer update saved. Keep the promise window visible and the next callback clear.",
         "productivity": "Productivity note saved. Advisors can now coach the next floor follow-up with context.",
@@ -1266,6 +1392,8 @@ def api_board_action():
         "missing": "Missing-info note saved. The board can now coach the next cleanup step with more context.",
         "details": "Support note saved.",
     }
+    if any(override_entry[key] for key in ("priority_lane", "waiting_on", "technician", "summary")):
+        return jsonify({"status": "received", "message": "Local board correction saved. The board will now show your override and keep the reason on file."}), 200
     return jsonify({"status": "received", "message": message_map.get(entry["action_type"], "Support note saved.")}), 200
 
 

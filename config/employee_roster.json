@@ -1,0 +1,136 @@
+{
+  "source": "manual_shop_roster",
+  "updated_at": "2026-05-18",
+  "people": [
+    {
+      "kind": "person",
+      "active": true,
+      "role_family": "advisor",
+      "display_name": "Andrew Mize",
+      "username": "drewm",
+      "email": "drewm@callahanautoaz.com",
+      "phone": "(480) 417-3970",
+      "aliases": ["Andrew Mize", "Drew Mize", "DrewM", "Drew"]
+    },
+    {
+      "kind": "person",
+      "active": true,
+      "role_family": "technician",
+      "display_name": "Johnathan Leithoff",
+      "username": "johnathanl",
+      "email": "JohnathanL@callahanautoaz.com",
+      "phone": "(480) 859-6065",
+      "aliases": ["Johnathan Leithoff", "Jonathan Leithoff", "Jonathan L", "JohnathanL", "Leithoff"]
+    },
+    {
+      "kind": "person",
+      "active": true,
+      "role_family": "technician",
+      "display_name": "Luis Cervantes",
+      "username": "lcervantes",
+      "email": "luisc@callahanautoaz.com",
+      "phone": "(480) 546-0104",
+      "aliases": ["Luis Cervantes", "L Cervantes", "lcervantes", "Cervantes"]
+    },
+    {
+      "kind": "person",
+      "active": true,
+      "role_family": "technician",
+      "display_name": "Marvin Charleston",
+      "username": "tc",
+      "email": "tc@callahanautoaz.com",
+      "phone": "(480) 234-1244",
+      "aliases": ["Marvin Charleston", "TC Charleston", "T C Charleston", "Charleston", "TC"]
+    },
+    {
+      "kind": "person",
+      "active": true,
+      "role_family": "advisor",
+      "display_name": "Mitch Callahan",
+      "username": "mcallahan",
+      "email": "mitchc@callahanautoaz.com",
+      "phone": "(480) 466-5596",
+      "aliases": ["Mitch Callahan", "Mitch", "mcallahan"]
+    },
+    {
+      "kind": "person",
+      "active": true,
+      "role_family": "owner",
+      "display_name": "Preston Callahan",
+      "username": "pcallahan",
+      "email": "prestonc@callahanautoaz.com",
+      "phone": "(480) 356-5508",
+      "aliases": ["Preston Callahan", "Preston", "pcallahan"]
+    },
+    {
+      "kind": "person",
+      "active": true,
+      "role_family": "technician",
+      "display_name": "Steve Chubb",
+      "username": "stevec",
+      "email": "stevec@callahanautoaz.com",
+      "phone": "(480) 793-6358",
+      "aliases": ["Steve Chubb", "Steve C", "stevec", "Chubb"]
+    },
+    {
+      "kind": "person",
+      "active": false,
+      "role_family": "technician",
+      "display_name": "Eugene Glosch",
+      "username": "eglosch",
+      "email": "EugeneG@callahanautoaz.com",
+      "phone": "",
+      "aliases": ["Eugene Glosch", "eglosch", "Eugene"]
+    },
+    {
+      "kind": "person",
+      "active": false,
+      "role_family": "admin",
+      "display_name": "Matt Strom",
+      "username": "mstrom",
+      "email": "Matthew@autoshopmedia.com",
+      "phone": "",
+      "aliases": ["Matt Strom", "mstrom"]
+    },
+    {
+      "kind": "bucket",
+      "active": true,
+      "role_family": "routing",
+      "display_name": "Shop HitList",
+      "username": ".shophitlist",
+      "email": "callahanshop255@gmail.com",
+      "phone": "(480) 969-3332",
+      "aliases": ["Shop HitList", "Shop Hitlist", "shop hit list", ".shophitlist"]
+    },
+    {
+      "kind": "bucket",
+      "active": true,
+      "role_family": "routing",
+      "display_name": "DIAG TESTING",
+      "username": "dtesting",
+      "email": "info@callahanautoaz.com",
+      "phone": "",
+      "aliases": ["DIAG TESTING", "DI Testing", "Diag Testing", "dtesting"]
+    },
+    {
+      "kind": "bucket",
+      "active": true,
+      "role_family": "routing",
+      "display_name": "Admin User",
+      "username": "admin",
+      "email": "callahanautoanddeisel@gmail.com",
+      "phone": "",
+      "aliases": ["Admin User", "admin"]
+    },
+    {
+      "kind": "person",
+      "active": true,
+      "role_family": "accounting",
+      "display_name": "Raylene Callahan",
+      "username": "rcallahan",
+      "email": "raylenec@callahanautoaz.com",
+      "phone": "(480) 738-8403",
+      "aliases": ["Raylene Callahan", "R Callahan", "rcallahan"]
+    }
+  ]
+}
