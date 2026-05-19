@@ -215,7 +215,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
         </div>
 
-        <div id="job-modal" class="hidden-panel fixed inset-0 z-50 bg-black/70 p-4 md:flex md:items-center md:justify-center">
+        <div id="job-modal" class="hidden-panel fixed inset-0 z-50 bg-black/70 p-4">
             <div class="modal-shell mx-auto rounded-3xl border border-zinc-700 bg-zinc-950 p-6">
                 <div class="flex items-start justify-between gap-4">
                     <div>
