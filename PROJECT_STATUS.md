@@ -38,6 +38,11 @@
 - Questions like `why is 13379 showing parts when AutoFlow says technical advisement?` now attach to the matching live job instead of falling back to the generic board reply
 - Greeting and short-chat fast paths still bypass RO context and return immediately
 
+## Progress Update - May 18, 2026 - Fast Status Explainer Path
+
+- Added a deterministic Callie fast-path for status/explainer questions so “why is this in parts / waiting parts / technical advisement?” does not have to wait on the local model
+- These questions now answer directly from board evidence, source statuses, and current mapping logic when a matching RO is found
+
 ## Checkpoint - May 16, 2026 - Live Webhook State Loop
 
 ## Progress Update - May 18, 2026 - Board State Phase 1
