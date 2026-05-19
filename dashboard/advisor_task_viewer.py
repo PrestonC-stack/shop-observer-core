@@ -268,10 +268,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function laneMeta(lane) {
             const map = {
-                P1: { cls: "lane-p1", title: "P1", subtitle: "Critical â€¢ Action now" },
-                P2: { cls: "lane-p2", title: "P2", subtitle: "Needs action â€¢ Info gap" },
-                P3: { cls: "lane-p3", title: "P3", subtitle: "Monitor â€¢ Controlled flow" },
-                P4: { cls: "lane-p4", title: "P4", subtitle: "Stable â€¢ External hold" }
+                P1: { cls: "lane-p1", title: "P1", subtitle: "Critical - Action Now" },
+                P2: { cls: "lane-p2", title: "P2", subtitle: "Needs Action - Info Gap" },
+                P3: { cls: "lane-p3", title: "P3", subtitle: "Monitor - Controlled Flow" },
+                P4: { cls: "lane-p4", title: "P4", subtitle: "Stable - External Hold" }
             };
             return map[lane] || map.P3;
         }
@@ -286,7 +286,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
             return { label: "Good", cls: "bg-emerald-500 text-zinc-950" };
         }
-
+        function hermesSignalBadge(job) {
+            const signal = String(job.hermes_board_signal || "clear").toLowerCase();
+            const priority = String(job.hermes_priority || "").toUpperCase();
+            const map = {
+                fire:    { label: priority || "P1", cls: "bg-red-500 text-white" },
+                blocked: { label: priority || "P2", cls: "bg-amber-400 text-zinc-950" },
+                comms:   { label: priority || "P1", cls: "bg-blue-500 text-white" },
+                money:   { label: priority || "P1", cls: "bg-emerald-500 text-zinc-950" },
+                clear:   { label: priority || "P3", cls: "bg-zinc-600 text-zinc-100" },
+            };
+            return map[signal] || { label: priority || "P3", cls: "bg-zinc-600 text-zinc-100" };
+        }
         function roleMatches(job) {
             if (currentRole === "board") return true;
             const waitingOn = String(job.waiting_on || "").toLowerCase();
@@ -2189,4 +2200,8 @@ def bay_performance():
 if __name__ == "__main__":
     print("ðŸš€ Starting Country Club Advisor Command Board on 127.0.0.1:5000")
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True, use_reloader=False)
+
+
+
+
 
