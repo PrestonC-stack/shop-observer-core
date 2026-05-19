@@ -71,6 +71,7 @@ def _derive_priority(job: dict[str, Any]) -> str:
     clocked_in = _to_bool(job.get("clocked_in"))
     job_marked_complete = _to_bool(job.get("job_marked_complete"))
     labor_hours_remaining = _to_float(job.get("labor_hours_remaining"), 0.0)
+    sold_hours = _to_float(job.get("sold_hours"), 0.0)
     progress_percent = _to_int(job.get("progress_percent"), 0)
 
     if job_marked_complete or workflow_status in {"complete", "completed", "closed", "done"} or progress_percent >= 100:
@@ -184,6 +185,14 @@ def _normalize_job(item: dict[str, Any]) -> dict[str, Any]:
             _first_value(item, "progress_percent", "progressPercent", "percent_complete", default=0),
             0,
         ),
+        "sold_hours": _to_float(
+            _first_value(item, "sold_hours", "soldHours", "labor_sold_hours", default=0.0),
+            0.0,
+        ),
+        "labor_hours_completed": _to_float(
+            _first_value(item, "labor_hours_completed", "laborHoursCompleted", "completed_labor_hours", default=0.0),
+            0.0,
+        ),
         "clocked_in": _to_bool(_first_value(item, "clocked_in", "clockedIn", default=False)),
         "job_marked_complete": _to_bool(
             _first_value(item, "job_marked_complete", "jobMarkedComplete", "isComplete", default=False)
@@ -202,6 +211,11 @@ def _normalize_job(item: dict[str, Any]) -> dict[str, Any]:
         "dvi_completed": _to_bool(_first_value(item, "dvi_completed", default=False)),
         "source_refs": item.get("source_refs") if isinstance(item.get("source_refs"), dict) else {},
     }
+    if normalized_job["labor_hours_completed"] <= 0 and normalized_job["sold_hours"] > 0:
+        normalized_job["labor_hours_completed"] = max(
+            round(normalized_job["sold_hours"] - normalized_job["labor_hours_remaining"], 2),
+            0.0,
+        )
     normalized_job["priority"] = _derive_priority(normalized_job)
     return normalized_job
 

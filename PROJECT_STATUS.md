@@ -23,6 +23,21 @@
 - Current honest limitation:
   - true sold-hours / labor-output productivity is still not available from the current connected data, so the board should present support coverage and workflow visibility until richer metrics are wired in
 
+## Progress Update - May 18, 2026 - Labor Story In The Live Board
+
+- Added a first real labor picture into the live AutoFlow board path:
+  - `sold_hours`
+  - `labor_hours_completed`
+  - `labor_hours_remaining`
+  - `progress_percent`
+- AutoFlow work-order labor rows are now summed so the board can estimate how much labor was sold on an RO
+- Job modals now show:
+  - labor sold
+  - labor complete
+  - labor remaining
+  - a simple labor story advisors can use to decide what is close enough to land and cash out
+- Next-action coaching now leans on labor progress when the board sees a job nearing closeout
+
 ## Progress Update - May 18, 2026 - Real Callie Intelligence Layer
 
 - Real Callie intelligence layer added on top of the live wallboard
