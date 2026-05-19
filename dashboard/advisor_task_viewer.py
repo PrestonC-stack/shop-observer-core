@@ -351,7 +351,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
             return (
                 '<div class="mt-3 flex flex-wrap gap-2">' +
-                    '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + phoneCls + '" data-helper="communication" data-ro="' + escapeHtml(job.ro || "") + '" type="button">â˜Ž Communication</button>' +
+                    '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + phoneCls + '" data-helper="communication" data-ro="' + escapeHtml(job.ro || "") + '" type="button">&#9990; Communication</button>' +
                     '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + clockCls + '" data-helper="productivity" data-ro="' + escapeHtml(job.ro || "") + '" type="button">â± Productivity</button>' +
                     '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + dataCls + '" data-helper="data" data-ro="' + escapeHtml(job.ro || "") + '" type="button">ðŸ§  Data</button>' +
                 '</div>'
@@ -446,7 +446,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const ownerText = Object.entries(byOwner)
                 .sort((a, b) => b[1] - a[1])
                 .map(([owner, count]) => owner + ": " + count)
-                .join(" â€¢ ");
+                .join(" - ");
 
             snapshot.innerHTML =
                 '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Visible jobs:</span> ' + jobs.length + "</div>" +
@@ -597,7 +597,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Clock-in checks still open:</span> ' + clocks + '</div>' +
                 '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Jobs with active tech evidence:</span> ' + activeTechKnown + ' / ' + jobs.length + '</div>' +
                 '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Routing-bucket holds:</span> ' + routingHolds + '</div>' +
-                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Front vs back coverage:</span> front ' + frontScore + '% â€¢ back ' + backScore + '%</div>';
+                '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Front vs back coverage:</span> front ' + frontScore + '% - back ' + backScore + '%</div>';
             document.getElementById("communication-patterns").innerHTML =
                 '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Communication misses:</span> ' + communicationNeeds + '</div>' +
                 '<div class="rounded-2xl bg-zinc-950 px-4 py-3 text-sm text-zinc-200"><span class="font-semibold">Communication clear:</span> ' + clearCommunication + ' / ' + jobs.length + '</div>' +
@@ -660,7 +660,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     '</div>' +
                     '<div class="mt-4 space-y-2">' +
                         (group.jobs.length
-                            ? group.jobs.slice(0, 6).map((job) => '<button class="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 data-input-job" data-ro="' + escapeHtml(job.ro || "") + '">' + escapeHtml(job.ro || "Unknown RO") + ' â€¢ ' + escapeHtml(job.customer || "Unknown Customer") + ' â€¢ ' + escapeHtml(job.workflow_status || "unknown") + '</button>').join("")
+                            ? group.jobs.slice(0, 6).map((job) => '<button class="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 data-input-job" data-ro="' + escapeHtml(job.ro || "") + '">' + escapeHtml(job.ro || "Unknown RO") + ' - ' + escapeHtml(job.customer || "Unknown Customer") + ' - ' + escapeHtml(job.workflow_status || "unknown") + '</button>').join("")
                             : '<div class="rounded-2xl border border-dashed border-zinc-800 px-4 py-3 text-sm text-zinc-500">Nothing in this correction bucket right now.</div>') +
                     '</div>' +
                 '</div>'
@@ -836,7 +836,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 '<div class="rounded-2xl bg-zinc-900 p-4">' +
                     '<div class="text-xs uppercase tracking-wide text-zinc-500">Action Center</div>' +
                     '<div class="mt-3 flex flex-wrap gap-2">' +
-                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="communication" type="button">â˜Ž Customer Update</button>' +
+                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="communication" type="button">&#9990; Customer Update</button>' +
                         '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="productivity" type="button">â± Productivity Check</button>' +
                         '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="data" type="button">ðŸ§  Board / Data Fix</button>' +
                         '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="missing" type="button">âš  Missing Info</button>' +
@@ -866,8 +866,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             activeModalRo = ro;
             activeModalMode = mode;
 
-            document.getElementById("modal-title").textContent = job.ro + " â€¢ " + (job.customer || "Unknown Customer");
-            document.getElementById("modal-subtitle").textContent = (job.vehicle || "Unknown Vehicle") + " â€¢ Waiting on " + (job.waiting_on || "Needs Review");
+            document.getElementById("modal-title").textContent = job.ro + " - " + (job.customer || "Unknown Customer");
+            document.getElementById("modal-subtitle").textContent = (job.vehicle || "Unknown Vehicle") + " - Waiting on " + (job.waiting_on || "Needs Review");
 
             const alerts = (job.alerts || []).map((alert) =>
                 "<li class=\\"mb-2\\">" + escapeHtml(alert.message || "Attention needed.") + "</li>"
@@ -897,9 +897,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const remainingHours = Number(job.labor_hours_remaining || ((job.source_evidence || {}).labor_hours_remaining) || 0);
             const progressPercent = Number(job.progress_percent || ((job.source_evidence || {}).progress_percent) || 0);
             const laborStory = soldHours > 0
-                ? (completedHours.toFixed(1) + " / " + soldHours.toFixed(1) + " hrs complete â€¢ " + remainingHours.toFixed(1) + " hrs left")
+                ? (completedHours.toFixed(1) + " / " + soldHours.toFixed(1) + " hrs complete - " + remainingHours.toFixed(1) + " hrs left")
                 : (progressPercent > 0 || remainingHours > 0
-                    ? (progressPercent + "% complete â€¢ " + remainingHours.toFixed(1) + " hrs left")
+                    ? (progressPercent + "% complete - " + remainingHours.toFixed(1) + " hrs left")
                     : "No usable labor-hour picture from AutoFlow yet.");
 
             document.getElementById("modal-body").innerHTML =
@@ -918,14 +918,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Next Move</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.hermes_next_action || job.next_action || "Keep momentum moving.") + "</div></div>" +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Summary</div><div class="mt-2 text-zinc-100">' + escapeHtml(job.summary || "No summary available.") + "</div></div>" +
                 '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Customer Concern Evidence</div><ul class="mt-2 text-zinc-100">' + (concerns || "<li>No DVI concern evidence found.</li>") + "</ul></div>" +
-                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Technician Evidence</div><div class="mt-2 flex flex-wrap gap-2">' + techEvidence + '</div><div class="mt-3 text-xs text-zinc-400">' + escapeHtml(sourceBits.join(" â€¢ ") || "No extra source evidence available yet.") + '</div></div>' +
+                '<div class="mt-4 rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Technician Evidence</div><div class="mt-2 flex flex-wrap gap-2">' + techEvidence + '</div><div class="mt-3 text-xs text-zinc-400">' + escapeHtml(sourceBits.join(" - ") || "No extra source evidence available yet.") + '</div></div>' +
                 '<div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">' +
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Source Truths</div><div class="mt-2 space-y-2 text-sm text-zinc-100">' +
                         '<div>AutoFlow WO: <span class="text-zinc-300">' + escapeHtml(sourceTruths.autoflow_work_order_status || "unknown") + '</span></div>' +
                         '<div>AutoFlow DVI: <span class="text-zinc-300">' + escapeHtml(sourceTruths.autoflow_dvi_status || "unknown") + '</span></div>' +
                         '<div>External / manual note: <span class="text-zinc-300">' + escapeHtml(sourceTruths.manual_external_status || "not connected") + '</span></div>' +
-                        '<div class="pt-2 text-xs text-zinc-400">Primary source: ' + escapeHtml(sourceTruths.primary_source || "autoflow") + ' â€¢ Fallback: ' + escapeHtml(sourceTruths.fallback_source || "manual_review") + '</div>' +
-                        '<div class="text-xs text-zinc-500">Trust scores â€” AutoFlow: ' + escapeHtml(String(trustScores.autoflow || 90)) + ' â€¢ Manual review: ' + escapeHtml(String(trustScores.manual_review || 40)) + '</div>' +
+                        '<div class="pt-2 text-xs text-zinc-400">Primary source: ' + escapeHtml(sourceTruths.primary_source || "autoflow") + ' - Fallback: ' + escapeHtml(sourceTruths.fallback_source || "manual_review") + '</div>' +
+                        '<div class="text-xs text-zinc-500">Trust scores â€” AutoFlow: ' + escapeHtml(String(trustScores.autoflow || 90)) + ' - Manual review: ' + escapeHtml(String(trustScores.manual_review || 40)) + '</div>' +
                     '</div></div>' +
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Board Decision</div><div class="mt-2 space-y-2 text-sm text-zinc-100">' +
                         '<div>Chosen source: <span class="text-zinc-300">' + escapeHtml(boardChoice.chosen_source || "unknown") + '</span></div>' +
@@ -1281,14 +1281,14 @@ def _recent_source_activity(jobs, limit=8):
         status = str(job.get("workflow_status", "unknown")).strip() or "unknown"
         if activity:
             items.append({
-                "title": f"RO {ro} â€¢ {customer}",
+                "title": f"RO {ro} - {customer}",
                 "detail": f"{activity} Current AutoFlow status: {status}.",
             })
             continue
         conflict = job.get("source_conflict", {}) if isinstance(job.get("source_conflict"), dict) else {}
         if conflict.get("has_conflict"):
             items.append({
-                "title": f"RO {ro} â€¢ source conflict",
+                "title": f"RO {ro} - source conflict",
                 "detail": str(conflict.get("summary", "")).strip(),
             })
     return items[:limit]
@@ -1318,7 +1318,7 @@ def _recent_ai_activity(limit=8):
             action_type = str(row.get("action_type", "details")).strip() or "details"
             note = str(row.get("note", "")).strip() or "No note captured."
             items.append({
-                "title": f"{ro_label} â€¢ {action_type.replace('_', ' ').title()} â€¢ {row.get('timestamp', '--')}",
+                "title": f"{ro_label} - {action_type.replace('_', ' ').title()} - {row.get('timestamp', '--')}",
                 "detail": note,
             })
         elif kind == "override":
@@ -1330,14 +1330,14 @@ def _recent_ai_activity(limit=8):
             ) if str(row.get(key, "")).strip()]
             if changed:
                 items.append({
-                    "title": f"{ro_label} â€¢ override â€¢ {row.get('timestamp', '--')}",
+                    "title": f"{ro_label} - override - {row.get('timestamp', '--')}",
                     "detail": "Changed " + ", ".join(changed) + ". " + (str(row.get("note", "")).strip() or "No override note captured."),
                 })
         else:
             question = str(row.get("question", "")).strip() or "No question captured."
             answer = str(row.get("answer", "")).strip() or "No answer captured."
             items.append({
-                "title": f"{ro_label} â€¢ Callie â€¢ {row.get('timestamp', '--')}",
+                "title": f"{ro_label} - Callie - {row.get('timestamp', '--')}",
                 "detail": f"Q: {question} | A: {answer[:220]}",
             })
         if len(items) >= limit:
@@ -2198,8 +2198,9 @@ def bay_performance():
 
 
 if __name__ == "__main__":
-    print("ðŸš€ Starting Country Club Advisor Command Board on 127.0.0.1:5000")
+    print(" Starting Country Club Advisor Command Board on 127.0.0.1:5000")
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True, use_reloader=False)
+
 
 
 
