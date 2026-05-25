@@ -127,7 +127,7 @@ Register-CallahanTask `
 Register-CallahanTask `
     -TaskName "CallahanAI-Tunnel" `
     -WorkingDirectory $RuntimeRoot `
-    -RunCommand ".\cloudflared.exe tunnel run shop-tasks" `
+    -RunCommand '.\cloudflared.exe tunnel --origincert "C:\Users\CallahanAi\.cloudflared\cert.pem" --config "C:\Users\CallahanAi\.cloudflared\config.yml" run shop-tasks' `
     -DelaySeconds 25
 
 Write-Host ""
