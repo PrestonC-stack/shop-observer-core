@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mitch — Shop Board</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg: #0d0f12;
+    --surface: #141720;
+    --surface2: #1c2030;
+    --border: #252a3a;
+    --border-bright: #323a52;
+    --text: #e2e8f0;
+    --text-muted: #64748b;
+    --text-dim: #3d4a60;
+    --red: #ef4444;
+    --red-bg: #1f0f0f;
+    --red-border: #7f1d1d;
+    --amber: #f59e0b;
+    --amber-bg: #1c1508;
+    --amber-border: #78350f;
+    --green: #22c55e;
+    --green-bg: #0a1f10;
+    --green-border: #14532d;
+    --blue: #3b82f6;
+    --blue-bg: #0f172a;
+    --blue-border: #1e3a8a;
+    --orange: #f97316;
+    --orange-bg: #1c1008;
+    --orange-border: #7c2d12;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .header-left { display: flex; align-items: center; gap: 12px; }
+
+  .avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #78350f, #f97316);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: #fed7aa;
+    letter-spacing: 0.05em;
+  }
+
+  .header-name {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+
+  .header-role {
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-family: var(--mono);
+  }
+
+  .header-right { display: flex; align-items: center; gap: 16px; }
+
+  .clock {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+  }
+
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  .nav-links { display: flex; gap: 4px; }
+
+  .nav-link {
+    padding: 5px 12px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    text-decoration: none;
+    color: var(--text-muted);
+    border: 1px solid transparent;
+    transition: all 0.15s;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .nav-link:hover { background: var(--surface2); color: var(--text); border-color: var(--border); }
+  .nav-link.active { background: var(--orange-bg); color: #fed7aa; border-color: var(--orange-border); }
+
+  .alert-banner {
+    background: var(--red-bg);
+    border-bottom: 1px solid var(--red-border);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    animation: flashBg 1.2s ease-in-out infinite;
+  }
+
+  @keyframes flashBg { 0%, 100% { background: var(--red-bg); } 50% { background: #2a0f0f; } }
+
+  .alert-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--red);
+    animation: pulse 0.8s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+
+  .alert-text { font-family: var(--mono); font-size: 12px; color: #fca5a5; letter-spacing: 0.04em; }
+  .alert-text strong { color: #ef4444; }
+  .alert-banner.hidden { display: none; }
+
+  .main { padding: 16px 20px; }
+
+  .summary-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .summary-card.urgent { border-color: var(--red-border); background: var(--red-bg); }
+  .summary-card.warn { border-color: var(--amber-border); background: var(--amber-bg); }
+  .summary-card.ok { border-color: var(--green-border); background: var(--green-bg); }
+  .summary-card.money { border-color: var(--orange-border); background: var(--orange-bg); }
+
+  .summary-label { font-family: var(--mono); font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .summary-value { font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--text); line-height: 1; }
+  .summary-card.urgent .summary-value { color: var(--red); }
+  .summary-card.warn .summary-value { color: var(--amber); }
+  .summary-card.ok .summary-value { color: var(--green); }
+  .summary-card.money .summary-value { color: var(--orange); }
+  .summary-sub { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+
+  .section {
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .section.urgent { border-color: var(--red-border); }
+  .section.warn { border-color: var(--amber-border); }
+  .section.money { border-color: var(--orange-border); }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .section.urgent .section-header { background: var(--red-bg); border-color: var(--red-border); }
+  .section.warn .section-header { background: var(--amber-bg); border-color: var(--amber-border); }
+  .section.money .section-header { background: var(--orange-bg); border-color: var(--orange-border); }
+
+  .section-header-left { display: flex; align-items: center; gap: 10px; }
+
+  .section-step {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: var(--border);
+    color: var(--text-muted);
+  }
+
+  .section.urgent .section-step { background: var(--red-border); color: #fca5a5; }
+  .section.warn .section-step { background: var(--amber-border); color: #fcd34d; }
+  .section.money .section-step { background: var(--orange-border); color: #fed7aa; }
+
+  .section-title { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: 0.02em; }
+  .section.urgent .section-title { color: #fca5a5; }
+  .section.warn .section-title { color: #fcd34d; }
+  .section.money .section-title { color: #fed7aa; }
+
+  .section-count {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+
+  .section.urgent .section-count { background: var(--red-border); color: #fca5a5; }
+  .section.warn .section-count { background: var(--amber-border); color: #fcd34d; }
+  .section.money .section-count { background: var(--orange-border); color: #fed7aa; }
+  .section:not(.urgent):not(.warn):not(.money) .section-count { background: var(--border); color: var(--text-muted); }
+
+  .section-help {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--mono);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    transition: all 0.15s;
+  }
+
+  .section-help:hover { background: var(--surface2); color: var(--text); }
+
+  .help-box {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--mono);
+    line-height: 1.6;
+    display: none;
+  }
+
+  .help-box.visible { display: block; }
+  .help-box strong { color: var(--orange); }
+
+  .job-list { background: var(--bg); }
+
+  .job-card {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+
+  .job-card:last-child { border-bottom: none; }
+  .job-card:hover { background: var(--surface); }
+
+  .job-card.flashing { animation: cardFlash 1.5s ease-in-out infinite; }
+
+  @keyframes cardFlash { 0%, 100% { background: transparent; } 50% { background: var(--red-bg); } }
+
+  .job-priority-bar { width: 4px; flex-shrink: 0; }
+  .priority-p1 { background: var(--red); }
+  .priority-p2 { background: var(--amber); }
+  .priority-p3 { background: var(--green); }
+  .priority-p4 { background: var(--text-dim); }
+
+  .job-body { flex: 1; padding: 10px 14px; min-width: 0; }
+
+  .job-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+
+  .job-customer { font-weight: 600; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .job-time { font-family: var(--mono); font-size: 11px; color: var(--text-muted); flex-shrink: 0; margin-left: 8px; }
+  .job-time.overdue { color: var(--red); font-weight: 600; }
+  .job-time.warn { color: var(--amber); }
+
+  .job-vehicle { font-size: 12px; color: var(--text-muted); margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .job-action {
+    font-size: 12px;
+    color: #fed7aa;
+    font-family: var(--mono);
+    background: var(--orange-bg);
+    border: 1px solid var(--orange-border);
+    border-radius: 3px;
+    padding: 3px 8px;
+    display: inline-block;
+  }
+
+  .job-ro { font-family: var(--mono); font-size: 10px; color: var(--text-dim); margin-top: 4px; }
+
+  .job-actions-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 10px 12px;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .btn-confirm {
+    background: var(--green-bg);
+    border: 1px solid var(--green-border);
+    color: var(--green);
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .btn-confirm:hover { background: #14532d; }
+
+  .btn-confirm.done {
+    background: var(--surface2);
+    border-color: var(--border);
+    color: var(--text-muted);
+    cursor: default;
+  }
+
+  .confirmed-tag { font-family: var(--mono); font-size: 9px; color: var(--text-dim); text-align: right; }
+
+  .empty-state { padding: 24px 14px; text-align: center; font-family: var(--mono); font-size: 12px; color: var(--text-dim); background: var(--bg); }
+  .empty-state span { display: block; font-size: 20px; margin-bottom: 6px; }
+
+  .loading { padding: 40px; text-align: center; font-family: var(--mono); font-size: 12px; color: var(--text-muted); letter-spacing: 0.08em; }
+
+  @media (max-width: 600px) {
+    .summary-strip { grid-template-columns: repeat(2, 1fr); }
+    .nav-links { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <div class="avatar">MC</div>
+    <div>
+      <div class="header-name">Mitch</div>
+      <div class="header-role">Lead Advisor — Customer</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="nav-links">
+      <a href="board" class="nav-link">Main</a>
+      <a href="drew" class="nav-link">Drew</a>
+      <a href="mitch" class="nav-link active">Mitch</a>
+      <a href="preston" class="nav-link">Preston</a>
+    </div>
+    <div class="live-dot" title="Live"></div>
+    <div class="clock" id="clock">--:--</div>
+  </div>
+</div>
+
+<div class="alert-banner hidden" id="alertBanner">
+  <div class="alert-dot"></div>
+  <div class="alert-text" id="alertText">
+    <strong>CALL NEEDED —</strong> Estimate ready on <strong id="alertJob">RO #13450</strong>. Review and present to customer now.
+  </div>
+</div>
+
+<div class="main" id="mainContent">
+  <div class="loading">Loading Mitch's queue</div>
+</div>
+
+<script>
+const AUTOFLOW_API = '/api/autoflow/jobs';
+const POLL_MS = 30000;
+
+const MITCH_STATUSES = [
+  'Drop Off/ Tow-In',
+  'Online /Stage',
+  'Advisor Estimate',
+  'Waiting approval',
+  'Ordering Parts',
+  'Waiting parts',
+  'Servicing / In Progress',
+  'Servicing',
+  'Advisor Finalize RO',
+  'Ready'
+];
+
+const MITCH_BUCKETS = [
+  {
+    id: 'intake',
+    step: 'STEP 1',
+    title: 'New Customer — Intake Interview',
+    statuses: ['Drop Off/ Tow-In', 'Online /Stage'],
+    urgent: false,
+    timing: 30,
+    action: 'Talk to customer · document concern · set expectations',
+    help: `<strong>What to do:</strong><br>
+1. Greet the customer — get the full complaint in their own words<br>
+2. Ask clarifying questions if the concern is vague (noise, vibration, warning light, etc.)<br>
+3. Enter the concern clearly into the RO so the tech has a usable dispatch note<br>
+4. Set the customer's expectation: inspection first, then we'll call with findings<br>
+5. Hand the RO to Drew — he runs it through CAS Phase 1 to clean the dispatch<br>
+6. Hit <strong>Confirm</strong> when customer is interviewed and concern is entered`
+  },
+  {
+    id: 'estimate_review',
+    step: 'STEP 2',
+    title: 'Estimate Ready — Review & Present',
+    statuses: ['Advisor Estimate'],
+    urgent: true,
+    timing: 20,
+    action: 'Review Drew\'s estimate structure · fill pricing · present to customer',
+    help: `<strong>What to do:</strong><br>
+1. Drew has built the job structure from CAS Phase 3 — it's waiting for you<br>
+2. Review each job block — fill in labor hours and look up parts pricing in Tekmetric<br>
+3. Hand the completed estimate back to Drew for the CAS audit<br>
+4. After audit is clean — YOU present it to the customer<br>
+5. Walk them through: what we found, what it means, what we recommend<br>
+6. You own the sale — close on what you can, document what they decline<br>
+7. Hit <strong>Confirm</strong> when estimate is presented and customer response is documented`
+  },
+  {
+    id: 'approval_followup',
+    step: 'STEP 3',
+    title: 'Waiting Approval — Follow Up',
+    statuses: ['Waiting approval'],
+    urgent: true,
+    timing: 45,
+    action: 'Contact customer · document response · move job forward',
+    help: `<strong>What to do:</strong><br>
+1. If you haven't heard back — call or text the customer now<br>
+2. Answer their questions, address concerns, close what you can<br>
+3. Document the outcome in AutoFlow: approved, partially approved, or declined<br>
+4. If approved: order parts or dispatch immediately<br>
+5. If declined: document what they declined — Drew handles future work planning<br>
+6. Hit <strong>Confirm</strong> when approval status is documented and job is moving`
+  },
+  {
+    id: 'parts_order',
+    step: 'STEP 4',
+    title: 'Parts — Order & Confirm ETA',
+    statuses: ['Ordering Parts'],
+    urgent: false,
+    timing: 30,
+    action: 'Order parts · confirm source and ETA · update customer if needed',
+    help: `<strong>What to do:</strong><br>
+1. Order all required parts from the approved estimate<br>
+2. Confirm source and ETA — be realistic about the timeline<br>
+3. If ETA is same day: tell the customer when to expect a call<br>
+4. If ETA is next day or later: call the customer now and reset expectations<br>
+5. Update AutoFlow status to Waiting Parts<br>
+6. Hit <strong>Confirm</strong> when parts are ordered and customer is updated`
+  },
+  {
+    id: 'parts_eta',
+    step: 'STEP 4A',
+    title: 'Waiting Parts — Monitor ETA',
+    statuses: ['Waiting parts'],
+    urgent: false,
+    timing: 120,
+    action: 'Monitor parts ETA · update customer if delayed · tell Drew when arrived',
+    help: `<strong>What to do:</strong><br>
+1. Check parts status — have they arrived?<br>
+2. If arrived: tell Drew so he can verify and stage them<br>
+3. If delayed: call the customer and reset expectations before they call you<br>
+4. Do not let waiting-parts jobs sit silently — a silent job means a frustrated customer<br>
+5. Hit <strong>Confirm</strong> when parts status is current and customer is updated`
+  },
+  {
+    id: 'incoming_soon',
+    step: 'STEP 5',
+    title: 'Incoming Soon — Start Prep',
+    statuses: ['Servicing / In Progress', 'Servicing'],
+    urgent: false,
+    timing: 90,
+    action: 'Job nearing completion — start closing prep now',
+    help: `<strong>What to do:</strong><br>
+1. Drew will flag when a job is within ~2 hours of completion<br>
+2. Start prepping: review the RO, check if anything was added or removed during service<br>
+3. Confirm payment method on file if applicable<br>
+4. If the customer needs a heads-up on timing — call or text now<br>
+5. You're getting ahead of the job, not reacting after it's done<br>
+6. Hit <strong>Confirm</strong> when you've reviewed the RO and prepped for closeout`
+  },
+  {
+    id: 'closeout',
+    step: 'STEP 6',
+    title: 'Ready — Close with Customer',
+    statuses: ['Ready'],
+    urgent: true,
+    timing: 15,
+    action: 'Call customer · confirm pickup · collect payment · schedule future work',
+    help: `<strong>What to do:</strong><br>
+1. Vehicle is done — call or text the customer immediately<br>
+2. Walk them through what was completed<br>
+3. Remind them of anything that was declined — offer to schedule it now<br>
+4. Confirm pickup time and payment method<br>
+5. A car sitting Ready is cash sitting on the lot — move it fast<br>
+6. Hit <strong>Confirm</strong> when customer is contacted and pickup is arranged`
+  }
+];
+
+let jobs = [];
+let confirmations = JSON.parse(localStorage.getItem('mitch_confirmations') || '{}');
+
+function timeAgo(isoString) {
+  if (!isoString) return null;
+  const diff = Math.floor((Date.now() - new Date(isoString)) / 60000);
+  if (diff < 1) return '<1m';
+  if (diff < 60) return `${diff}m`;
+  const h = Math.floor(diff / 60);
+  const m = diff % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+function minutesInStatus(isoString) {
+  if (!isoString) return 0;
+  return Math.floor((Date.now() - new Date(isoString)) / 60000);
+}
+
+function getPriority(job) {
+  const s = (job.status || '').toLowerCase();
+  if (['ready', 'waiting approval'].includes(s)) return 'p1';
+  if (['advisor estimate'].includes(s)) return 'p2';
+  if (['servicing / in progress', 'servicing'].includes(s)) return 'p3';
+  return 'p4';
+}
+
+function confirmKey(jobId, bucketId) { return `${jobId}_${bucketId}`; }
+
+function saveConfirmation(jobId, bucketId) {
+  const key = confirmKey(jobId, bucketId);
+  confirmations[key] = { ts: new Date().toISOString(), by: 'Mitch' };
+  localStorage.setItem('mitch_confirmations', JSON.stringify(confirmations));
+}
+
+function getConfirmation(jobId, bucketId) { return confirmations[confirmKey(jobId, bucketId)]; }
+
+function formatTime(ts) {
+  return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+async function fetchJobs() {
+  try {
+    const resp = await fetch(AUTOFLOW_API);
+    if (!resp.ok) throw new Error('fetch failed');
+    const data = await resp.json();
+    jobs = Array.isArray(data) ? data : (data.jobs || data.rolling_jobs || []);
+  } catch(e) {
+    jobs = getDemoJobs();
+  }
+  render();
+}
+
+function getDemoJobs() {
+  return [
+    { id: '13506', ro_number: '13506', customer_name: 'Bersa Ruiz', vehicle: '2015 Ford Fusion SE', status: 'Advisor Estimate', status_updated_at: new Date(Date.now() - 22*60000).toISOString() },
+    { id: '13450', ro_number: '13450', customer_name: 'Joseph Rodriguez', vehicle: '2014 GMC Sierra 1500', status: 'Waiting approval', status_updated_at: new Date(Date.now() - 55*60000).toISOString() },
+    { id: '13480', ro_number: '13480', customer_name: 'Laisa Sanchez', vehicle: '1999 Ford F-350', status: 'Waiting approval', status_updated_at: new Date(Date.now() - 20*60000).toISOString() },
+    { id: '13455', ro_number: '13455', customer_name: 'Ben Ladwig', vehicle: '2018 Chrysler 300', status: 'Ready', status_updated_at: new Date(Date.now() - 10*60000).toISOString() },
+    { id: '13445', ro_number: '13445', customer_name: 'George Soto', vehicle: '2000 Ford F-250', status: 'Servicing / In Progress', status_updated_at: new Date(Date.now() - 110*60000).toISOString() },
+    { id: '13315', ro_number: '13315', customer_name: 'Paul Venet', vehicle: '2004 Ford Expedition', status: 'Ordering Parts', status_updated_at: new Date(Date.now() - 15*60000).toISOString() },
+  ];
+}
+
+function render() {
+  // Alert: Ready jobs sitting too long
+  const readyJobs = jobs.filter(j => (j.status||'').toLowerCase() === 'ready');
+  const alertBanner = document.getElementById('alertBanner');
+  const overdueReady = readyJobs.filter(j => minutesInStatus(j.status_updated_at) > 15 && !getConfirmation(j.id||j.ro_number, 'closeout'));
+  if (overdueReady.length > 0) {
+    const j = overdueReady[0];
+    document.getElementById('alertText').innerHTML =
+      `<strong>CAR IS DONE —</strong> RO #${j.ro_number} · ${j.customer_name} has been Ready for ${timeAgo(j.status_updated_at)}. Contact customer now.`;
+    alertBanner.classList.remove('hidden');
+  } else {
+    // Check for approval jobs overdue
+    const overdueApproval = jobs.filter(j =>
+      (j.status||'').toLowerCase() === 'waiting approval' &&
+      minutesInStatus(j.status_updated_at) > 45 &&
+      !getConfirmation(j.id||j.ro_number, 'approval_followup')
+    );
+    if (overdueApproval.length > 0) {
+      const j = overdueApproval[0];
+      document.getElementById('alertText').innerHTML =
+        `<strong>FOLLOW UP NEEDED —</strong> RO #${j.ro_number} · ${j.customer_name} has been waiting ${timeAgo(j.status_updated_at)} for approval.`;
+      alertBanner.classList.remove('hidden');
+    } else {
+      alertBanner.classList.add('hidden');
+    }
+  }
+
+  // Summary stats
+  const mitchJobs = jobs.filter(j => MITCH_STATUSES.some(s => s.toLowerCase() === (j.status||'').toLowerCase()));
+  let needsAction = 0, overdue = 0, readyCount = readyJobs.length, done = 0;
+
+  mitchJobs.forEach(j => {
+    const bucket = MITCH_BUCKETS.find(b => b.statuses.some(s => s.toLowerCase() === (j.status||'').toLowerCase()));
+    if (!bucket) return;
+    const mins = minutesInStatus(j.status_updated_at);
+    const conf = getConfirmation(j.id||j.ro_number, bucket.id);
+    if (conf) { done++; return; }
+    if (mins > bucket.timing) overdue++;
+    else needsAction++;
+  });
+
+  let html = `
+    <div class="summary-strip">
+      <div class="summary-card ${overdue > 0 ? 'urgent' : ''}">
+        <div class="summary-label">Overdue</div>
+        <div class="summary-value">${overdue}</div>
+        <div class="summary-sub">past timing window</div>
+      </div>
+      <div class="summary-card ${needsAction > 0 ? 'warn' : 'ok'}">
+        <div class="summary-label">Needs Action</div>
+        <div class="summary-value">${needsAction}</div>
+        <div class="summary-sub">in your queue</div>
+      </div>
+      <div class="summary-card ${readyCount > 0 ? 'money' : ''}">
+        <div class="summary-label">Ready to Close</div>
+        <div class="summary-value">${readyCount}</div>
+        <div class="summary-sub">vehicles done</div>
+      </div>
+      <div class="summary-card ok">
+        <div class="summary-label">Confirmed Today</div>
+        <div class="summary-value">${done}</div>
+        <div class="summary-sub">steps completed</div>
+      </div>
+    </div>
+  `;
+
+  MITCH_BUCKETS.forEach(bucket => {
+    const bucketJobs = bucket.statuses.length > 0
+      ? jobs.filter(j => bucket.statuses.some(s => s.toLowerCase() === (j.status||'').toLowerCase()))
+      : [];
+
+    bucketJobs.sort((a, b) => {
+      const ma = minutesInStatus(a.status_updated_at);
+      const mb = minutesInStatus(b.status_updated_at);
+      const oa = ma > bucket.timing ? 1 : 0;
+      const ob = mb > bucket.timing ? 1 : 0;
+      if (oa !== ob) return ob - oa;
+      return mb - ma;
+    });
+
+    const unconfirmedCount = bucketJobs.filter(j => !getConfirmation(j.id||j.ro_number, bucket.id)).length;
+    const isUrgent = bucket.urgent && unconfirmedCount > 0 && bucketJobs.some(j => minutesInStatus(j.status_updated_at) > bucket.timing);
+    const isMoney = bucket.id === 'closeout' && unconfirmedCount > 0;
+    const isWarn = bucket.urgent && unconfirmedCount > 0 && !isUrgent;
+
+    html += `
+      <div class="section ${isUrgent ? 'urgent' : isMoney ? 'money' : isWarn ? 'warn' : ''}" id="section_${bucket.id}">
+        <div class="section-header" onclick="toggleSection('${bucket.id}')">
+          <div class="section-header-left">
+            <span class="section-step">${bucket.step}</span>
+            <span class="section-title">${bucket.title}</span>
+            <span class="section-count">${unconfirmedCount}</span>
+          </div>
+          <span class="section-help" onclick="event.stopPropagation(); toggleHelp('${bucket.id}')">? how</span>
+        </div>
+        <div class="help-box" id="help_${bucket.id}">${bucket.help}</div>
+        <div class="job-list" id="list_${bucket.id}">
+    `;
+
+    if (bucketJobs.length === 0) {
+      html += `<div class="empty-state"><span>✓</span>Nothing here right now</div>`;
+    } else {
+      bucketJobs.forEach(job => {
+        const jobId = job.id || job.ro_number;
+        const conf = getConfirmation(jobId, bucket.id);
+        const mins = minutesInStatus(job.status_updated_at);
+        const overdueJob = mins > bucket.timing;
+        const warnJob = mins > bucket.timing * 0.6;
+        const priority = getPriority(job);
+        const flashing = !conf && overdueJob && bucket.urgent;
+
+        html += `
+          <div class="job-card ${flashing ? 'flashing' : ''}">
+            <div class="job-priority-bar priority-${priority}"></div>
+            <div class="job-body">
+              <div class="job-top">
+                <div class="job-customer">${job.customer_name || 'Unknown'}</div>
+                <div class="job-time ${overdueJob ? 'overdue' : warnJob ? 'warn' : ''}">${job.status_updated_at ? timeAgo(job.status_updated_at) + ' in status' : '—'}</div>
+              </div>
+              <div class="job-vehicle">${job.vehicle || job.year_make_model || '—'}</div>
+              <div class="job-action">${bucket.action}</div>
+              <div class="job-ro">RO #${job.ro_number || jobId}</div>
+            </div>
+            <div class="job-actions-right">
+              ${conf
+                ? `<button class="btn-confirm done" disabled>✓ Done</button>
+                   <div class="confirmed-tag">${formatTime(conf.ts)}</div>`
+                : `<button class="btn-confirm" onclick="confirm_step('${jobId}','${bucket.id}',this)">Confirm</button>`
+              }
+            </div>
+          </div>
+        `;
+      });
+    }
+
+    html += `</div></div>`;
+  });
+
+  document.getElementById('mainContent').innerHTML = html;
+}
+
+function toggleSection(id) {}
+function toggleHelp(id) {
+  const box = document.getElementById('help_' + id);
+  if (box) box.classList.toggle('visible');
+}
+
+function confirm_step(jobId, bucketId, btn) {
+  saveConfirmation(jobId, bucketId);
+  const right = btn.closest('.job-actions-right');
+  right.innerHTML = `
+    <button class="btn-confirm done" disabled>✓ Done</button>
+    <div class="confirmed-tag">${formatTime(new Date().toISOString())}</div>
+  `;
+  btn.closest('.job-card').classList.remove('flashing');
+  render();
+}
+
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-US', {
+    hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true
+  });
+}
+
+updateClock();
+setInterval(updateClock, 1000);
+fetchJobs();
+setInterval(fetchJobs, POLL_MS);
+</script>
+</body>
+</html>

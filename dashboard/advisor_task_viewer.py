@@ -1793,6 +1793,20 @@ def healthz():
     return {"status": "ok"}, 200
 
 
+@app.route("/drew")
+def drew_board():
+    from flask import send_from_directory
+    import os
+    return send_from_directory(os.path.dirname(__file__), "drew_board.html")
+
+
+@app.route("/mitch")
+def mitch_board():
+    from flask import send_from_directory
+    import os
+    return send_from_directory(os.path.dirname(__file__), "mitch_board.html")
+
+
 @app.route("/api/jobs")
 def api_jobs():
     try:
@@ -2199,7 +2213,7 @@ def bay_performance():
 
 if __name__ == "__main__":
     print(" Starting Country Club Advisor Command Board on 127.0.0.1:5000")
-    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True, use_reloader=False)
+    app.run(host="127.0.0.1", port=8080, debug=False, threaded=True, use_reloader=False)
 
 
 
