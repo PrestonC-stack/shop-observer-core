@@ -1793,6 +1793,20 @@ def healthz():
     return {"status": "ok"}, 200
 
 
+@app.route("/drew")
+def drew_board():
+    from flask import send_from_directory
+    import os
+    return send_from_directory(os.path.dirname(__file__), "drew_board.html")
+
+
+@app.route("/mitch")
+def mitch_board():
+    from flask import send_from_directory
+    import os
+    return send_from_directory(os.path.dirname(__file__), "mitch_board.html")
+
+
 @app.route("/api/jobs")
 def api_jobs():
     try:

@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drew — Callahan Command Board</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;900&family=DM+Mono:wght@400;500&display=swap');
+  body { font-family: 'DM Sans', system-ui, sans-serif; background: #09090b; color: #f4f4f5; }
+  .mono { font-family: 'DM Mono', monospace; }
+  .lane-urgent  { border: 2px solid #dc2626; background: linear-gradient(180deg, rgba(127,29,29,0.25), rgba(9,9,11,1)); }
+  .lane-warn    { border: 2px solid #d97706; background: linear-gradient(180deg, rgba(120,53,15,0.25), rgba(9,9,11,1)); }
+  .lane-calm    { border: 2px solid #27272a; background: rgba(24,24,27,0.6); }
+  .lane-done    { border: 2px solid #16a34a; background: linear-gradient(180deg, rgba(20,83,45,0.15), rgba(9,9,11,1)); }
+  .job-card     { border: 1px solid rgba(255,255,255,0.07); background: rgba(24,24,27,0.95); transition: background 0.15s; }
+  .job-card:hover { background: rgba(39,39,42,0.95); }
+  .pulse-urgent { animation: pulseUrgent 1.2s ease-in-out infinite; }
+  @keyframes pulseUrgent {
+    0%,100% { border-color: #dc2626; box-shadow: 0 0 0 0 rgba(220,38,38,0); }
+    50%      { border-color: #ef4444; box-shadow: 0 0 0 6px rgba(220,38,38,0.15); }
+  }
+  .callie-bubble { border-left: 3px solid #8b5cf6; background: rgba(139,92,246,0.07); }
+  .step-badge { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.1em; }
+  .confirm-btn {
+    background: rgba(34,197,94,0.12);
+    border: 1px solid #16a34a;
+    color: #86efac;
+    font-weight: 600;
+    font-size: 12px;
+    padding: 6px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .confirm-btn:hover { background: rgba(34,197,94,0.25); }
+  .confirm-btn.done {
+    background: rgba(39,39,42,0.8);
+    border-color: #3f3f46;
+    color: #52525b;
+    cursor: default;
+  }
+  .help-panel { display: none; }
+  .help-panel.open { display: block; }
+  .overdue-time { color: #f87171; font-weight: 700; }
+  .warn-time    { color: #fbbf24; font-weight: 600; }
+  .ok-time      { color: #71717a; }
+  .nav-btn {
+    padding: 6px 16px;
+    border-radius: 20px;
+    border: 1px solid #3f3f46;
+    background: #18181b;
+    color: #a1a1aa;
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+  .nav-btn:hover { border-color: #71717a; color: #f4f4f5; }
+  .nav-btn.active { background: #27272a; border-color: #71717a; color: #f4f4f5; }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; animation: livepulse 2s ease-in-out infinite; }
+  @keyframes livepulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .callie-alert {
+    background: linear-gradient(135deg, rgba(139,92,246,0.15), rgba(109,40,217,0.08));
+    border: 1px solid rgba(139,92,246,0.3);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+    animation: callieIn 0.4s ease-out;
+  }
+  @keyframes callieIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+  .summary-pill {
+    border-radius: 12px;
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- HEADER -->
+<div class="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur px-6 py-3">
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <div class="text-xs mono text-zinc-500 uppercase tracking-widest">Powered by</div>
+        <div class="text-sm font-black text-zinc-100 tracking-tight">AdvizMe<span class="text-violet-400">.ai</span></div>
+      </div>
+      <div class="w-px h-5 bg-zinc-700"></div>
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center text-xs font-black text-white">DM</div>
+        <div>
+          <div class="text-sm font-bold leading-none">Drew Mize</div>
+          <div class="text-[10px] text-zinc-500 mono uppercase tracking-wider mt-0.5">Shop-Side Advisor</div>
+        </div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <a href="/" class="nav-btn">Main Board</a>
+      <a href="/drew" class="nav-btn active">Drew</a>
+      <a href="/mitch" class="nav-btn">Mitch</a>
+      <div class="flex items-center gap-2 ml-2">
+        <div class="live-dot"></div>
+        <div class="text-xs mono text-zinc-500" id="clock">--:--</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CALLIE ALERT BANNER -->
+<div id="callie-banner" class="hidden px-6 pt-4">
+  <div class="callie-alert">
+    <div class="flex items-start gap-3">
+      <div class="text-violet-400 text-lg mt-0.5">◆</div>
+      <div>
+        <div class="text-[10px] mono text-violet-400 uppercase tracking-widest mb-1">Callie</div>
+        <div class="text-sm text-zinc-100 leading-relaxed" id="callie-banner-text"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="px-6 py-4" id="main-content">
+  <div class="text-zinc-500 text-sm py-12 text-center mono">Loading your queue...</div>
+</div>
+
+<script>
+const API = '/api/board-state';
+const POLL_MS = 30000;
+const ADVISOR = 'drew';
+
+// ── Callie's voice for Drew ───────────────────────────────────────
+const CALLIE = {
+  dviReady: (ro, customer, tech, mins) =>
+    `RO ${ro} — ${customer}'s vehicle has been in DVI Updates for ${mins} minutes. ${tech} finished the inspection. You've got a tight window before the estimate slot closes today — want to knock this out now while the car's still on the rack?`,
+  dviOverdue: (ro, customer, mins) =>
+    `Drew, RO ${ro} — ${customer} has been waiting ${mins} minutes for the DVI review. That's past the window. Let's get Phase 2 running right now so Mitch can build the estimate and we don't lose the day on this one.`,
+  estimateReady: (ro, customer) =>
+    `The structure on RO ${ro} for ${customer} is ready for Mitch — but it needs your audit pass first. Shouldn't take long. Let's make sure nothing's missing before it goes to the customer.`,
+  qcReady: (ro, customer) =>
+    `RO ${ro} — ${customer}'s vehicle is ready for your QC check. Take a quick walk around before we call it done. This is the last line of defense before the customer sees it.`,
+  finalizeReady: (ro, customer) =>
+    `RO ${ro} — ${customer}'s ticket needs to be finalized and handed to Mitch. Clean up the notes, confirm the charges match, and let's get this one closed out.`,
+  morningGreeting: (name, count, firstPriority) =>
+    `Good morning, ${name}. You've got ${count} active jobs today. Your first priority is ${firstPriority}. Let's make it a strong one.`,
+  nothingOverdue: () =>
+    `You're in good shape right now — nothing overdue. Keep the momentum going and stay ahead of the DVIs when they land.`,
+  confirmResponse: (step, ro, nextStep, mins) =>
+    `Got it — ${step} logged for RO ${ro} at ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}. That took ${mins} minutes. Next: ${nextStep}.`,
+};
+
+// ── Drew's workflow buckets ────────────────────────────────────────
+const BUCKETS = [
+  {
+    id: 'dvi', step: 'STEP 1', title: 'DVI Ready — Run CAS Phase 2',
+    statuses: ['dvi updates'],
+    timing: 15, urgent: true,
+    action: 'Open CAS → Phase 2 → paste full DVI + code photos → review output → walk rework to tech → confirm',
+    help: 'You have 15 minutes from when the tech finishes. Open the Callahan Advisory System in ChatGPT and select Phase 2. Paste the full DVI text and upload any code photos. Review what comes back — if there\'s rework, print it and walk it to the tech while the car is still on the rack. Then confirm here.',
+    nextStep: 'Build estimate structure for Mitch',
+    callieUrgent: (j, mins) => mins > 15 ? CALLIE.dviOverdue(j.ro, j.customer, mins) : CALLIE.dviReady(j.ro, j.customer, j.technician || 'The tech', mins),
+  },
+  {
+    id: 'intake', step: 'STEP 1A', title: 'New Vehicle — Intake & Dispatch',
+    statuses: ['drop off/ tow-in', 'online /stage'],
+    timing: 30, urgent: false,
+    action: 'Verify vehicle matches RO · take 4-corner photos in AutoFlow · run concern through CAS Phase 1 · dispatch tech',
+    help: 'Before the car goes anywhere: verify the vehicle, keys, and tag match the RO. Take 4-corner photos in AutoFlow. Run the customer\'s concern through CAS Phase 1 to clean up the dispatch note. Paste the cleaned note into the RO. Then stage the vehicle for the tech.',
+    nextStep: 'Monitor for DVI completion',
+  },
+  {
+    id: 'dispatch', step: 'STEP 2', title: 'Dispatch — Assign Tech & Clear Blockers',
+    statuses: ['ready for tech', 'awaiting tech'],
+    timing: 20, urgent: false,
+    action: 'Confirm bay and tech are available · assign job in AutoFlow · remove any blockers',
+    help: 'Confirm a tech and bay are ready. Assign the job to the correct tech in AutoFlow. Remove any blockers — missing info, unclear concern, missing parts. The tech needs a clear starting point.',
+    nextStep: 'Wait for DVI completion',
+  },
+  {
+    id: 'estimate', step: 'STEP 3', title: 'Estimate Structure — Build for Mitch',
+    statuses: ['advisor estimate'],
+    timing: 20, urgent: true,
+    action: 'Run CAS Phase 3 → build job blocks in Tekmetric format → hand structure to Mitch to price',
+    help: 'Use Phase 2 output as your source. Open CAS Phase 3 and let it build the job block structure. Each job gets a title, labor description, parts list, and RO note in Tekmetric format. Hand that structure to Mitch — he fills in the pricing and presents it. Do NOT send to the customer without Mitch\'s review.',
+    nextStep: 'Run estimate audit after Mitch prices it',
+    callieUrgent: (j) => CALLIE.estimateReady(j.ro, j.customer),
+  },
+  {
+    id: 'production', step: 'STEP 4', title: 'Production — Monitor & Mid-Job Check',
+    statuses: ['servicing / in progress', 'servicing'],
+    timing: 120, urgent: false,
+    action: 'Check tech progress · take mid-job photos on larger jobs · post Tekmetric activity update · notify Mitch of timeline changes',
+    help: 'On larger jobs — teardowns, engine work, gasket jobs, anything over 2 hours — take mid-job photos when the car is about halfway through. Run them through CAS Phase 6 if needed. Post a Tekmetric activity update with: current stage, visible progress, rough completion time. If the timeline is shifting, tell Mitch immediately so he can update the customer before they call us.',
+    nextStep: 'Watch for completion and flag incoming soon',
+  },
+  {
+    id: 'parts', step: 'STEP 4A', title: 'Parts — Verify Received & Staged',
+    statuses: ['waiting parts'],
+    timing: 60, urgent: false,
+    action: 'Check if parts arrived · verify against RO · stage next to vehicle · update AutoFlow status',
+    help: 'Check the parts status. If they\'ve arrived: pull them, verify every part against the RO, and stage them next to the vehicle. Update AutoFlow so the board reflects reality. If parts are still waiting: confirm the ETA with the supplier and make sure Mitch has updated the customer.',
+    nextStep: 'Notify Mitch when parts are staged and ready',
+  },
+  {
+    id: 'qc', step: 'STEP 5', title: 'QC — Verify Repair Complete',
+    statuses: ['qc', 'advisor qc review'],
+    timing: 15, urgent: true,
+    action: 'Walk the vehicle · confirm repair is complete · verify photos and notes · sign off in AutoFlow',
+    help: 'Walk out to the vehicle. Visually confirm the repair is complete. Check that the photos and notes in AutoFlow tell the repair story clearly. Verify fluids are topped off, all covers and shields are reinstalled, no grease prints inside or under the hood. Sign off Advisor QC Review in AutoFlow when it\'s clean.',
+    nextStep: 'Finalize the RO and hand to Mitch',
+    callieUrgent: (j) => CALLIE.qcReady(j.ro, j.customer),
+  },
+  {
+    id: 'finalize', step: 'STEP 6', title: 'Finalize RO — Prep for Mitch',
+    statuses: ['advisor finalize ro'],
+    timing: 10, urgent: true,
+    action: 'Clean up RO notes · confirm all charges match · handle parts returns · hand finalized ticket to Mitch',
+    help: 'Review all RO notes and clean up anything unclear or incomplete. Confirm every charge matches what was actually done. Check that parts returns are handled. Verify the invoice is clean and ready for the customer to review. Then hand it to Mitch — he closes it out with the customer.',
+    nextStep: 'Mitch closes with customer',
+    callieUrgent: (j) => CALLIE.finalizeReady(j.ro, j.customer),
+  },
+];
+
+// ── State ─────────────────────────────────────────────────────────
+let boardState = null;
+let confirmations = JSON.parse(localStorage.getItem('drew_confirms') || '{}');
+let lastCallieMessage = '';
+
+function saveConfirm(ro, bucketId, mins) {
+  const key = ro + '_' + bucketId;
+  const next = (BUCKETS.find(b => b.id === bucketId) || {}).nextStep || 'Keep moving.';
+  confirmations[key] = {
+    ts: new Date().toISOString(),
+    mins: mins,
+    next: next,
+  };
+  localStorage.setItem('drew_confirms', JSON.stringify(confirmations));
+  return CALLIE.confirmResponse(
+    (BUCKETS.find(b => b.id === bucketId) || {}).title || bucketId,
+    ro, next, mins
+  );
+}
+
+function getConfirm(ro, bucketId) {
+  return confirmations[ro + '_' + bucketId];
+}
+
+function minsAgo(iso) {
+  if (!iso) return 0;
+  return Math.floor((Date.now() - new Date(iso)) / 60000);
+}
+
+function fmtMins(mins) {
+  if (mins < 60) return mins + 'm';
+  return Math.floor(mins/60) + 'h ' + (mins%60) + 'm';
+}
+
+function fmtTime(iso) {
+  return new Date(iso).toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit',hour12:true});
+}
+
+function statusMatch(job, statuses) {
+  const s = (job.workflow_status || job.autoflow_status || job.status || '').toLowerCase().trim();
+  return statuses.some(st => s.includes(st.toLowerCase()));
+}
+
+// ── Render ────────────────────────────────────────────────────────
+function render() {
+  if (!boardState) return;
+  const jobs = boardState.jobs || [];
+
+  // Find most urgent Callie message
+  let urgentMessage = '';
+  BUCKETS.filter(b => b.urgent).forEach(b => {
+    const bucketJobs = jobs.filter(j => statusMatch(j, b.statuses));
+    bucketJobs.forEach(j => {
+      if (getConfirm(j.ro, b.id)) return;
+      const mins = minsAgo(j.status_updated_at);
+      if (mins > b.timing * 0.5 && b.callieUrgent && !urgentMessage) {
+        urgentMessage = b.callieUrgent(j, mins);
+      }
+    });
+  });
+
+  const banner = document.getElementById('callie-banner');
+  const bannerText = document.getElementById('callie-banner-text');
+  if (urgentMessage && urgentMessage !== lastCallieMessage) {
+    lastCallieMessage = urgentMessage;
+    bannerText.textContent = urgentMessage;
+    banner.classList.remove('hidden');
+  } else if (!urgentMessage) {
+    banner.classList.add('hidden');
+    lastCallieMessage = '';
+  }
+
+  // Summary stats
+  let overdue = 0, inQueue = 0, doneToday = 0;
+  BUCKETS.forEach(b => {
+    jobs.filter(j => statusMatch(j, b.statuses)).forEach(j => {
+      if (getConfirm(j.ro, b.id)) { doneToday++; return; }
+      if (minsAgo(j.status_updated_at) > b.timing) overdue++;
+      else inQueue++;
+    });
+  });
+
+  let html = `
+    <div class="grid grid-cols-3 gap-3 mb-5">
+      <div class="summary-pill ${overdue > 0 ? 'border border-red-800 bg-red-950/30' : 'border border-zinc-800 bg-zinc-900/50'}">
+        <div class="text-[10px] mono uppercase tracking-widest text-zinc-500">Overdue</div>
+        <div class="text-4xl font-black ${overdue > 0 ? 'text-red-400' : 'text-zinc-300'}">${overdue}</div>
+        <div class="text-xs text-zinc-500">past timing window</div>
+      </div>
+      <div class="summary-pill ${inQueue > 0 ? 'border border-amber-800 bg-amber-950/20' : 'border border-zinc-800 bg-zinc-900/50'}">
+        <div class="text-[10px] mono uppercase tracking-widest text-zinc-500">In Your Queue</div>
+        <div class="text-4xl font-black ${inQueue > 0 ? 'text-amber-400' : 'text-zinc-300'}">${inQueue}</div>
+        <div class="text-xs text-zinc-500">needs your action</div>
+      </div>
+      <div class="summary-pill border border-emerald-900 bg-emerald-950/20">
+        <div class="text-[10px] mono uppercase tracking-widest text-zinc-500">Done Today</div>
+        <div class="text-4xl font-black text-emerald-400">${doneToday}</div>
+        <div class="text-xs text-zinc-500">steps confirmed</div>
+      </div>
+    </div>
+  `;
+
+  BUCKETS.forEach(b => {
+    const bucketJobs = jobs
+      .filter(j => statusMatch(j, b.statuses))
+      .sort((a,c) => minsAgo(c.status_updated_at) - minsAgo(a.status_updated_at));
+
+    const unconfirmed = bucketJobs.filter(j => !getConfirm(j.ro, b.id));
+    const anyOverdue = unconfirmed.some(j => minsAgo(j.status_updated_at) > b.timing);
+    const anyWarn = unconfirmed.some(j => minsAgo(j.status_updated_at) > b.timing * 0.6);
+
+    const laneClass = b.urgent && anyOverdue ? 'lane-urgent pulse-urgent' :
+                      b.urgent && anyWarn ? 'lane-warn' :
+                      unconfirmed.length === 0 && bucketJobs.length > 0 ? 'lane-done' : 'lane-calm';
+
+    const stepColor = b.urgent && anyOverdue ? 'bg-red-900 text-red-300' :
+                      b.urgent && anyWarn ? 'bg-amber-900 text-amber-300' : 'bg-zinc-800 text-zinc-400';
+
+    const titleColor = b.urgent && anyOverdue ? 'text-red-300' :
+                       b.urgent && anyWarn ? 'text-amber-300' : 'text-zinc-100';
+
+    let cardsHtml = '';
+    if (bucketJobs.length === 0) {
+      cardsHtml = `<div class="px-5 py-8 text-center text-sm text-zinc-600 mono">Nothing here right now</div>`;
+    } else {
+      bucketJobs.forEach(j => {
+        const conf = getConfirm(j.ro, b.id);
+        const mins = minsAgo(j.status_updated_at);
+        const isOverdue = mins > b.timing;
+        const isWarn = mins > b.timing * 0.6;
+        const timeClass = isOverdue ? 'overdue-time' : isWarn ? 'warn-time' : 'ok-time';
+        const timeStr = fmtMins(mins) + ' in status';
+        const flashClass = !conf && isOverdue && b.urgent ? 'pulse-urgent' : '';
+
+        const confirmHtml = conf
+          ? `<div class="text-right">
+               <div class="text-[10px] text-emerald-500 mono">✓ confirmed</div>
+               <div class="text-[10px] text-zinc-600 mono">${fmtTime(conf.ts)}</div>
+             </div>`
+          : `<button class="confirm-btn" onclick="handleConfirm('${j.ro}','${b.id}',${mins},this)">
+               Confirm Done
+             </button>`;
+
+        cardsHtml += `
+          <div class="job-card rounded-2xl p-4 mx-3 mb-3 ${flashClass}">
+            <div class="flex items-start justify-between gap-4">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-base font-black text-zinc-100">${escHtml(j.customer || 'Unknown')}</span>
+                  <span class="text-[10px] mono text-zinc-600">RO ${escHtml(String(j.ro || ''))}</span>
+                </div>
+                <div class="text-xs text-zinc-400 mb-2">${escHtml(j.vehicle || '')}</div>
+                <div class="text-xs ${timeClass} mono mb-3">${timeStr}</div>
+                <div class="callie-bubble rounded-xl px-3 py-2 text-xs text-zinc-300 leading-relaxed">
+                  ${escHtml(b.action)}
+                </div>
+              </div>
+              <div class="flex-shrink-0 mt-1">${confirmHtml}</div>
+            </div>
+          </div>`;
+      });
+    }
+
+    html += `
+      <div class="rounded-3xl ${laneClass} overflow-hidden mb-4">
+        <div class="px-5 py-3 flex items-center justify-between border-b border-white/5">
+          <div class="flex items-center gap-3">
+            <span class="step-badge rounded-lg ${stepColor} px-2 py-1 uppercase">${b.step}</span>
+            <span class="font-semibold text-sm ${titleColor}">${b.title}</span>
+            <span class="text-xs mono text-zinc-600 bg-zinc-900 rounded-full px-2 py-0.5">${unconfirmed.length}</span>
+          </div>
+          <button onclick="toggleHelp('${b.id}')" class="text-[11px] text-zinc-600 hover:text-zinc-400 border border-zinc-800 rounded-lg px-2 py-1 transition-colors">
+            how?
+          </button>
+        </div>
+        <div id="help-${b.id}" class="help-panel px-5 py-3 border-b border-white/5 bg-zinc-900/50">
+          <div class="text-[10px] mono text-violet-400 uppercase tracking-widest mb-2">◆ Callie</div>
+          <p class="text-xs text-zinc-300 leading-relaxed">${escHtml(b.help)}</p>
+        </div>
+        <div class="pt-3 pb-1">${cardsHtml}</div>
+      </div>`;
+  });
+
+  document.getElementById('main-content').innerHTML = html;
+}
+
+function handleConfirm(ro, bucketId, mins, btn) {
+  const msg = saveConfirm(ro, bucketId, mins);
+  // Update button area
+  const card = btn.closest('.job-card');
+  btn.outerHTML = `<div class="text-right">
+    <div class="text-[10px] text-emerald-500 mono">✓ confirmed</div>
+    <div class="text-[10px] text-zinc-600 mono">${fmtTime(new Date().toISOString())}</div>
+  </div>`;
+  // Show Callie response
+  const callieDiv = card.querySelector('.callie-bubble');
+  if (callieDiv) {
+    callieDiv.innerHTML = `<span class="text-violet-400 mono text-[10px]">◆ Callie — </span>${escHtml(msg)}`;
+  }
+  card.classList.remove('pulse-urgent');
+  setTimeout(render, 500);
+}
+
+function toggleHelp(id) {
+  const el = document.getElementById('help-' + id);
+  if (el) el.classList.toggle('open');
+}
+
+function escHtml(v) {
+  return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function loadBoard() {
+  try {
+    const r = await fetch(API, {cache:'no-store'});
+    if (!r.ok) throw new Error('failed');
+    boardState = await r.json();
+  } catch {
+    // Keep last state if refresh fails
+  }
+  render();
+}
+
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true});
+}
+
+updateClock();
+setInterval(updateClock, 1000);
+loadBoard();
+setInterval(loadBoard, POLL_MS);
+</script>
+</body>
+</html>

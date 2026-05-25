@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mitch — Callahan Command Board</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;900&family=DM+Mono:wght@400;500&display=swap');
+  body { font-family: 'DM Sans', system-ui, sans-serif; background: #09090b; color: #f4f4f5; }
+  .mono { font-family: 'DM Mono', monospace; }
+  .lane-urgent  { border: 2px solid #dc2626; background: linear-gradient(180deg, rgba(127,29,29,0.25), rgba(9,9,11,1)); }
+  .lane-money   { border: 2px solid #f97316; background: linear-gradient(180deg, rgba(124,45,18,0.25), rgba(9,9,11,1)); }
+  .lane-warn    { border: 2px solid #d97706; background: linear-gradient(180deg, rgba(120,53,15,0.25), rgba(9,9,11,1)); }
+  .lane-calm    { border: 2px solid #27272a; background: rgba(24,24,27,0.6); }
+  .lane-done    { border: 2px solid #16a34a; background: linear-gradient(180deg, rgba(20,83,45,0.15), rgba(9,9,11,1)); }
+  .job-card     { border: 1px solid rgba(255,255,255,0.07); background: rgba(24,24,27,0.95); transition: background 0.15s; }
+  .job-card:hover { background: rgba(39,39,42,0.95); }
+  .pulse-urgent { animation: pulseUrgent 1.2s ease-in-out infinite; }
+  .pulse-money  { animation: pulseMoney 1.5s ease-in-out infinite; }
+  @keyframes pulseUrgent {
+    0%,100% { border-color: #dc2626; box-shadow: 0 0 0 0 rgba(220,38,38,0); }
+    50%      { border-color: #ef4444; box-shadow: 0 0 0 6px rgba(220,38,38,0.15); }
+  }
+  @keyframes pulseMoney {
+    0%,100% { border-color: #f97316; box-shadow: 0 0 0 0 rgba(249,115,22,0); }
+    50%      { border-color: #fb923c; box-shadow: 0 0 0 6px rgba(249,115,22,0.12); }
+  }
+  .callie-bubble { border-left: 3px solid #8b5cf6; background: rgba(139,92,246,0.07); }
+  .step-badge { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.1em; }
+  .confirm-btn {
+    background: rgba(34,197,94,0.12);
+    border: 1px solid #16a34a;
+    color: #86efac;
+    font-weight: 600;
+    font-size: 12px;
+    padding: 6px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .confirm-btn:hover { background: rgba(34,197,94,0.25); }
+  .help-panel { display: none; }
+  .help-panel.open { display: block; }
+  .overdue-time { color: #f87171; font-weight: 700; }
+  .warn-time    { color: #fbbf24; font-weight: 600; }
+  .ok-time      { color: #71717a; }
+  .nav-btn {
+    padding: 6px 16px; border-radius: 20px; border: 1px solid #3f3f46;
+    background: #18181b; color: #a1a1aa; font-size: 13px; font-weight: 500;
+    text-decoration: none; transition: all 0.15s;
+  }
+  .nav-btn:hover { border-color: #71717a; color: #f4f4f5; }
+  .nav-btn.active { background: #27272a; border-color: #71717a; color: #f4f4f5; }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; animation: livepulse 2s ease-in-out infinite; }
+  @keyframes livepulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .callie-alert {
+    background: linear-gradient(135deg, rgba(139,92,246,0.15), rgba(109,40,217,0.08));
+    border: 1px solid rgba(139,92,246,0.3);
+    border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;
+    animation: callieIn 0.4s ease-out;
+  }
+  @keyframes callieIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+  .summary-pill { border-radius: 12px; padding: 14px 18px; display: flex; flex-direction: column; gap: 4px; }
+  .money-tag {
+    background: rgba(249,115,22,0.15);
+    border: 1px solid rgba(249,115,22,0.3);
+    color: #fb923c;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.05em;
+  }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- HEADER -->
+<div class="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur px-6 py-3">
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <div class="text-xs mono text-zinc-500 uppercase tracking-widest">Powered by</div>
+        <div class="text-sm font-black text-zinc-100 tracking-tight">AdvizMe<span class="text-violet-400">.ai</span></div>
+      </div>
+      <div class="w-px h-5 bg-zinc-700"></div>
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-orange-600 to-orange-800 flex items-center justify-center text-xs font-black text-white">MC</div>
+        <div>
+          <div class="text-sm font-bold leading-none">Mitch</div>
+          <div class="text-[10px] text-zinc-500 mono uppercase tracking-wider mt-0.5">Lead Advisor — Customer</div>
+        </div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <a href="/" class="nav-btn">Main Board</a>
+      <a href="/drew" class="nav-btn">Drew</a>
+      <a href="/mitch" class="nav-btn active">Mitch</a>
+      <div class="flex items-center gap-2 ml-2">
+        <div class="live-dot"></div>
+        <div class="text-xs mono text-zinc-500" id="clock">--:--</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CALLIE ALERT BANNER -->
+<div id="callie-banner" class="hidden px-6 pt-4">
+  <div class="callie-alert">
+    <div class="flex items-start gap-3">
+      <div class="text-violet-400 text-lg mt-0.5">◆</div>
+      <div>
+        <div class="text-[10px] mono text-violet-400 uppercase tracking-widest mb-1">Callie</div>
+        <div class="text-sm text-zinc-100 leading-relaxed" id="callie-banner-text"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="px-6 py-4" id="main-content">
+  <div class="text-zinc-500 text-sm py-12 text-center mono">Loading your queue...</div>
+</div>
+
+<script>
+const API = '/api/board-state';
+const POLL_MS = 30000;
+const ADVISOR = 'mitch';
+
+const CALLIE = {
+  estimateReady: (ro, customer) =>
+    `Mitch — Drew has the estimate structure ready for RO ${ro}, ${customer}. It needs your pricing and your review before it goes anywhere near the customer. Take a look and let's get this one moving.`,
+  approvalOverdue: (ro, customer, mins) =>
+    `Mitch, ${customer} on RO ${ro} has been in Waiting Approval for ${mins} minutes. They're probably wondering what's next. Give them a call — answer their questions, close what you can, and let's keep this one from going cold.`,
+  readyCar: (ro, customer, mins) =>
+    `${customer}'s vehicle has been Ready for ${mins} minutes on RO ${ro}. That's cash sitting on the lot. Give them a call right now — confirm pickup, walk them through what was done, and offer to schedule anything they declined.`,
+  intakeReady: (customer) =>
+    `Mitch — ${customer} is here. Get their full concern in their own words, ask any clarifying questions if it's vague, and make sure they leave knowing we'll call them with findings before we do anything. Then hand the concern to Drew for CAS Phase 1.`,
+  confirmResponse: (step, ro, next, mins) =>
+    `Logged — ${step} confirmed for RO ${ro} at ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}. That took ${mins} minutes. Next step: ${next}.`,
+};
+
+const BUCKETS = [
+  {
+    id: 'intake', step: 'STEP 1', title: 'New Customer — Intake Interview',
+    statuses: ['drop off/ tow-in', 'online /stage'],
+    timing: 30, urgent: false,
+    action: 'Greet customer · get full complaint in their words · clarify if vague · set expectation: inspection first, we\'ll call with findings',
+    help: 'Get their concern in their exact words — don\'t clean it up yet. Ask clarifying questions if it\'s vague: when does it happen, what kind of noise, does it change with speed or temperature? Set the expectation clearly: we do a full inspection first, then we call with findings before we do anything. Then hand the concern to Drew for CAS Phase 1 cleanup.',
+    nextStep: 'Monitor for DVI completion from Drew',
+    callieUrgent: (j) => CALLIE.intakeReady(j.customer),
+  },
+  {
+    id: 'estimate', step: 'STEP 2', title: 'Estimate Ready — Review & Present',
+    statuses: ['advisor estimate'],
+    timing: 20, urgent: true,
+    action: 'Review Drew\'s job structure · fill labor hours and parts pricing in Tekmetric · hand back to Drew for audit · then YOU present to customer',
+    help: 'Drew has built the job block structure from CAS Phase 3. Open Tekmetric and fill in the labor hours and look up parts pricing for each job. Hand the completed estimate back to Drew — he runs the audit to catch missing items. After the audit is clean, YOU call the customer. Walk them through what was found, what it means for their vehicle, and what you recommend. You own this conversation.',
+    nextStep: 'Wait for Drew\'s audit, then call customer',
+    callieUrgent: (j) => CALLIE.estimateReady(j.ro, j.customer),
+  },
+  {
+    id: 'approval', step: 'STEP 3', title: 'Waiting Approval — Follow Up Now',
+    statuses: ['waiting approval'],
+    timing: 45, urgent: true,
+    action: 'Call or text customer · answer their questions · close what you can · document outcome in AutoFlow',
+    help: 'If you haven\'t heard back, don\'t wait for them to call you. Pick up the phone. Answer their questions directly, address any concerns, and close what you can. Document the outcome in AutoFlow: approved, partially approved, or declined. If they approved: get parts ordered or dispatch immediately. If they declined something: document it clearly — Drew handles future work planning.',
+    nextStep: 'Order parts immediately if approved',
+    callieUrgent: (j, mins) => CALLIE.approvalOverdue(j.ro, j.customer, mins),
+  },
+  {
+    id: 'parts_order', step: 'STEP 4', title: 'Parts — Order & Confirm ETA',
+    statuses: ['ordering parts'],
+    timing: 30, urgent: false,
+    action: 'Order all approved parts · confirm source and ETA · call customer if next-day or later · update AutoFlow to Waiting Parts',
+    help: 'Order every part from the approved estimate. Confirm the source and get a realistic ETA. If parts arrive same day: let the customer know when to expect a call. If parts are next day or later: call the customer NOW and reset their expectation before they call wondering what\'s happening. Update AutoFlow status to Waiting Parts so Drew can monitor.',
+    nextStep: 'Monitor ETA and update customer if delayed',
+  },
+  {
+    id: 'parts_wait', step: 'STEP 4A', title: 'Waiting Parts — Monitor ETA',
+    statuses: ['waiting parts'],
+    timing: 120, urgent: false,
+    action: 'Check parts status · update customer proactively if delayed · tell Drew immediately when parts arrive',
+    help: 'Don\'t let waiting-parts jobs go silent. Check the status. If parts arrived: tell Drew right away so he can verify and stage them. If parts are delayed: call the customer before they call you — reset the expectation, apologize for the wait, and give them a new timeline. A proactive call keeps trust. A reactive call loses it.',
+    nextStep: 'Tell Drew when parts arrive to stage',
+  },
+  {
+    id: 'incoming', step: 'STEP 5', title: 'Incoming Soon — Start Closeout Prep',
+    statuses: ['servicing / in progress', 'servicing'],
+    timing: 90, urgent: false,
+    action: 'Job nearing completion — review RO now · check for any adds or removes · confirm payment method · get ahead of closeout',
+    help: 'Drew will flag when a job is within about 2 hours of completion. Don\'t wait for it to land in Ready. Start prepping now: review the RO, check if anything was added or removed during service, verify the payment method is on file. If the customer needs a heads-up on timing, call or text them now. Getting ahead of the job is exactly what separates a smooth closeout from a scramble.',
+    nextStep: 'Be ready to close immediately when Ready status hits',
+  },
+  {
+    id: 'ready', step: 'STEP 6', title: 'Ready — Close with Customer NOW',
+    statuses: ['ready'],
+    timing: 15, urgent: true,
+    isMoney: true,
+    action: 'Call customer immediately · walk them through what was done · remind them of declined work · confirm pickup · collect payment',
+    help: 'The vehicle is done. Call or text the customer right now — don\'t let them sit in Ready. Walk them through everything that was completed. Remind them of anything they declined and offer to schedule it at their next visit. Confirm the pickup time and payment method. A car sitting in Ready is money sitting on the lot that hasn\'t been collected yet.',
+    nextStep: 'Vehicle delivered — RO closed',
+    callieUrgent: (j, mins) => CALLIE.readyCar(j.ro, j.customer, mins),
+  },
+];
+
+let boardState = null;
+let confirmations = JSON.parse(localStorage.getItem('mitch_confirms') || '{}');
+let lastCallieMessage = '';
+
+function saveConfirm(ro, bucketId, mins) {
+  const key = ro + '_' + bucketId;
+  const next = (BUCKETS.find(b => b.id === bucketId) || {}).nextStep || 'Keep moving.';
+  confirmations[key] = { ts: new Date().toISOString(), mins, next };
+  localStorage.setItem('mitch_confirms', JSON.stringify(confirmations));
+  return CALLIE.confirmResponse(
+    (BUCKETS.find(b => b.id === bucketId) || {}).title || bucketId,
+    ro, next, mins
+  );
+}
+
+function getConfirm(ro, bucketId) { return confirmations[ro + '_' + bucketId]; }
+function minsAgo(iso) { if (!iso) return 0; return Math.floor((Date.now() - new Date(iso)) / 60000); }
+function fmtMins(m) { return m < 60 ? m + 'm' : Math.floor(m/60) + 'h ' + (m%60) + 'm'; }
+function fmtTime(iso) { return new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}); }
+function statusMatch(job, statuses) {
+  const s = (job.workflow_status || job.autoflow_status || job.status || '').toLowerCase().trim();
+  return statuses.some(st => s.includes(st.toLowerCase()));
+}
+function escHtml(v) {
+  return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function render() {
+  if (!boardState) return;
+  const jobs = boardState.jobs || [];
+
+  let urgentMessage = '';
+  BUCKETS.filter(b => b.urgent || b.isMoney).forEach(b => {
+    jobs.filter(j => statusMatch(j, b.statuses)).forEach(j => {
+      if (getConfirm(j.ro, b.id)) return;
+      const mins = minsAgo(j.status_updated_at);
+      if (mins > b.timing * 0.5 && b.callieUrgent && !urgentMessage) {
+        urgentMessage = b.callieUrgent(j, mins);
+      }
+    });
+  });
+
+  const banner = document.getElementById('callie-banner');
+  const bannerText = document.getElementById('callie-banner-text');
+  if (urgentMessage && urgentMessage !== lastCallieMessage) {
+    lastCallieMessage = urgentMessage;
+    bannerText.textContent = urgentMessage;
+    banner.classList.remove('hidden');
+  } else if (!urgentMessage) {
+    banner.classList.add('hidden');
+    lastCallieMessage = '';
+  }
+
+  let overdue = 0, inQueue = 0, doneToday = 0;
+  const readyJobs = jobs.filter(j => statusMatch(j, ['ready']));
+  const readyUnconfirmed = readyJobs.filter(j => !getConfirm(j.ro, 'ready'));
+
+  BUCKETS.forEach(b => {
+    jobs.filter(j => statusMatch(j, b.statuses)).forEach(j => {
+      if (getConfirm(j.ro, b.id)) { doneToday++; return; }
+      if (minsAgo(j.status_updated_at) > b.timing) overdue++; else inQueue++;
+    });
+  });
+
+  let html = `
+    <div class="grid grid-cols-4 gap-3 mb-5">
+      <div class="summary-pill ${overdue > 0 ? 'border border-red-800 bg-red-950/30' : 'border border-zinc-800 bg-zinc-900/50'}">
+        <div class="text-[10px] mono uppercase tracking-widest text-zinc-500">Overdue</div>
+        <div class="text-4xl font-black ${overdue > 0 ? 'text-red-400' : 'text-zinc-300'}">${overdue}</div>
+        <div class="text-xs text-zinc-500">past timing</div>
+      </div>
+      <div class="summary-pill ${inQueue > 0 ? 'border border-amber-800 bg-amber-950/20' : 'border border-zinc-800 bg-zinc-900/50'}">
+        <div class="text-[10px] mono uppercase tracking-widest text-zinc-500">In Queue</div>
+        <div class="text-4xl font-black ${inQueue > 0 ? 'text-amber-400' : 'text-zinc-300'}">${inQueue}</div>
+        <div class="text-xs text-zinc-500">needs action</div>
+      </div>
+      <div class="summary-pill ${readyUnconfirmed.length > 0 ? 'border border-orange-700 bg-orange-950/20' : 'border border-zinc-800 bg-zinc-900/50'}">
+        <div class="text-[10px] mono uppercase tracking-widest text-zinc-500">Ready to Close</div>
+        <div class="text-4xl font-black ${readyUnconfirmed.length > 0 ? 'text-orange-400' : 'text-zinc-300'}">${readyUnconfirmed.length}</div>
+        <div class="text-xs text-zinc-500">cash on lot</div>
+      </div>
+      <div class="summary-pill border border-emerald-900 bg-emerald-950/20">
+        <div class="text-[10px] mono uppercase tracking-widest text-zinc-500">Done Today</div>
+        <div class="text-4xl font-black text-emerald-400">${doneToday}</div>
+        <div class="text-xs text-zinc-500">steps confirmed</div>
+      </div>
+    </div>`;
+
+  BUCKETS.forEach(b => {
+    const bucketJobs = jobs
+      .filter(j => statusMatch(j, b.statuses))
+      .sort((a,c) => minsAgo(c.status_updated_at) - minsAgo(a.status_updated_at));
+
+    const unconfirmed = bucketJobs.filter(j => !getConfirm(j.ro, b.id));
+    const anyOverdue = unconfirmed.some(j => minsAgo(j.status_updated_at) > b.timing);
+    const anyWarn = unconfirmed.some(j => minsAgo(j.status_updated_at) > b.timing * 0.6);
+
+    const laneClass = b.isMoney && unconfirmed.length > 0 ? 'lane-money pulse-money' :
+                      b.urgent && anyOverdue ? 'lane-urgent pulse-urgent' :
+                      b.urgent && anyWarn ? 'lane-warn' :
+                      unconfirmed.length === 0 && bucketJobs.length > 0 ? 'lane-done' : 'lane-calm';
+
+    const stepColor = b.isMoney && unconfirmed.length > 0 ? 'bg-orange-900 text-orange-300' :
+                      b.urgent && anyOverdue ? 'bg-red-900 text-red-300' :
+                      b.urgent && anyWarn ? 'bg-amber-900 text-amber-300' : 'bg-zinc-800 text-zinc-400';
+
+    const titleColor = b.isMoney && unconfirmed.length > 0 ? 'text-orange-300' :
+                       b.urgent && anyOverdue ? 'text-red-300' :
+                       b.urgent && anyWarn ? 'text-amber-300' : 'text-zinc-100';
+
+    let cardsHtml = '';
+    if (bucketJobs.length === 0) {
+      cardsHtml = `<div class="px-5 py-8 text-center text-sm text-zinc-600 mono">Nothing here right now</div>`;
+    } else {
+      bucketJobs.forEach(j => {
+        const conf = getConfirm(j.ro, b.id);
+        const mins = minsAgo(j.status_updated_at);
+        const isOverdue = mins > b.timing;
+        const isWarn = mins > b.timing * 0.6;
+        const timeClass = isOverdue ? 'overdue-time' : isWarn ? 'warn-time' : 'ok-time';
+
+        const confirmHtml = conf
+          ? `<div class="text-right">
+               <div class="text-[10px] text-emerald-500 mono">✓ confirmed</div>
+               <div class="text-[10px] text-zinc-600 mono">${fmtTime(conf.ts)}</div>
+             </div>`
+          : `<button class="confirm-btn" onclick="handleConfirm('${j.ro}','${b.id}',${mins},this)">
+               Confirm Done
+             </button>`;
+
+        const moneyTag = b.isMoney ? `<span class="money-tag ml-2">$ COLLECT</span>` : '';
+
+        cardsHtml += `
+          <div class="job-card rounded-2xl p-4 mx-3 mb-3">
+            <div class="flex items-start justify-between gap-4">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
+                  <span class="text-base font-black text-zinc-100">${escHtml(j.customer || 'Unknown')}</span>
+                  ${moneyTag}
+                  <span class="text-[10px] mono text-zinc-600">RO ${escHtml(String(j.ro || ''))}</span>
+                </div>
+                <div class="text-xs text-zinc-400 mb-2">${escHtml(j.vehicle || '')}</div>
+                <div class="text-xs ${timeClass} mono mb-3">${fmtMins(mins)} in status</div>
+                <div class="callie-bubble rounded-xl px-3 py-2 text-xs text-zinc-300 leading-relaxed">
+                  ${escHtml(b.action)}
+                </div>
+              </div>
+              <div class="flex-shrink-0 mt-1">${confirmHtml}</div>
+            </div>
+          </div>`;
+      });
+    }
+
+    html += `
+      <div class="rounded-3xl ${laneClass} overflow-hidden mb-4">
+        <div class="px-5 py-3 flex items-center justify-between border-b border-white/5">
+          <div class="flex items-center gap-3">
+            <span class="step-badge rounded-lg ${stepColor} px-2 py-1 uppercase">${b.step}</span>
+            <span class="font-semibold text-sm ${titleColor}">${b.title}</span>
+            <span class="text-xs mono text-zinc-600 bg-zinc-900 rounded-full px-2 py-0.5">${unconfirmed.length}</span>
+          </div>
+          <button onclick="toggleHelp('${b.id}')" class="text-[11px] text-zinc-600 hover:text-zinc-400 border border-zinc-800 rounded-lg px-2 py-1 transition-colors">
+            how?
+          </button>
+        </div>
+        <div id="help-${b.id}" class="help-panel px-5 py-3 border-b border-white/5 bg-zinc-900/50">
+          <div class="text-[10px] mono text-violet-400 uppercase tracking-widest mb-2">◆ Callie</div>
+          <p class="text-xs text-zinc-300 leading-relaxed">${escHtml(b.help)}</p>
+        </div>
+        <div class="pt-3 pb-1">${cardsHtml}</div>
+      </div>`;
+  });
+
+  document.getElementById('main-content').innerHTML = html;
+}
+
+function handleConfirm(ro, bucketId, mins, btn) {
+  const msg = saveConfirm(ro, bucketId, mins);
+  const card = btn.closest('.job-card');
+  btn.outerHTML = `<div class="text-right">
+    <div class="text-[10px] text-emerald-500 mono">✓ confirmed</div>
+    <div class="text-[10px] text-zinc-600 mono">${fmtTime(new Date().toISOString())}</div>
+  </div>`;
+  const callieDiv = card.querySelector('.callie-bubble');
+  if (callieDiv) {
+    callieDiv.innerHTML = `<span class="text-violet-400 mono text-[10px]">◆ Callie — </span>${escHtml(msg)}`;
+  }
+  card.classList.remove('pulse-urgent','pulse-money');
+  setTimeout(render, 500);
+}
+
+function toggleHelp(id) {
+  const el = document.getElementById('help-' + id);
+  if (el) el.classList.toggle('open');
+}
+
+async function loadBoard() {
+  try {
+    const r = await fetch(API, {cache:'no-store'});
+    if (!r.ok) throw new Error('failed');
+    boardState = await r.json();
+  } catch {}
+  render();
+}
+
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true});
+}
+
+updateClock();
+setInterval(updateClock, 1000);
+loadBoard();
+setInterval(loadBoard, POLL_MS);
+</script>
+</body>
+</html>
