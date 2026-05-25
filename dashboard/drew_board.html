@@ -3,953 +3,459 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Drew — Shop Board</title>
+<title>Drew — Callahan Command Board</title>
+<script src="https://cdn.tailwindcss.com"></script>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
-
-  :root {
-    --bg: #0d0f12;
-    --surface: #141720;
-    --surface2: #1c2030;
-    --border: #252a3a;
-    --border-bright: #323a52;
-    --text: #e2e8f0;
-    --text-muted: #64748b;
-    --text-dim: #3d4a60;
-    --red: #ef4444;
-    --red-bg: #1f0f0f;
-    --red-border: #7f1d1d;
-    --amber: #f59e0b;
-    --amber-bg: #1c1508;
-    --amber-border: #78350f;
-    --green: #22c55e;
-    --green-bg: #0a1f10;
-    --green-border: #14532d;
-    --blue: #3b82f6;
-    --blue-bg: #0f172a;
-    --blue-border: #1e3a8a;
-    --gray-bg: #141720;
-    --mono: 'IBM Plex Mono', monospace;
-    --sans: 'IBM Plex Sans', sans-serif;
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;900&family=DM+Mono:wght@400;500&display=swap');
+  body { font-family: 'DM Sans', system-ui, sans-serif; background: #09090b; color: #f4f4f5; }
+  .mono { font-family: 'DM Mono', monospace; }
+  .lane-urgent  { border: 2px solid #dc2626; background: linear-gradient(180deg, rgba(127,29,29,0.25), rgba(9,9,11,1)); }
+  .lane-warn    { border: 2px solid #d97706; background: linear-gradient(180deg, rgba(120,53,15,0.25), rgba(9,9,11,1)); }
+  .lane-calm    { border: 2px solid #27272a; background: rgba(24,24,27,0.6); }
+  .lane-done    { border: 2px solid #16a34a; background: linear-gradient(180deg, rgba(20,83,45,0.15), rgba(9,9,11,1)); }
+  .job-card     { border: 1px solid rgba(255,255,255,0.07); background: rgba(24,24,27,0.95); transition: background 0.15s; }
+  .job-card:hover { background: rgba(39,39,42,0.95); }
+  .pulse-urgent { animation: pulseUrgent 1.2s ease-in-out infinite; }
+  @keyframes pulseUrgent {
+    0%,100% { border-color: #dc2626; box-shadow: 0 0 0 0 rgba(220,38,38,0); }
+    50%      { border-color: #ef4444; box-shadow: 0 0 0 6px rgba(220,38,38,0.15); }
   }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--sans);
-    font-size: 14px;
-    min-height: 100vh;
-  }
-
-  /* HEADER */
-  .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 20px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .avatar {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #1e3a8a, #3b82f6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: var(--mono);
-    font-size: 14px;
+  .callie-bubble { border-left: 3px solid #8b5cf6; background: rgba(139,92,246,0.07); }
+  .step-badge { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.1em; }
+  .confirm-btn {
+    background: rgba(34,197,94,0.12);
+    border: 1px solid #16a34a;
+    color: #86efac;
     font-weight: 600;
-    color: #93c5fd;
-    letter-spacing: 0.05em;
-  }
-
-  .header-name {
-    font-family: var(--mono);
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--text);
-    letter-spacing: 0.02em;
-  }
-
-  .header-role {
-    font-size: 11px;
-    color: var(--text-muted);
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    font-family: var(--mono);
-  }
-
-  .header-right {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-
-  .clock {
-    font-family: var(--mono);
-    font-size: 13px;
-    color: var(--text-muted);
-    letter-spacing: 0.05em;
-  }
-
-  .live-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--green);
-    animation: pulse 2s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-  }
-
-  .nav-links {
-    display: flex;
-    gap: 4px;
-  }
-
-  .nav-link {
-    padding: 5px 12px;
-    border-radius: 4px;
-    font-family: var(--mono);
-    font-size: 11px;
-    font-weight: 500;
-    text-decoration: none;
-    color: var(--text-muted);
-    border: 1px solid transparent;
-    transition: all 0.15s;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-
-  .nav-link:hover { background: var(--surface2); color: var(--text); border-color: var(--border); }
-  .nav-link.active { background: var(--blue-bg); color: #93c5fd; border-color: var(--blue-border); }
-
-  /* ALERT BANNER */
-  .alert-banner {
-    background: var(--red-bg);
-    border-bottom: 1px solid var(--red-border);
-    padding: 10px 20px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    animation: flashBg 1.2s ease-in-out infinite;
-  }
-
-  @keyframes flashBg {
-    0%, 100% { background: var(--red-bg); }
-    50% { background: #2a0f0f; }
-  }
-
-  .alert-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--red);
-    animation: pulse 0.8s ease-in-out infinite;
-    flex-shrink: 0;
-  }
-
-  .alert-text {
-    font-family: var(--mono);
     font-size: 12px;
-    color: #fca5a5;
-    letter-spacing: 0.04em;
-  }
-
-  .alert-text strong { color: #ef4444; }
-  .alert-banner.hidden { display: none; }
-
-  /* MAIN LAYOUT */
-  .main { padding: 16px 20px; }
-
-  /* SUMMARY STRIP */
-  .summary-strip {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-
-  .summary-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 12px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .summary-card.urgent { border-color: var(--red-border); background: var(--red-bg); }
-  .summary-card.warn { border-color: var(--amber-border); background: var(--amber-bg); }
-  .summary-card.ok { border-color: var(--green-border); background: var(--green-bg); }
-
-  .summary-label {
-    font-family: var(--mono);
-    font-size: 10px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-
-  .summary-value {
-    font-family: var(--mono);
-    font-size: 24px;
-    font-weight: 600;
-    color: var(--text);
-    line-height: 1;
-  }
-
-  .summary-card.urgent .summary-value { color: var(--red); }
-  .summary-card.warn .summary-value { color: var(--amber); }
-  .summary-card.ok .summary-value { color: var(--green); }
-
-  .summary-sub {
-    font-size: 11px;
-    color: var(--text-muted);
-    font-family: var(--mono);
-  }
-
-  /* SECTION */
-  .section {
-    margin-bottom: 16px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .section.urgent { border-color: var(--red-border); }
-  .section.warn { border-color: var(--amber-border); }
-
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    padding: 6px 16px;
+    border-radius: 20px;
     cursor: pointer;
-    user-select: none;
-  }
-
-  .section.urgent .section-header { background: var(--red-bg); border-color: var(--red-border); }
-  .section.warn .section-header { background: var(--amber-bg); border-color: var(--amber-border); }
-
-  .section-header-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .section-step {
-    font-family: var(--mono);
-    font-size: 10px;
-    font-weight: 600;
-    padding: 2px 7px;
-    border-radius: 3px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    background: var(--border);
-    color: var(--text-muted);
-  }
-
-  .section.urgent .section-step { background: var(--red-border); color: #fca5a5; }
-  .section.warn .section-step { background: var(--amber-border); color: #fcd34d; }
-
-  .section-title {
-    font-family: var(--mono);
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text);
-    letter-spacing: 0.02em;
-  }
-
-  .section.urgent .section-title { color: #fca5a5; }
-  .section.warn .section-title { color: #fcd34d; }
-
-  .section-count {
-    font-family: var(--mono);
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-weight: 600;
-  }
-
-  .section.urgent .section-count { background: var(--red-border); color: #fca5a5; }
-  .section.warn .section-count { background: var(--amber-border); color: #fcd34d; }
-  .section:not(.urgent):not(.warn) .section-count { background: var(--border); color: var(--text-muted); }
-
-  .section-help {
-    font-size: 11px;
-    color: var(--text-muted);
-    font-family: var(--mono);
-    cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 3px;
-    border: 1px solid var(--border);
-    transition: all 0.15s;
-  }
-
-  .section-help:hover { background: var(--surface2); color: var(--text); }
-
-  .help-box {
-    background: var(--surface2);
-    border-bottom: 1px solid var(--border);
-    padding: 10px 14px;
-    font-size: 12px;
-    color: var(--text-muted);
-    font-family: var(--mono);
-    line-height: 1.6;
-    display: none;
-  }
-
-  .help-box.visible { display: block; }
-  .help-box strong { color: var(--blue); }
-
-  /* JOB CARDS */
-  .job-list { background: var(--bg); }
-
-  .job-card {
-    display: flex;
-    align-items: stretch;
-    border-bottom: 1px solid var(--border);
-    transition: background 0.1s;
-  }
-
-  .job-card:last-child { border-bottom: none; }
-  .job-card:hover { background: var(--surface); }
-
-  .job-card.flashing {
-    animation: cardFlash 1.5s ease-in-out infinite;
-  }
-
-  @keyframes cardFlash {
-    0%, 100% { background: transparent; }
-    50% { background: var(--red-bg); }
-  }
-
-  .job-priority-bar {
-    width: 4px;
-    flex-shrink: 0;
-  }
-
-  .priority-p1 { background: var(--red); }
-  .priority-p2 { background: var(--amber); }
-  .priority-p3 { background: var(--green); }
-  .priority-p4 { background: var(--text-dim); }
-
-  .job-body {
-    flex: 1;
-    padding: 10px 14px;
-    min-width: 0;
-  }
-
-  .job-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 4px;
-  }
-
-  .job-customer {
-    font-weight: 600;
-    font-size: 13px;
-    color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .job-time {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--text-muted);
-    flex-shrink: 0;
-    margin-left: 8px;
-  }
-
-  .job-time.overdue { color: var(--red); font-weight: 600; }
-  .job-time.warn { color: var(--amber); }
-
-  .job-vehicle {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-bottom: 5px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .job-action {
-    font-size: 12px;
-    color: #93c5fd;
-    font-family: var(--mono);
-    background: var(--blue-bg);
-    border: 1px solid var(--blue-border);
-    border-radius: 3px;
-    padding: 3px 8px;
-    display: inline-block;
-  }
-
-  .job-ro {
-    font-family: var(--mono);
-    font-size: 10px;
-    color: var(--text-dim);
-    margin-top: 4px;
-  }
-
-  .job-actions-right {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    justify-content: center;
-    padding: 10px 12px;
-    gap: 6px;
-    flex-shrink: 0;
-  }
-
-  .btn-confirm {
-    background: var(--green-bg);
-    border: 1px solid var(--green-border);
-    color: var(--green);
-    font-family: var(--mono);
-    font-size: 10px;
-    font-weight: 600;
-    padding: 5px 10px;
-    border-radius: 4px;
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     transition: all 0.15s;
     white-space: nowrap;
   }
-
-  .btn-confirm:hover { background: #14532d; }
-
-  .btn-confirm.done {
-    background: var(--surface2);
-    border-color: var(--border);
-    color: var(--text-muted);
+  .confirm-btn:hover { background: rgba(34,197,94,0.25); }
+  .confirm-btn.done {
+    background: rgba(39,39,42,0.8);
+    border-color: #3f3f46;
+    color: #52525b;
     cursor: default;
   }
-
-  .confirmed-tag {
-    font-family: var(--mono);
-    font-size: 9px;
-    color: var(--text-dim);
-    text-align: right;
+  .help-panel { display: none; }
+  .help-panel.open { display: block; }
+  .overdue-time { color: #f87171; font-weight: 700; }
+  .warn-time    { color: #fbbf24; font-weight: 600; }
+  .ok-time      { color: #71717a; }
+  .nav-btn {
+    padding: 6px 16px;
+    border-radius: 20px;
+    border: 1px solid #3f3f46;
+    background: #18181b;
+    color: #a1a1aa;
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.15s;
   }
-
-  /* EMPTY STATE */
-  .empty-state {
-    padding: 24px 14px;
-    text-align: center;
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--text-dim);
-    background: var(--bg);
+  .nav-btn:hover { border-color: #71717a; color: #f4f4f5; }
+  .nav-btn.active { background: #27272a; border-color: #71717a; color: #f4f4f5; }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; animation: livepulse 2s ease-in-out infinite; }
+  @keyframes livepulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .callie-alert {
+    background: linear-gradient(135deg, rgba(139,92,246,0.15), rgba(109,40,217,0.08));
+    border: 1px solid rgba(139,92,246,0.3);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+    animation: callieIn 0.4s ease-out;
   }
-
-  .empty-state span { display: block; font-size: 20px; margin-bottom: 6px; }
-
-  /* LOADING */
-  .loading {
-    padding: 40px;
-    text-align: center;
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--text-muted);
-    letter-spacing: 0.08em;
-  }
-
-  .loading::after {
-    content: '';
-    animation: dots 1.4s steps(4, end) infinite;
-  }
-
-  @keyframes dots {
-    0%   { content: ''; }
-    25%  { content: '.'; }
-    50%  { content: '..'; }
-    75%  { content: '...'; }
-  }
-
-  /* RESPONSIVE */
-  @media (max-width: 600px) {
-    .summary-strip { grid-template-columns: repeat(2, 1fr); }
-    .nav-links { display: none; }
+  @keyframes callieIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+  .summary-pill {
+    border-radius: 12px;
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 </style>
 </head>
-<body>
+<body class="min-h-screen">
 
-<div class="header">
-  <div class="header-left">
-    <div class="avatar">DM</div>
-    <div>
-      <div class="header-name">Drew Mize</div>
-      <div class="header-role">Shop-Side Advisor</div>
+<!-- HEADER -->
+<div class="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur px-6 py-3">
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <div class="text-xs mono text-zinc-500 uppercase tracking-widest">Powered by</div>
+        <div class="text-sm font-black text-zinc-100 tracking-tight">AdvizMe<span class="text-violet-400">.ai</span></div>
+      </div>
+      <div class="w-px h-5 bg-zinc-700"></div>
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center text-xs font-black text-white">DM</div>
+        <div>
+          <div class="text-sm font-bold leading-none">Drew Mize</div>
+          <div class="text-[10px] text-zinc-500 mono uppercase tracking-wider mt-0.5">Shop-Side Advisor</div>
+        </div>
+      </div>
     </div>
-  </div>
-  <div class="header-right">
-    <div class="nav-links">
-      <a href="board" class="nav-link">Main</a>
-      <a href="drew" class="nav-link active">Drew</a>
-      <a href="mitch" class="nav-link">Mitch</a>
-      <a href="preston" class="nav-link">Preston</a>
+    <div class="flex items-center gap-3">
+      <a href="/" class="nav-btn">Main Board</a>
+      <a href="/drew" class="nav-btn active">Drew</a>
+      <a href="/mitch" class="nav-btn">Mitch</a>
+      <div class="flex items-center gap-2 ml-2">
+        <div class="live-dot"></div>
+        <div class="text-xs mono text-zinc-500" id="clock">--:--</div>
+      </div>
     </div>
-    <div class="live-dot" title="Live"></div>
-    <div class="clock" id="clock">--:--</div>
   </div>
 </div>
 
-<!-- Alert Banner — shown when P1 jobs need Drew NOW -->
-<div class="alert-banner hidden" id="alertBanner">
-  <div class="alert-dot"></div>
-  <div class="alert-text" id="alertText">
-    <strong>ACTION REQUIRED —</strong> DVI complete on <strong id="alertJob">RO #13506 · Bersa Ruiz</strong>. Run CAS Phase 2 now.
+<!-- CALLIE ALERT BANNER -->
+<div id="callie-banner" class="hidden px-6 pt-4">
+  <div class="callie-alert">
+    <div class="flex items-start gap-3">
+      <div class="text-violet-400 text-lg mt-0.5">◆</div>
+      <div>
+        <div class="text-[10px] mono text-violet-400 uppercase tracking-widest mb-1">Callie</div>
+        <div class="text-sm text-zinc-100 leading-relaxed" id="callie-banner-text"></div>
+      </div>
+    </div>
   </div>
 </div>
 
-<div class="main" id="mainContent">
-  <div class="loading">Loading Drew's queue</div>
+<!-- MAIN -->
+<div class="px-6 py-4" id="main-content">
+  <div class="text-zinc-500 text-sm py-12 text-center mono">Loading your queue...</div>
 </div>
 
 <script>
-// ─── CONFIG ───────────────────────────────────────────────────────────────
-const AUTOFLOW_API = '/api/autoflow/jobs';   // existing board endpoint
-const POLL_MS = 30000;                        // 30 second poll
-const DREW_STATUSES = [
-  'Drop Off/ Tow-In',
-  'Online /Stage',
-  'Ready for Tech',
-  'Awaiting tech',
-  'Testing',
-  'DVI updates',
-  'Technical Advisement',
-  'Technical Overview',
-  'Advisor Estimate',
-  'Servicing / In Progress',
-  'Servicing',
-  'QC',
-  'Advisor QC Review',
-  'Advisor Finalize RO',
-  'Waiting parts'
+const API = '/api/board-state';
+const POLL_MS = 30000;
+const ADVISOR = 'drew';
+
+// ── Callie's voice for Drew ───────────────────────────────────────
+const CALLIE = {
+  dviReady: (ro, customer, tech, mins) =>
+    `RO ${ro} — ${customer}'s vehicle has been in DVI Updates for ${mins} minutes. ${tech} finished the inspection. You've got a tight window before the estimate slot closes today — want to knock this out now while the car's still on the rack?`,
+  dviOverdue: (ro, customer, mins) =>
+    `Drew, RO ${ro} — ${customer} has been waiting ${mins} minutes for the DVI review. That's past the window. Let's get Phase 2 running right now so Mitch can build the estimate and we don't lose the day on this one.`,
+  estimateReady: (ro, customer) =>
+    `The structure on RO ${ro} for ${customer} is ready for Mitch — but it needs your audit pass first. Shouldn't take long. Let's make sure nothing's missing before it goes to the customer.`,
+  qcReady: (ro, customer) =>
+    `RO ${ro} — ${customer}'s vehicle is ready for your QC check. Take a quick walk around before we call it done. This is the last line of defense before the customer sees it.`,
+  finalizeReady: (ro, customer) =>
+    `RO ${ro} — ${customer}'s ticket needs to be finalized and handed to Mitch. Clean up the notes, confirm the charges match, and let's get this one closed out.`,
+  morningGreeting: (name, count, firstPriority) =>
+    `Good morning, ${name}. You've got ${count} active jobs today. Your first priority is ${firstPriority}. Let's make it a strong one.`,
+  nothingOverdue: () =>
+    `You're in good shape right now — nothing overdue. Keep the momentum going and stay ahead of the DVIs when they land.`,
+  confirmResponse: (step, ro, nextStep, mins) =>
+    `Got it — ${step} logged for RO ${ro} at ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}. That took ${mins} minutes. Next: ${nextStep}.`,
+};
+
+// ── Drew's workflow buckets ────────────────────────────────────────
+const BUCKETS = [
+  {
+    id: 'dvi', step: 'STEP 1', title: 'DVI Ready — Run CAS Phase 2',
+    statuses: ['dvi updates'],
+    timing: 15, urgent: true,
+    action: 'Open CAS → Phase 2 → paste full DVI + code photos → review output → walk rework to tech → confirm',
+    help: 'You have 15 minutes from when the tech finishes. Open the Callahan Advisory System in ChatGPT and select Phase 2. Paste the full DVI text and upload any code photos. Review what comes back — if there\'s rework, print it and walk it to the tech while the car is still on the rack. Then confirm here.',
+    nextStep: 'Build estimate structure for Mitch',
+    callieUrgent: (j, mins) => mins > 15 ? CALLIE.dviOverdue(j.ro, j.customer, mins) : CALLIE.dviReady(j.ro, j.customer, j.technician || 'The tech', mins),
+  },
+  {
+    id: 'intake', step: 'STEP 1A', title: 'New Vehicle — Intake & Dispatch',
+    statuses: ['drop off/ tow-in', 'online /stage'],
+    timing: 30, urgent: false,
+    action: 'Verify vehicle matches RO · take 4-corner photos in AutoFlow · run concern through CAS Phase 1 · dispatch tech',
+    help: 'Before the car goes anywhere: verify the vehicle, keys, and tag match the RO. Take 4-corner photos in AutoFlow. Run the customer\'s concern through CAS Phase 1 to clean up the dispatch note. Paste the cleaned note into the RO. Then stage the vehicle for the tech.',
+    nextStep: 'Monitor for DVI completion',
+  },
+  {
+    id: 'dispatch', step: 'STEP 2', title: 'Dispatch — Assign Tech & Clear Blockers',
+    statuses: ['ready for tech', 'awaiting tech'],
+    timing: 20, urgent: false,
+    action: 'Confirm bay and tech are available · assign job in AutoFlow · remove any blockers',
+    help: 'Confirm a tech and bay are ready. Assign the job to the correct tech in AutoFlow. Remove any blockers — missing info, unclear concern, missing parts. The tech needs a clear starting point.',
+    nextStep: 'Wait for DVI completion',
+  },
+  {
+    id: 'estimate', step: 'STEP 3', title: 'Estimate Structure — Build for Mitch',
+    statuses: ['advisor estimate'],
+    timing: 20, urgent: true,
+    action: 'Run CAS Phase 3 → build job blocks in Tekmetric format → hand structure to Mitch to price',
+    help: 'Use Phase 2 output as your source. Open CAS Phase 3 and let it build the job block structure. Each job gets a title, labor description, parts list, and RO note in Tekmetric format. Hand that structure to Mitch — he fills in the pricing and presents it. Do NOT send to the customer without Mitch\'s review.',
+    nextStep: 'Run estimate audit after Mitch prices it',
+    callieUrgent: (j) => CALLIE.estimateReady(j.ro, j.customer),
+  },
+  {
+    id: 'production', step: 'STEP 4', title: 'Production — Monitor & Mid-Job Check',
+    statuses: ['servicing / in progress', 'servicing'],
+    timing: 120, urgent: false,
+    action: 'Check tech progress · take mid-job photos on larger jobs · post Tekmetric activity update · notify Mitch of timeline changes',
+    help: 'On larger jobs — teardowns, engine work, gasket jobs, anything over 2 hours — take mid-job photos when the car is about halfway through. Run them through CAS Phase 6 if needed. Post a Tekmetric activity update with: current stage, visible progress, rough completion time. If the timeline is shifting, tell Mitch immediately so he can update the customer before they call us.',
+    nextStep: 'Watch for completion and flag incoming soon',
+  },
+  {
+    id: 'parts', step: 'STEP 4A', title: 'Parts — Verify Received & Staged',
+    statuses: ['waiting parts'],
+    timing: 60, urgent: false,
+    action: 'Check if parts arrived · verify against RO · stage next to vehicle · update AutoFlow status',
+    help: 'Check the parts status. If they\'ve arrived: pull them, verify every part against the RO, and stage them next to the vehicle. Update AutoFlow so the board reflects reality. If parts are still waiting: confirm the ETA with the supplier and make sure Mitch has updated the customer.',
+    nextStep: 'Notify Mitch when parts are staged and ready',
+  },
+  {
+    id: 'qc', step: 'STEP 5', title: 'QC — Verify Repair Complete',
+    statuses: ['qc', 'advisor qc review'],
+    timing: 15, urgent: true,
+    action: 'Walk the vehicle · confirm repair is complete · verify photos and notes · sign off in AutoFlow',
+    help: 'Walk out to the vehicle. Visually confirm the repair is complete. Check that the photos and notes in AutoFlow tell the repair story clearly. Verify fluids are topped off, all covers and shields are reinstalled, no grease prints inside or under the hood. Sign off Advisor QC Review in AutoFlow when it\'s clean.',
+    nextStep: 'Finalize the RO and hand to Mitch',
+    callieUrgent: (j) => CALLIE.qcReady(j.ro, j.customer),
+  },
+  {
+    id: 'finalize', step: 'STEP 6', title: 'Finalize RO — Prep for Mitch',
+    statuses: ['advisor finalize ro'],
+    timing: 10, urgent: true,
+    action: 'Clean up RO notes · confirm all charges match · handle parts returns · hand finalized ticket to Mitch',
+    help: 'Review all RO notes and clean up anything unclear or incomplete. Confirm every charge matches what was actually done. Check that parts returns are handled. Verify the invoice is clean and ready for the customer to review. Then hand it to Mitch — he closes it out with the customer.',
+    nextStep: 'Mitch closes with customer',
+    callieUrgent: (j) => CALLIE.finalizeReady(j.ro, j.customer),
+  },
 ];
 
-// ─── WORKFLOW BUCKETS ──────────────────────────────────────────────────────
-const DREW_BUCKETS = [
-  {
-    id: 'dvi_review',
-    step: 'STEP 1',
-    title: 'DVI Ready — Run CAS Phase 2',
-    statuses: ['DVI updates'],
-    urgent: true,
-    timing: 15,  // minutes before overdue
-    action: 'Open CAS → Phase 2 → paste DVI → confirm when done',
-    help: `<strong>What to do:</strong> The tech just finished the DVI. You have 15 minutes.<br>
-1. Open CAS in ChatGPT (Callahan Advisory System project)<br>
-2. Select Phase 2 — DVI Intake and Breakdown<br>
-3. Copy and paste the full DVI text + upload code photos<br>
-4. Review the output — catch any rework items<br>
-5. If rework needed: print it, walk it to the tech NOW while the car is on the rack<br>
-6. Hit <strong>Confirm</strong> when Phase 2 is complete`
-  },
-  {
-    id: 'intake_dispatch',
-    step: 'STEP 1A',
-    title: 'New Vehicle In — Intake & Dispatch',
-    statuses: ['Drop Off/ Tow-In', 'Online /Stage'],
-    urgent: false,
-    timing: 30,
-    action: 'Take starting photos · verify vehicle · stage for tech · run concern through CAS Phase 1',
-    help: `<strong>What to do:</strong><br>
-1. Verify vehicle, keys, tag match the RO<br>
-2. Take 4-corner starting photos in AutoFlow<br>
-3. Open CAS Phase 1 and run the customer concern through it<br>
-4. Paste the cleaned dispatch note into the RO<br>
-5. Stage the vehicle for the tech — make sure they have everything they need<br>
-6. Hit <strong>Confirm</strong> when staged and dispatched`
-  },
-  {
-    id: 'dispatch',
-    step: 'STEP 2',
-    title: 'Dispatch — Assign Tech & Clear Blockers',
-    statuses: ['Ready for Tech', 'Awaiting tech'],
-    urgent: false,
-    timing: 20,
-    action: 'Confirm bay/tech ready · assign job · remove blockers',
-    help: `<strong>What to do:</strong><br>
-1. Confirm a tech and bay are available<br>
-2. Assign the job to the correct tech in AutoFlow<br>
-3. Remove any blockers — missing info, missing parts, unclear concern<br>
-4. Hit <strong>Confirm</strong> when tech is dispatched`
-  },
-  {
-    id: 'estimate_build',
-    step: 'STEP 3',
-    title: 'Estimate — Build Structure for Mitch',
-    statuses: ['Advisor Estimate'],
-    urgent: true,
-    timing: 20,
-    action: 'Run CAS Phase 3 → build job structure → hand to Mitch',
-    help: `<strong>What to do:</strong><br>
-1. Open CAS Phase 3 — Estimate Strategy<br>
-2. Paste Phase 2 output as the source<br>
-3. CAS will build the job blocks in Tekmetric format<br>
-4. Hand the structured output to Mitch — he fills pricing and presents<br>
-5. Do NOT send to customer without Mitch review<br>
-6. Hit <strong>Confirm</strong> when structure is handed to Mitch`
-  },
-  {
-    id: 'estimate_audit',
-    step: 'STEP 4',
-    title: 'Estimate Audit — Before Customer Sees It',
-    statuses: [],   // triggered manually after Mitch completes pricing
-    urgent: false,
-    timing: 15,
-    action: 'Paste completed estimate into CAS → run audit → confirm clean',
-    help: `<strong>What to do:</strong><br>
-1. Mitch has filled in labor and parts<br>
-2. Open CAS and paste the completed estimate<br>
-3. Ask CAS to audit it — it will catch missing parts, wrong parts, pricing issues<br>
-4. Fix any issues before it goes to the customer<br>
-5. Hit <strong>Confirm</strong> when audit is clean and Mitch has final copy`
-  },
-  {
-    id: 'production_monitor',
-    step: 'STEP 5',
-    title: 'Production — Monitor & Mid-Job Check',
-    statuses: ['Servicing / In Progress', 'Servicing'],
-    urgent: false,
-    timing: 120,
-    action: 'Check tech progress · take mid-job photos on large jobs · post Tekmetric activity update',
-    help: `<strong>What to do:</strong><br>
-1. Check in with the tech — is the job moving?<br>
-2. On larger jobs (2+ hours, teardowns, engine/trans work): take mid-job photos<br>
-3. Run photos through CAS Phase 6 for mid-job review<br>
-4. Post a Tekmetric job activity update with: current stage, visible progress, rough completion time<br>
-5. Tell Mitch if the timeline is changing so he can update the customer<br>
-6. Hit <strong>Confirm</strong> when update is posted`
-  },
-  {
-    id: 'parts_verify',
-    step: 'STEP 5A',
-    title: 'Parts — Verify Received & Staged',
-    statuses: ['Waiting parts'],
-    urgent: false,
-    timing: 60,
-    action: 'Check parts arrival · stage for tech · update if still waiting',
-    help: `<strong>What to do:</strong><br>
-1. Check if ordered parts have arrived<br>
-2. If arrived: pull them, verify against the RO, stage them next to the vehicle<br>
-3. Update AutoFlow status so the board reflects reality<br>
-4. If still waiting: confirm ETA and make sure Mitch has updated the customer<br>
-5. Hit <strong>Confirm</strong> when parts are staged or wait status is confirmed`
-  },
-  {
-    id: 'qc',
-    step: 'STEP 6',
-    title: 'QC — Verify Repair Complete',
-    statuses: ['QC', 'Advisor QC Review'],
-    urgent: true,
-    timing: 15,
-    action: 'Confirm repair done · verify notes/photos · sign off QC',
-    help: `<strong>What to do:</strong><br>
-1. Visually confirm the repair is complete<br>
-2. Check that notes and photos in AutoFlow support the repair story<br>
-3. Confirm all fluids topped off, covers reinstalled, no grease prints<br>
-4. Run CAS Phase 7 if it's a large or high-risk job<br>
-5. Sign off Advisor QC Review in AutoFlow<br>
-6. Hit <strong>Confirm</strong> when QC is clean`
-  },
-  {
-    id: 'finalize',
-    step: 'STEP 7',
-    title: 'Finalize RO — Prep for Mitch Closeout',
-    statuses: ['Advisor Finalize RO'],
-    urgent: true,
-    timing: 10,
-    action: 'Clean notes · confirm charges · prep invoice · hand to Mitch',
-    help: `<strong>What to do:</strong><br>
-1. Review all RO notes — clean up anything unclear<br>
-2. Confirm all charges match what was actually done<br>
-3. Check that parts returns are handled<br>
-4. Verify the invoice is ready for customer review<br>
-5. Hand to Mitch — he closes with the customer<br>
-6. Hit <strong>Confirm</strong> when RO is finalized and Mitch has it`
-  }
-];
+// ── State ─────────────────────────────────────────────────────────
+let boardState = null;
+let confirmations = JSON.parse(localStorage.getItem('drew_confirms') || '{}');
+let lastCallieMessage = '';
 
-// ─── STATE ────────────────────────────────────────────────────────────────
-let jobs = [];
-let confirmations = JSON.parse(localStorage.getItem('drew_confirmations') || '{}');
-let lastPollTime = null;
-
-// ─── HELPERS ──────────────────────────────────────────────────────────────
-function timeAgo(isoString) {
-  if (!isoString) return null;
-  const diff = Math.floor((Date.now() - new Date(isoString)) / 60000);
-  if (diff < 1) return '<1m';
-  if (diff < 60) return `${diff}m`;
-  const h = Math.floor(diff / 60);
-  const m = diff % 60;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+function saveConfirm(ro, bucketId, mins) {
+  const key = ro + '_' + bucketId;
+  const next = (BUCKETS.find(b => b.id === bucketId) || {}).nextStep || 'Keep moving.';
+  confirmations[key] = {
+    ts: new Date().toISOString(),
+    mins: mins,
+    next: next,
+  };
+  localStorage.setItem('drew_confirms', JSON.stringify(confirmations));
+  return CALLIE.confirmResponse(
+    (BUCKETS.find(b => b.id === bucketId) || {}).title || bucketId,
+    ro, next, mins
+  );
 }
 
-function minutesInStatus(isoString) {
-  if (!isoString) return 0;
-  return Math.floor((Date.now() - new Date(isoString)) / 60000);
+function getConfirm(ro, bucketId) {
+  return confirmations[ro + '_' + bucketId];
 }
 
-function getPriority(job) {
-  const s = (job.status || '').toLowerCase();
-  if (['dvi updates'].includes(s)) return 'p1';
-  if (['advisor estimate', 'advisor finalize ro', 'qc', 'advisor qc review'].includes(s)) return 'p2';
-  if (['servicing / in progress', 'servicing'].includes(s)) return 'p3';
-  return 'p4';
+function minsAgo(iso) {
+  if (!iso) return 0;
+  return Math.floor((Date.now() - new Date(iso)) / 60000);
 }
 
-function confirmKey(jobId, bucketId) {
-  return `${jobId}_${bucketId}`;
+function fmtMins(mins) {
+  if (mins < 60) return mins + 'm';
+  return Math.floor(mins/60) + 'h ' + (mins%60) + 'm';
 }
 
-function saveConfirmation(jobId, bucketId) {
-  const key = confirmKey(jobId, bucketId);
-  confirmations[key] = { ts: new Date().toISOString(), by: 'Drew' };
-  localStorage.setItem('drew_confirmations', JSON.stringify(confirmations));
+function fmtTime(iso) {
+  return new Date(iso).toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit',hour12:true});
 }
 
-function getConfirmation(jobId, bucketId) {
-  return confirmations[confirmKey(jobId, bucketId)];
+function statusMatch(job, statuses) {
+  const s = (job.workflow_status || job.autoflow_status || job.status || '').toLowerCase().trim();
+  return statuses.some(st => s.includes(st.toLowerCase()));
 }
 
-function formatTime(ts) {
-  const d = new Date(ts);
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-}
-
-// ─── DATA FETCH ──────────────────────────────────────────────────────────
-async function fetchJobs() {
-  try {
-    const resp = await fetch(AUTOFLOW_API);
-    if (!resp.ok) throw new Error('fetch failed');
-    const data = await resp.json();
-    // Support both array and {jobs:[]} shapes
-    jobs = Array.isArray(data) ? data : (data.jobs || data.rolling_jobs || []);
-    lastPollTime = new Date();
-    render();
-  } catch(e) {
-    // If API not reachable, show demo data so the board is always useful
-    jobs = getDemoJobs();
-    lastPollTime = new Date();
-    render();
-  }
-}
-
-function getDemoJobs() {
-  return [
-    { id: '13506', ro_number: '13506', customer_name: 'Bersa Ruiz', vehicle: '2015 Ford Fusion SE', status: 'DVI updates', status_updated_at: new Date(Date.now() - 8*60000).toISOString(), priority: 1 },
-    { id: '13450', ro_number: '13450', customer_name: 'Joseph Rodriguez', vehicle: '2014 GMC Sierra 1500', status: 'Advisor Estimate', status_updated_at: new Date(Date.now() - 35*60000).toISOString(), priority: 2 },
-    { id: '13480', ro_number: '13480', customer_name: 'Laisa Sanchez', vehicle: '1999 Ford F-350', status: 'Advisor Estimate', status_updated_at: new Date(Date.now() - 12*60000).toISOString(), priority: 2 },
-    { id: '13445', ro_number: '13445', customer_name: 'George Soto', vehicle: '2000 Ford F-250', status: 'Servicing / In Progress', status_updated_at: new Date(Date.now() - 90*60000).toISOString(), priority: 3 },
-    { id: '13400', ro_number: '13400', customer_name: 'Terdell Dawes', vehicle: '2004 Ford F-250', status: 'QC', status_updated_at: new Date(Date.now() - 5*60000).toISOString(), priority: 1 },
-    { id: '13391', ro_number: '13391', customer_name: 'Jeff Leverton', vehicle: '2016 Ford Explorer', status: 'Awaiting tech', status_updated_at: new Date(Date.now() - 25*60000).toISOString(), priority: 3 },
-    { id: '13455', ro_number: '13455', customer_name: 'Ben Ladwig', vehicle: '2018 Chrysler 300', status: 'Advisor Finalize RO', status_updated_at: new Date(Date.now() - 18*60000).toISOString(), priority: 1 },
-  ];
-}
-
-// ─── RENDER ───────────────────────────────────────────────────────────────
+// ── Render ────────────────────────────────────────────────────────
 function render() {
-  // Check for alert conditions (P1 DVI jobs)
-  const p1DviJobs = jobs.filter(j => (j.status || '').toLowerCase() === 'dvi updates');
-  const alertBanner = document.getElementById('alertBanner');
-  if (p1DviJobs.length > 0) {
-    const j = p1DviJobs[0];
-    document.getElementById('alertText').innerHTML =
-      `<strong>ACTION REQUIRED —</strong> DVI complete on RO #${j.ro_number} · ${j.customer_name}. Run CAS Phase 2 now.`;
-    alertBanner.classList.remove('hidden');
-  } else {
-    alertBanner.classList.add('hidden');
-  }
+  if (!boardState) return;
+  const jobs = boardState.jobs || [];
 
-  // Build summary stats
-  const drewJobs = jobs.filter(j => DREW_STATUSES.some(s => s.toLowerCase() === (j.status || '').toLowerCase()));
-  let needsAction = 0, overdue = 0, inProgress = 0, done = 0;
-
-  drewJobs.forEach(j => {
-    const bucket = DREW_BUCKETS.find(b => b.statuses.some(s => s.toLowerCase() === (j.status || '').toLowerCase()));
-    if (!bucket) return;
-    const mins = minutesInStatus(j.status_updated_at);
-    const conf = getConfirmation(j.id || j.ro_number, bucket.id);
-    if (conf) { done++; return; }
-    if (mins > bucket.timing) overdue++;
-    else needsAction++;
+  // Find most urgent Callie message
+  let urgentMessage = '';
+  BUCKETS.filter(b => b.urgent).forEach(b => {
+    const bucketJobs = jobs.filter(j => statusMatch(j, b.statuses));
+    bucketJobs.forEach(j => {
+      if (getConfirm(j.ro, b.id)) return;
+      const mins = minsAgo(j.status_updated_at);
+      if (mins > b.timing * 0.5 && b.callieUrgent && !urgentMessage) {
+        urgentMessage = b.callieUrgent(j, mins);
+      }
+    });
   });
 
-  inProgress = drewJobs.filter(j => ['servicing / in progress','servicing'].includes((j.status||'').toLowerCase())).length;
+  const banner = document.getElementById('callie-banner');
+  const bannerText = document.getElementById('callie-banner-text');
+  if (urgentMessage && urgentMessage !== lastCallieMessage) {
+    lastCallieMessage = urgentMessage;
+    bannerText.textContent = urgentMessage;
+    banner.classList.remove('hidden');
+  } else if (!urgentMessage) {
+    banner.classList.add('hidden');
+    lastCallieMessage = '';
+  }
 
-  // Build HTML
+  // Summary stats
+  let overdue = 0, inQueue = 0, doneToday = 0;
+  BUCKETS.forEach(b => {
+    jobs.filter(j => statusMatch(j, b.statuses)).forEach(j => {
+      if (getConfirm(j.ro, b.id)) { doneToday++; return; }
+      if (minsAgo(j.status_updated_at) > b.timing) overdue++;
+      else inQueue++;
+    });
+  });
+
   let html = `
-    <div class="summary-strip">
-      <div class="summary-card ${overdue > 0 ? 'urgent' : ''}">
-        <div class="summary-label">Overdue</div>
-        <div class="summary-value">${overdue}</div>
-        <div class="summary-sub">past timing window</div>
+    <div class="grid grid-cols-3 gap-3 mb-5">
+      <div class="summary-pill ${overdue > 0 ? 'border border-red-800 bg-red-950/30' : 'border border-zinc-800 bg-zinc-900/50'}">
+        <div class="text-[10px] mono uppercase tracking-widest text-zinc-500">Overdue</div>
+        <div class="text-4xl font-black ${overdue > 0 ? 'text-red-400' : 'text-zinc-300'}">${overdue}</div>
+        <div class="text-xs text-zinc-500">past timing window</div>
       </div>
-      <div class="summary-card ${needsAction > 0 ? 'warn' : 'ok'}">
-        <div class="summary-label">Needs Action</div>
-        <div class="summary-value">${needsAction}</div>
-        <div class="summary-sub">in your queue</div>
+      <div class="summary-pill ${inQueue > 0 ? 'border border-amber-800 bg-amber-950/20' : 'border border-zinc-800 bg-zinc-900/50'}">
+        <div class="text-[10px] mono uppercase tracking-widest text-zinc-500">In Your Queue</div>
+        <div class="text-4xl font-black ${inQueue > 0 ? 'text-amber-400' : 'text-zinc-300'}">${inQueue}</div>
+        <div class="text-xs text-zinc-500">needs your action</div>
       </div>
-      <div class="summary-card">
-        <div class="summary-label">In Production</div>
-        <div class="summary-value">${inProgress}</div>
-        <div class="summary-sub">actively servicing</div>
-      </div>
-      <div class="summary-card ok">
-        <div class="summary-label">Confirmed Today</div>
-        <div class="summary-value">${done}</div>
-        <div class="summary-sub">steps completed</div>
+      <div class="summary-pill border border-emerald-900 bg-emerald-950/20">
+        <div class="text-[10px] mono uppercase tracking-widest text-zinc-500">Done Today</div>
+        <div class="text-4xl font-black text-emerald-400">${doneToday}</div>
+        <div class="text-xs text-zinc-500">steps confirmed</div>
       </div>
     </div>
   `;
 
-  // Render each bucket
-  DREW_BUCKETS.forEach(bucket => {
-    const bucketJobs = bucket.statuses.length > 0
-      ? jobs.filter(j => bucket.statuses.some(s => s.toLowerCase() === (j.status || '').toLowerCase()))
-      : [];
+  BUCKETS.forEach(b => {
+    const bucketJobs = jobs
+      .filter(j => statusMatch(j, b.statuses))
+      .sort((a,c) => minsAgo(c.status_updated_at) - minsAgo(a.status_updated_at));
 
-    // Sort: overdue first, then by time in status desc
-    bucketJobs.sort((a, b) => {
-      const ma = minutesInStatus(a.status_updated_at);
-      const mb = minutesInStatus(b.status_updated_at);
-      const oa = ma > bucket.timing ? 1 : 0;
-      const ob = mb > bucket.timing ? 1 : 0;
-      if (oa !== ob) return ob - oa;
-      return mb - ma;
-    });
+    const unconfirmed = bucketJobs.filter(j => !getConfirm(j.ro, b.id));
+    const anyOverdue = unconfirmed.some(j => minsAgo(j.status_updated_at) > b.timing);
+    const anyWarn = unconfirmed.some(j => minsAgo(j.status_updated_at) > b.timing * 0.6);
 
-    const unconfirmedCount = bucketJobs.filter(j => !getConfirmation(j.id || j.ro_number, bucket.id)).length;
-    const isUrgent = bucket.urgent && unconfirmedCount > 0 && bucketJobs.some(j => minutesInStatus(j.status_updated_at) > bucket.timing / 2);
-    const isWarn = bucket.urgent && unconfirmedCount > 0;
+    const laneClass = b.urgent && anyOverdue ? 'lane-urgent pulse-urgent' :
+                      b.urgent && anyWarn ? 'lane-warn' :
+                      unconfirmed.length === 0 && bucketJobs.length > 0 ? 'lane-done' : 'lane-calm';
 
-    html += `
-      <div class="section ${isUrgent ? 'urgent' : isWarn ? 'warn' : ''}" id="section_${bucket.id}">
-        <div class="section-header" onclick="toggleSection('${bucket.id}')">
-          <div class="section-header-left">
-            <span class="section-step">${bucket.step}</span>
-            <span class="section-title">${bucket.title}</span>
-            <span class="section-count">${unconfirmedCount}</span>
-          </div>
-          <span class="section-help" onclick="event.stopPropagation(); toggleHelp('${bucket.id}')">? how</span>
-        </div>
-        <div class="help-box" id="help_${bucket.id}">${bucket.help}</div>
-        <div class="job-list" id="list_${bucket.id}">
-    `;
+    const stepColor = b.urgent && anyOverdue ? 'bg-red-900 text-red-300' :
+                      b.urgent && anyWarn ? 'bg-amber-900 text-amber-300' : 'bg-zinc-800 text-zinc-400';
 
+    const titleColor = b.urgent && anyOverdue ? 'text-red-300' :
+                       b.urgent && anyWarn ? 'text-amber-300' : 'text-zinc-100';
+
+    let cardsHtml = '';
     if (bucketJobs.length === 0) {
-      html += `<div class="empty-state"><span>✓</span>Nothing here right now</div>`;
+      cardsHtml = `<div class="px-5 py-8 text-center text-sm text-zinc-600 mono">Nothing here right now</div>`;
     } else {
-      bucketJobs.forEach(job => {
-        const jobId = job.id || job.ro_number;
-        const conf = getConfirmation(jobId, bucket.id);
-        const mins = minutesInStatus(job.status_updated_at);
-        const overdue = mins > bucket.timing;
-        const warn = mins > bucket.timing * 0.6;
-        const priority = getPriority(job);
-        const flashing = !conf && overdue && bucket.urgent;
+      bucketJobs.forEach(j => {
+        const conf = getConfirm(j.ro, b.id);
+        const mins = minsAgo(j.status_updated_at);
+        const isOverdue = mins > b.timing;
+        const isWarn = mins > b.timing * 0.6;
+        const timeClass = isOverdue ? 'overdue-time' : isWarn ? 'warn-time' : 'ok-time';
+        const timeStr = fmtMins(mins) + ' in status';
+        const flashClass = !conf && isOverdue && b.urgent ? 'pulse-urgent' : '';
 
-        let timeClass = '';
-        if (overdue) timeClass = 'overdue';
-        else if (warn) timeClass = 'warn';
+        const confirmHtml = conf
+          ? `<div class="text-right">
+               <div class="text-[10px] text-emerald-500 mono">✓ confirmed</div>
+               <div class="text-[10px] text-zinc-600 mono">${fmtTime(conf.ts)}</div>
+             </div>`
+          : `<button class="confirm-btn" onclick="handleConfirm('${j.ro}','${b.id}',${mins},this)">
+               Confirm Done
+             </button>`;
 
-        html += `
-          <div class="job-card ${flashing ? 'flashing' : ''}">
-            <div class="job-priority-bar priority-${priority}"></div>
-            <div class="job-body">
-              <div class="job-top">
-                <div class="job-customer">${job.customer_name || 'Unknown'}</div>
-                <div class="job-time ${timeClass}">${job.status_updated_at ? timeAgo(job.status_updated_at) + ' in status' : '—'}</div>
+        cardsHtml += `
+          <div class="job-card rounded-2xl p-4 mx-3 mb-3 ${flashClass}">
+            <div class="flex items-start justify-between gap-4">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-base font-black text-zinc-100">${escHtml(j.customer || 'Unknown')}</span>
+                  <span class="text-[10px] mono text-zinc-600">RO ${escHtml(String(j.ro || ''))}</span>
+                </div>
+                <div class="text-xs text-zinc-400 mb-2">${escHtml(j.vehicle || '')}</div>
+                <div class="text-xs ${timeClass} mono mb-3">${timeStr}</div>
+                <div class="callie-bubble rounded-xl px-3 py-2 text-xs text-zinc-300 leading-relaxed">
+                  ${escHtml(b.action)}
+                </div>
               </div>
-              <div class="job-vehicle">${job.vehicle || job.year_make_model || '—'}</div>
-              <div class="job-action">${bucket.action}</div>
-              <div class="job-ro">RO #${job.ro_number || jobId}</div>
+              <div class="flex-shrink-0 mt-1">${confirmHtml}</div>
             </div>
-            <div class="job-actions-right">
-              ${conf
-                ? `<button class="btn-confirm done" disabled>✓ Done</button>
-                   <div class="confirmed-tag">${formatTime(conf.ts)}</div>`
-                : `<button class="btn-confirm" onclick="confirm_step('${jobId}','${bucket.id}',this)">Confirm</button>`
-              }
-            </div>
-          </div>
-        `;
+          </div>`;
       });
     }
 
-    html += `</div></div>`;
+    html += `
+      <div class="rounded-3xl ${laneClass} overflow-hidden mb-4">
+        <div class="px-5 py-3 flex items-center justify-between border-b border-white/5">
+          <div class="flex items-center gap-3">
+            <span class="step-badge rounded-lg ${stepColor} px-2 py-1 uppercase">${b.step}</span>
+            <span class="font-semibold text-sm ${titleColor}">${b.title}</span>
+            <span class="text-xs mono text-zinc-600 bg-zinc-900 rounded-full px-2 py-0.5">${unconfirmed.length}</span>
+          </div>
+          <button onclick="toggleHelp('${b.id}')" class="text-[11px] text-zinc-600 hover:text-zinc-400 border border-zinc-800 rounded-lg px-2 py-1 transition-colors">
+            how?
+          </button>
+        </div>
+        <div id="help-${b.id}" class="help-panel px-5 py-3 border-b border-white/5 bg-zinc-900/50">
+          <div class="text-[10px] mono text-violet-400 uppercase tracking-widest mb-2">◆ Callie</div>
+          <p class="text-xs text-zinc-300 leading-relaxed">${escHtml(b.help)}</p>
+        </div>
+        <div class="pt-3 pb-1">${cardsHtml}</div>
+      </div>`;
   });
 
-  document.getElementById('mainContent').innerHTML = html;
+  document.getElementById('main-content').innerHTML = html;
 }
 
-// ─── INTERACTIONS ─────────────────────────────────────────────────────────
-function toggleSection(id) {
-  const list = document.getElementById('list_' + id);
-  if (list) list.style.display = list.style.display === 'none' ? '' : '';
+function handleConfirm(ro, bucketId, mins, btn) {
+  const msg = saveConfirm(ro, bucketId, mins);
+  // Update button area
+  const card = btn.closest('.job-card');
+  btn.outerHTML = `<div class="text-right">
+    <div class="text-[10px] text-emerald-500 mono">✓ confirmed</div>
+    <div class="text-[10px] text-zinc-600 mono">${fmtTime(new Date().toISOString())}</div>
+  </div>`;
+  // Show Callie response
+  const callieDiv = card.querySelector('.callie-bubble');
+  if (callieDiv) {
+    callieDiv.innerHTML = `<span class="text-violet-400 mono text-[10px]">◆ Callie — </span>${escHtml(msg)}`;
+  }
+  card.classList.remove('pulse-urgent');
+  setTimeout(render, 500);
 }
 
 function toggleHelp(id) {
-  const box = document.getElementById('help_' + id);
-  if (box) box.classList.toggle('visible');
+  const el = document.getElementById('help-' + id);
+  if (el) el.classList.toggle('open');
 }
 
-function confirm_step(jobId, bucketId, btn) {
-  saveConfirmation(jobId, bucketId);
-  // Update button immediately without full re-render
-  const right = btn.closest('.job-actions-right');
-  right.innerHTML = `
-    <button class="btn-confirm done" disabled>✓ Done</button>
-    <div class="confirmed-tag">${formatTime(new Date().toISOString())}</div>
-  `;
-  // Remove flashing
-  btn.closest('.job-card').classList.remove('flashing');
-  // Re-render section count
+function escHtml(v) {
+  return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function loadBoard() {
+  try {
+    const r = await fetch(API, {cache:'no-store'});
+    if (!r.ok) throw new Error('failed');
+    boardState = await r.json();
+  } catch {
+    // Keep last state if refresh fails
+  }
   render();
 }
 
-// ─── CLOCK ────────────────────────────────────────────────────────────────
 function updateClock() {
-  const now = new Date();
-  document.getElementById('clock').textContent = now.toLocaleTimeString('en-US', {
-    hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true
-  });
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true});
 }
 
-// ─── INIT ────────────────────────────────────────────────────────────────
 updateClock();
 setInterval(updateClock, 1000);
-fetchJobs();
-setInterval(fetchJobs, POLL_MS);
+loadBoard();
+setInterval(loadBoard, POLL_MS);
 </script>
 </body>
 </html>
