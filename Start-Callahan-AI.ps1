@@ -49,7 +49,7 @@ Start-Sleep -Seconds 3
 
 Start-CallahanService `
     -Name "Cloudflare tunnel" `
-    -Command ".\cloudflared.exe tunnel run shop-tasks"
+    -Command '.\cloudflared.exe tunnel --origincert "C:\Users\CallahanAi\.cloudflared\cert.pem" --config "C:\Users\CallahanAi\.cloudflared\config.yml" run shop-tasks'
 
 Start-Sleep -Seconds 8
 
