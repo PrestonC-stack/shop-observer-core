@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-05-18T18:20:00-07:00",
+  "active_jobs": [
+    {
+      "ro_number": "4782",
+      "vehicle": "2021 Ford F-250",
+      "customer": "Mike Thompson",
+      "priority_lane": "P1",
+      "status": "Waiting Parts",
+      "assigned_advisor": "Drew",
+      "waiting_on": "Parts - ETA tomorrow 10am",
+      "last_activity": "2026-05-18T14:30:00",
+      "customer_comms_last": "2026-05-18T09:45:00"
+    },
+    {
+      "ro_number": "4791",
+      "vehicle": "2018 Chevy Silverado",
+      "customer": "Sarah Patel",
+      "priority_lane": "P2",
+      "status": "Ready for Estimate",
+      "assigned_advisor": "Preston",
+      "waiting_on": "Advisor",
+      "last_activity": "2026-05-18T11:20:00",
+      "customer_comms_last": "2026-05-17T16:00:00"
+    }
+  ]
+}

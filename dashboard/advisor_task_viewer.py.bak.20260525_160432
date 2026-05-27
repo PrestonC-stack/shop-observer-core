@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import json
 import os
 import re
@@ -2210,11 +2209,14 @@ def bay_performance():
 </body>
 </html>"""
     return Response(html, mimetype="text/html")
-=======
-from app import app
->>>>>>> a6b3032faea9b5600681b23c34dab50635256b7d
 
 
 if __name__ == "__main__":
-    print(" Starting Country Club Advisor Command Board on 127.0.0.1:8080")
+    print(" Starting Country Club Advisor Command Board on 127.0.0.1:5000")
     app.run(host="127.0.0.1", port=8080, debug=False, threaded=True, use_reloader=False)
+
+
+
+
+
+
