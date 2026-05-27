@@ -108,14 +108,14 @@ if (-not (Test-Administrator)) {
 
 Assert-PathExists -Path $RuntimeRoot -Description "Runtime root"
 Assert-PathExists -Path $DashboardRoot -Description "Dashboard directory"
-Assert-PathExists -Path (Join-Path $DashboardRoot "advisor_task_viewer.py") -Description "Dashboard app"
+Assert-PathExists -Path (Join-Path $DashboardRoot "app.py") -Description "Dashboard app"
 Assert-PathExists -Path (Join-Path $RuntimeRoot "webhooks\autoflow_webhook_receiver.py") -Description "Webhook receiver"
 Assert-PathExists -Path (Join-Path $RuntimeRoot "cloudflared.exe") -Description "Cloudflare tunnel binary"
 
 Register-CallahanTask `
     -TaskName "CallahanAI-Board" `
-    -WorkingDirectory $DashboardRoot `
-    -RunCommand "python advisor_task_viewer.py" `
+    -WorkingDirectory $RuntimeRoot `
+    -RunCommand "python dashboard\app.py" `
     -DelaySeconds 10
 
 Register-CallahanTask `
