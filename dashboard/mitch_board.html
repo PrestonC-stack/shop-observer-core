@@ -224,12 +224,65 @@ function saveNote(ro, value) {
   else delete notes[key];
   localStorage.setItem('mitch_notes', JSON.stringify(notes));
 }
-function minsAgo(iso) { if (!iso) return 0; return Math.floor((Date.now() - new Date(iso)) / 60000); }
-function fmtMins(m) { return m < 60 ? m + 'm' : Math.floor(m/60) + 'h ' + (m%60) + 'm'; }
+function minsAgo(iso) {
+  if (!iso) return null;
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return Math.max(0, Math.floor((Date.now() - parsed) / 60000));
+}
+function fmtMins(m) { if (m === null || m === undefined) return '?'; return m < 60 ? m + 'm' : Math.floor(m/60) + 'h ' + (m%60) + 'm'; }
 function fmtTime(iso) { return new Date(iso).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}); }
 function statusMatch(job, statuses) {
   const s = (job.workflow_status || job.autoflow_status || job.status || '').toLowerCase().trim();
   return statuses.some(st => s === st.toLowerCase());
+}
+function bucketOptions(currentStatus) {
+  const current = String(currentStatus || '').toLowerCase().trim();
+  return `<option value="">Move step...</option>` + BUCKETS.map(b => {
+    const value = b.statuses[0];
+    const selected = current === value ? 'selected' : '';
+    return `<option value="${escHtml(value)}" ${selected}>${escHtml(b.step + ' - ' + b.title)}</option>`;
+  }).join('');
+}
+async function postConfirmation(ro, bucketId, mins) {
+  try {
+    const bucket = BUCKETS.find(b => b.id === bucketId) || {};
+    await fetch('/api/confirm-step', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        ro,
+        advisor: 'Mitch',
+        step: bucket.title || bucketId,
+        mins_taken: mins,
+        source: 'mitch_board',
+      }),
+    });
+    return true;
+  } catch (err) {
+    console.warn('confirmation server post failed; localStorage backup kept', err);
+    return false;
+  }
+}
+async function handleOverride(ro, fromStatus, select) {
+  const toStatus = select.value;
+  if (!toStatus) return;
+  try {
+    await fetch('/api/override-job', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        ro,
+        advisor: 'Mitch',
+        from_status: fromStatus || '',
+        to_status: toStatus,
+        source: 'mitch_board',
+      }),
+    });
+    await loadBoard();
+  } catch (err) {
+    console.warn('override post failed', err);
+  }
 }
 function escHtml(v) {
   return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -245,7 +298,7 @@ function render() {
     mitchJobs.filter(j => statusMatch(j, b.statuses)).forEach(j => {
       if (getConfirm(j.ro, b.id)) return;
       const mins = minsAgo(j.status_updated_at);
-      if (mins > b.timing * 0.5 && b.callieUrgent && !urgentMessage) {
+      if (mins !== null && mins > b.timing * 0.5 && b.callieUrgent && !urgentMessage) {
         urgentMessage = b.callieUrgent(j, mins);
       }
     });
@@ -269,7 +322,8 @@ function render() {
   BUCKETS.forEach(b => {
     mitchJobs.filter(j => statusMatch(j, b.statuses)).forEach(j => {
       if (getConfirm(j.ro, b.id)) { doneToday++; return; }
-      if (minsAgo(j.status_updated_at) > b.timing) overdue++; else inQueue++;
+      const mins = minsAgo(j.status_updated_at);
+      if (mins !== null && mins > b.timing) overdue++; else inQueue++;
     });
   });
 
@@ -303,8 +357,14 @@ function render() {
       .sort((a,c) => minsAgo(c.status_updated_at) - minsAgo(a.status_updated_at));
 
     const unconfirmed = bucketJobs.filter(j => !getConfirm(j.ro, b.id));
-    const anyOverdue = unconfirmed.some(j => minsAgo(j.status_updated_at) > b.timing);
-    const anyWarn = unconfirmed.some(j => minsAgo(j.status_updated_at) > b.timing * 0.6);
+    const anyOverdue = unconfirmed.some(j => {
+      const mins = minsAgo(j.status_updated_at);
+      return mins !== null && mins > b.timing;
+    });
+    const anyWarn = unconfirmed.some(j => {
+      const mins = minsAgo(j.status_updated_at);
+      return mins !== null && mins > b.timing * 0.6;
+    });
 
     const laneClass = b.isMoney && unconfirmed.length > 0 ? 'lane-money pulse-money' :
                       b.urgent && anyOverdue ? 'lane-urgent pulse-urgent' :
@@ -326,19 +386,20 @@ function render() {
       bucketJobs.forEach(j => {
         const conf = getConfirm(j.ro, b.id);
         const mins = minsAgo(j.status_updated_at);
-        const isOverdue = mins > b.timing;
-        const isWarn = mins > b.timing * 0.6;
+        const isOverdue = mins !== null && mins > b.timing;
+        const isWarn = mins !== null && mins > b.timing * 0.6;
         const timeClass = isOverdue ? 'overdue-time' : isWarn ? 'warn-time' : 'ok-time';
         const ro = String(j.ro || '');
         const note = getNote(ro);
         const noteBadge = note ? `<span class="text-[10px] mono text-violet-300 bg-violet-950/40 border border-violet-800 rounded-full px-2 py-0.5">note</span>` : '';
+        const currentStatus = j.workflow_status || j.autoflow_status || j.status || '';
 
         const confirmHtml = conf
           ? `<div class="text-right">
                <div class="text-[10px] text-emerald-500 mono">✓ confirmed</div>
                <div class="text-[10px] text-zinc-600 mono">${fmtTime(conf.ts)}</div>
              </div>`
-          : `<button class="confirm-btn" onclick="handleConfirm('${j.ro}','${b.id}',${mins},this)">
+          : `<button class="confirm-btn" onclick="handleConfirm('${escJs(ro)}','${b.id}',${mins === null ? 'null' : mins},this)">
                Confirm Done
              </button>`;
 
@@ -359,6 +420,10 @@ function render() {
                 <div class="callie-bubble rounded-xl px-3 py-2 text-xs text-zinc-300 leading-relaxed">
                   ${escHtml(b.action)}
                 </div>
+                <select
+                  class="mt-3 w-full rounded-xl bg-zinc-950/80 border border-zinc-800 px-3 py-2 text-xs text-zinc-300 outline-none"
+                  onchange="handleOverride('${escJs(ro)}', '${escJs(currentStatus)}', this)"
+                >${bucketOptions(currentStatus)}</select>
                 <textarea
                   class="mt-3 w-full h-8 focus:h-24 rounded-xl bg-zinc-950/80 border border-zinc-800 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none transition-all"
                   placeholder="Add Mitch note..."
@@ -400,6 +465,7 @@ function render() {
           const ro = String(j.ro || '');
           const note = getNote(ro);
           const noteBadge = note ? `<span class="text-[10px] mono text-violet-300 bg-violet-950/40 border border-violet-800 rounded-full px-2 py-0.5">note</span>` : '';
+          const currentStatus = j.workflow_status || j.autoflow_status || j.status || '';
           return `
             <div class="job-card rounded-2xl p-4 mx-3 mb-3">
               <div class="flex items-center justify-between gap-3 mb-2">
@@ -411,8 +477,12 @@ function render() {
                   </div>
                   <div class="text-xs text-zinc-400">${escHtml(j.vehicle || '')}</div>
                 </div>
-                <div class="text-[10px] mono text-zinc-500 uppercase">${escHtml(j.workflow_status || j.autoflow_status || j.status || 'unknown')}</div>
+                <div class="text-[10px] mono text-zinc-500 uppercase">${escHtml(currentStatus || 'unknown')}</div>
               </div>
+              <select
+                class="mb-3 w-full rounded-xl bg-zinc-950/80 border border-zinc-800 px-3 py-2 text-xs text-zinc-300 outline-none"
+                onchange="handleOverride('${escJs(ro)}', '${escJs(currentStatus)}', this)"
+              >${bucketOptions(currentStatus)}</select>
               <textarea
                 class="w-full h-8 focus:h-24 rounded-xl bg-zinc-950/80 border border-zinc-800 px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none transition-all"
                 placeholder="Add Mitch note..."
@@ -437,7 +507,8 @@ function render() {
   document.getElementById('main-content').innerHTML = html;
 }
 
-function handleConfirm(ro, bucketId, mins, btn) {
+async function handleConfirm(ro, bucketId, mins, btn) {
+  await postConfirmation(ro, bucketId, mins);
   const msg = saveConfirm(ro, bucketId, mins);
   const card = btn.closest('.job-card');
   btn.outerHTML = `<div class="text-right">

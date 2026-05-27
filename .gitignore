@@ -12,4 +12,5 @@ state/board_state.json
 state/board_actions.jsonl
 state/hermes_feedback.jsonl
 state/board_overrides.jsonl
+state/confirmations.jsonl
 data/callie_insights.json
