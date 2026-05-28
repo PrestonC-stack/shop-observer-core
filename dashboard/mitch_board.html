@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mitch — Callahan Command Board</title>
+<title>Mitch - Callahan Command Board</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;900&family=DM+Mono:wght@400;500&display=swap');
@@ -91,7 +91,7 @@
         <div class="w-8 h-8 rounded-full bg-gradient-to-br from-orange-600 to-orange-800 flex items-center justify-center text-xs font-black text-white">MC</div>
         <div>
           <div class="text-sm font-bold leading-none">Mitch</div>
-          <div class="text-[10px] text-zinc-500 mono uppercase tracking-wider mt-0.5">Lead Advisor — Customer</div>
+          <div class="text-[10px] text-zinc-500 mono uppercase tracking-wider mt-0.5">Lead Advisor - Customer</div>
         </div>
       </div>
     </div>
@@ -111,7 +111,7 @@
 <div id="callie-banner" class="hidden px-6 pt-4">
   <div class="callie-alert">
     <div class="flex items-start gap-3">
-      <div class="text-violet-400 text-lg mt-0.5">◆</div>
+      <div class="text-violet-400 text-lg mt-0.5">[Callie]</div>
       <div>
         <div class="text-[10px] mono text-violet-400 uppercase tracking-widest mb-1">Callie</div>
         <div class="text-sm text-zinc-100 leading-relaxed" id="callie-banner-text"></div>
@@ -131,69 +131,69 @@ const ADVISOR = 'mitch';
 
 const CALLIE = {
   estimateReady: (ro, customer) =>
-    `Mitch — Drew has the estimate structure ready for RO ${ro}, ${customer}. It needs your pricing and your review before it goes anywhere near the customer. Take a look and let's get this one moving.`,
+    `Mitch - Drew has the estimate structure ready for RO ${ro}, ${customer}. It needs your pricing and your review before it goes anywhere near the customer. Take a look and let's get this one moving.`,
   approvalOverdue: (ro, customer, mins) =>
-    `Mitch, ${customer} on RO ${ro} has been in Waiting Approval for ${mins} minutes. They're probably wondering what's next. Give them a call — answer their questions, close what you can, and let's keep this one from going cold.`,
+    `Mitch, ${customer} on RO ${ro} has been in Waiting Approval for ${mins} minutes. They're probably wondering what's next. Give them a call - answer their questions, close what you can, and let's keep this one from going cold.`,
   readyCar: (ro, customer, mins) =>
-    `${customer}'s vehicle has been Ready for ${mins} minutes on RO ${ro}. That's cash sitting on the lot. Give them a call right now — confirm pickup, walk them through what was done, and offer to schedule anything they declined.`,
+    `${customer}'s vehicle has been Ready for ${mins} minutes on RO ${ro}. That's cash sitting on the lot. Give them a call right now - confirm pickup, walk them through what was done, and offer to schedule anything they declined.`,
   intakeReady: (customer) =>
-    `Mitch — ${customer} is here. Get their full concern in their own words, ask any clarifying questions if it's vague, and make sure they leave knowing we'll call them with findings before we do anything. Then hand the concern to Drew for CAS Phase 1.`,
+    `Mitch - ${customer} is here. Get their full concern in their own words, ask any clarifying questions if it's vague, and make sure they leave knowing we'll call them with findings before we do anything. Then hand the concern to Drew for CAS Phase 1.`,
   confirmResponse: (step, ro, next, mins) =>
-    `Logged — ${step} confirmed for RO ${ro} at ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}. That took ${mins} minutes. Next step: ${next}.`,
+    `Logged - ${step} confirmed for RO ${ro} at ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}. That took ${mins} minutes. Next step: ${next}.`,
 };
 
 const BUCKETS = [
   {
-    id: 'unknown', step: 'STEP 1', title: 'Needs Attention — Status Unknown',
+    id: 'unknown', step: 'STEP 1', title: 'Needs Attention - Status Unknown',
     statuses: ['unknown'],
     timing: 20, urgent: true,
-    action: 'Check AutoFlow · clarify what is happening · update status immediately',
-    help: 'This job has no clear status. Find out where it stands in AutoFlow and update it. Unknown jobs are invisible — they fall through the cracks.',
+    action: 'Check AutoFlow - clarify what is happening - update status immediately',
+    help: 'This job has no clear status. Find out where it stands in AutoFlow and update it. Unknown jobs are invisible - they fall through the cracks.',
     nextStep: 'Update status in AutoFlow',
-    callieUrgent: (j, mins) => `Mitch — RO ${j.ro}, ${j.customer || 'Unknown'} has been sitting with no clear status for ${mins} minutes. What is happening with this one? Let's get it moving.`,
+    callieUrgent: (j, mins) => `Mitch - RO ${j.ro}, ${j.customer || 'Unknown'} has been sitting with no clear status for ${mins} minutes. What is happening with this one? Let's get it moving.`,
   },
   {
-    id: 'call_shop', step: 'STEP 2', title: 'Call Shop — Customer Follow Up Needed',
+    id: 'call_shop', step: 'STEP 2', title: 'Call Shop - Customer Follow Up Needed',
     statuses: ['call_shop'],
     timing: 30, urgent: true,
-    action: 'Call or text customer now · answer questions · get approval or decision · document outcome',
-    help: 'This job needs a customer call. Pick up the phone — answer their questions, address concerns, get a decision. Document the outcome in AutoFlow. Do not let call_shop jobs sit. Every hour without contact is an hour closer to losing the job.',
+    action: 'Call or text customer now - answer questions - get approval or decision - document outcome',
+    help: 'This job needs a customer call. Pick up the phone - answer their questions, address concerns, get a decision. Document the outcome in AutoFlow. Do not let call_shop jobs sit. Every hour without contact is an hour closer to losing the job.',
     nextStep: 'Document outcome and move job to next status',
-    callieUrgent: (j, mins) => `Mitch — ${j.customer || 'Unknown'} on RO ${j.ro} has been waiting ${mins} minutes for a call. They are probably wondering what is going on. Give them a call right now and let's keep this one moving.`,
+    callieUrgent: (j, mins) => `Mitch - ${j.customer || 'Unknown'} on RO ${j.ro} has been waiting ${mins} minutes for a call. They are probably wondering what is going on. Give them a call right now and let's keep this one moving.`,
   },
   {
-    id: 'approval', step: 'STEP 3', title: 'Waiting Approval — Follow Up Now',
+    id: 'approval', step: 'STEP 3', title: 'Waiting Approval - Follow Up Now',
     statuses: ['waiting_approval'],
     timing: 45, urgent: true,
-    action: 'Call or text customer · close what you can · document approved and declined · move forward',
+    action: 'Call or text customer - close what you can - document approved and declined - move forward',
     help: 'Customer has not approved yet. Do not wait for them to call you. Pick up the phone, answer their questions, and close what you can. Document everything in AutoFlow: approved, partially approved, or declined.',
     nextStep: 'Order parts immediately if approved',
-    callieUrgent: (j, mins) => `Mitch, ${j.customer || 'Unknown'} on RO ${j.ro} has been in Waiting Approval for ${mins} minutes. They are probably wondering what is next. Give them a call — let's close this one out.`,
+    callieUrgent: (j, mins) => `Mitch, ${j.customer || 'Unknown'} on RO ${j.ro} has been in Waiting Approval for ${mins} minutes. They are probably wondering what is next. Give them a call - let's close this one out.`,
   },
   {
-    id: 'parts', step: 'STEP 4', title: 'Parts — Monitor ETA & Update Customer',
+    id: 'parts', step: 'STEP 4', title: 'Parts - Monitor ETA & Update Customer',
     statuses: ['parts'],
     timing: 120, urgent: false,
-    action: 'Check parts status · update customer proactively if delayed · tell Drew immediately when parts arrive',
+    action: 'Check parts status - update customer proactively if delayed - tell Drew immediately when parts arrive',
     help: 'Do not let parts jobs go silent. Check the status. If arrived: tell Drew right away so he can verify and stage them. If delayed: call the customer before they call you. A proactive call keeps trust. A reactive call loses it.',
     nextStep: 'Tell Drew when parts arrive',
   },
   {
-    id: 'servicing', step: 'STEP 5', title: 'In Production — Start Closeout Prep',
+    id: 'servicing', step: 'STEP 5', title: 'In Production - Start Closeout Prep',
     statuses: ['servicing'],
     timing: 90, urgent: false,
-    action: 'Job is being worked on — review RO · check for adds or removes · confirm payment method',
+    action: 'Job is being worked on - review RO - check for adds or removes - confirm payment method',
     help: 'Start prepping now while the job is still in production. Review the RO, check if anything was added or removed during service, verify the payment method is on file. Getting ahead of the job separates a smooth closeout from a scramble.',
     nextStep: 'Be ready to close immediately when Ready status hits',
   },
   {
-    id: 'ready', step: 'STEP 6', title: 'Ready — Close with Customer NOW',
+    id: 'ready', step: 'STEP 6', title: 'Ready - Close with Customer NOW',
     statuses: ['ready'],
     timing: 15, urgent: true,
     isMoney: true,
-    action: 'Call customer immediately · walk them through what was done · confirm pickup · collect payment',
+    action: 'Call customer immediately - walk them through what was done - confirm pickup - collect payment',
     help: 'The vehicle is done. Call or text the customer right now. Walk them through everything completed. Remind them of anything they declined and offer to schedule it. A car sitting in Ready is money sitting on the lot uncollected.',
-    nextStep: 'Vehicle delivered — RO closed',
+    nextStep: 'Vehicle delivered - RO closed',
     callieUrgent: (j, mins) => `${j.customer || 'Unknown'}'s vehicle has been Ready for ${mins} minutes on RO ${j.ro}. That is cash sitting on the lot. Give them a call right now.`,
   },
 ];
@@ -396,7 +396,7 @@ function render() {
 
         const confirmHtml = conf
           ? `<div class="text-right">
-               <div class="text-[10px] text-emerald-500 mono">✓ confirmed</div>
+               <div class="text-[10px] text-emerald-500 mono">[confirmed] confirmed</div>
                <div class="text-[10px] text-zinc-600 mono">${fmtTime(conf.ts)}</div>
              </div>`
           : `<button class="confirm-btn" onclick="handleConfirm('${escJs(ro)}','${b.id}',${mins === null ? 'null' : mins},this)">
@@ -449,7 +449,7 @@ function render() {
           </button>
         </div>
         <div id="help-${b.id}" class="help-panel px-5 py-3 border-b border-white/5 bg-zinc-900/50">
-          <div class="text-[10px] mono text-violet-400 uppercase tracking-widest mb-2">◆ Callie</div>
+          <div class="text-[10px] mono text-violet-400 uppercase tracking-widest mb-2">[Callie] Callie</div>
           <p class="text-xs text-zinc-300 leading-relaxed">${escHtml(b.help)}</p>
         </div>
         <div class="pt-3 pb-1">${cardsHtml}</div>
@@ -512,12 +512,12 @@ async function handleConfirm(ro, bucketId, mins, btn) {
   const msg = saveConfirm(ro, bucketId, mins);
   const card = btn.closest('.job-card');
   btn.outerHTML = `<div class="text-right">
-    <div class="text-[10px] text-emerald-500 mono">✓ confirmed</div>
+    <div class="text-[10px] text-emerald-500 mono">[confirmed] confirmed</div>
     <div class="text-[10px] text-zinc-600 mono">${fmtTime(new Date().toISOString())}</div>
   </div>`;
   const callieDiv = card.querySelector('.callie-bubble');
   if (callieDiv) {
-    callieDiv.innerHTML = `<span class="text-violet-400 mono text-[10px]">◆ Callie — </span>${escHtml(msg)}`;
+    callieDiv.innerHTML = `<span class="text-violet-400 mono text-[10px]">[Callie] Callie - </span>${escHtml(msg)}`;
   }
   card.classList.remove('pulse-urgent','pulse-money');
   setTimeout(render, 500);

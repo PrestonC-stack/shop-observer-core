@@ -36,7 +36,7 @@ Clear-Host
 Set-Location '$escapedRoot'
 while (`$true) {
     Write-Host "================================" -ForegroundColor White
-    Write-Host "$escapedServiceName — Starting..." -ForegroundColor White
+    Write-Host "$escapedServiceName - Starting..." -ForegroundColor White
     Write-Host "Port: $escapedPortLabel" -ForegroundColor White
     Write-Host "Started: `$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor White
     Write-Host "================================" -ForegroundColor White
@@ -76,7 +76,7 @@ if (-not (Test-Path -LiteralPath $RuntimeRoot)) {
     Add-Type -AssemblyName PresentationFramework
     [System.Windows.MessageBox]::Show(
         "Runtime folder not found:`n`n$RuntimeRoot",
-        "Callahan AI — Start Failed",
+        "Callahan AI - Start Failed",
         'OK',
         'Error'
     ) | Out-Null
@@ -86,7 +86,7 @@ if (-not (Test-Path -LiteralPath $RuntimeRoot)) {
 Set-Location $RuntimeRoot
 
 Start-CallahanServiceWindow `
-    -WindowTitle "CALLAHAN BOARD — Port 8080" `
+    -WindowTitle "CALLAHAN BOARD - Port 8080" `
     -BackgroundColor "DarkBlue" `
     -ForegroundColor "White" `
     -ServiceName "CALLAHAN BOARD" `
@@ -96,7 +96,7 @@ Start-CallahanServiceWindow `
 Start-Sleep -Seconds 4
 
 Start-CallahanServiceWindow `
-    -WindowTitle "CALLAHAN WEBHOOK — Port 5055" `
+    -WindowTitle "CALLAHAN WEBHOOK - Port 5055" `
     -BackgroundColor "DarkGreen" `
     -ForegroundColor "White" `
     -ServiceName "CALLAHAN WEBHOOK" `
@@ -106,7 +106,7 @@ Start-CallahanServiceWindow `
 Start-Sleep -Seconds 3
 
 Start-CallahanServiceWindow `
-    -WindowTitle "CALLAHAN TUNNEL — Cloudflare" `
+    -WindowTitle "CALLAHAN TUNNEL - Cloudflare" `
     -BackgroundColor "DarkMagenta" `
     -ForegroundColor "White" `
     -ServiceName "CALLAHAN TUNNEL" `
@@ -118,15 +118,15 @@ Start-Sleep -Seconds 3
 Add-Type -AssemblyName PresentationFramework
 [System.Windows.MessageBox]::Show(
     "3 windows are now open and labeled:`n`n" +
-    "🔵 BOARD (blue) — http://127.0.0.1:8080`n" +
-    "🟢 WEBHOOK (green) — Port 5055`n" +
-    "🟣 TUNNEL (purple) — Cloudflare active`n`n" +
+    "[BOARD] BOARD (blue) - http://127.0.0.1:8080`n" +
+    "[WEBHOOK] WEBHOOK (green) - Port 5055`n" +
+    "[TUNNEL] TUNNEL (purple) - Cloudflare active`n`n" +
     "Board: https://tasks.callahanautoaz.net`n" +
     "Drew: https://tasks.callahanautoaz.net/drew`n" +
     "Mitch: https://tasks.callahanautoaz.net/mitch`n`n" +
     "Each window auto-restarts if it crashes.`n" +
     "You can minimize them but do not close them.",
-    "Callahan AI — All Systems Running",
+    "Callahan AI - All Systems Running",
     'OK',
     'Information'
 ) | Out-Null

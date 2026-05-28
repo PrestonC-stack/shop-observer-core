@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Drew — Callahan Command Board</title>
+<title>Drew - Callahan Command Board</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;900&family=DM+Mono:wght@400;500&display=swap');
@@ -114,7 +114,7 @@
 <div id="callie-banner" class="hidden px-6 pt-4">
   <div class="callie-alert">
     <div class="flex items-start gap-3">
-      <div class="text-violet-400 text-lg mt-0.5">◆</div>
+      <div class="text-violet-400 text-lg mt-0.5">[Callie]</div>
       <div>
         <div class="text-[10px] mono text-violet-400 uppercase tracking-widest mb-1">Callie</div>
         <div class="text-sm text-zinc-100 leading-relaxed" id="callie-banner-text"></div>
@@ -133,56 +133,56 @@ const API = '/api/board-state';
 const POLL_MS = 30000;
 const ADVISOR = 'drew';
 
-// ── Callie's voice for Drew ───────────────────────────────────────
+// -- Callie's voice for Drew ---------------------------------------
 const CALLIE = {
   dviReady: (ro, customer, tech, mins) =>
-    `RO ${ro} — ${customer}'s vehicle has been in DVI Updates for ${mins} minutes. ${tech} finished the inspection. You've got a tight window before the estimate slot closes today — want to knock this out now while the car's still on the rack?`,
+    `RO ${ro} - ${customer}'s vehicle has been in DVI Updates for ${mins} minutes. ${tech} finished the inspection. You've got a tight window before the estimate slot closes today - want to knock this out now while the car's still on the rack?`,
   dviOverdue: (ro, customer, mins) =>
-    `Drew, RO ${ro} — ${customer} has been waiting ${mins} minutes for the DVI review. That's past the window. Let's get Phase 2 running right now so Mitch can build the estimate and we don't lose the day on this one.`,
+    `Drew, RO ${ro} - ${customer} has been waiting ${mins} minutes for the DVI review. That's past the window. Let's get Phase 2 running right now so Mitch can build the estimate and we don't lose the day on this one.`,
   estimateReady: (ro, customer) =>
-    `The structure on RO ${ro} for ${customer} is ready for Mitch — but it needs your audit pass first. Shouldn't take long. Let's make sure nothing's missing before it goes to the customer.`,
+    `The structure on RO ${ro} for ${customer} is ready for Mitch - but it needs your audit pass first. Shouldn't take long. Let's make sure nothing's missing before it goes to the customer.`,
   qcReady: (ro, customer) =>
-    `RO ${ro} — ${customer}'s vehicle is ready for your QC check. Take a quick walk around before we call it done. This is the last line of defense before the customer sees it.`,
+    `RO ${ro} - ${customer}'s vehicle is ready for your QC check. Take a quick walk around before we call it done. This is the last line of defense before the customer sees it.`,
   finalizeReady: (ro, customer) =>
-    `RO ${ro} — ${customer}'s ticket needs to be finalized and handed to Mitch. Clean up the notes, confirm the charges match, and let's get this one closed out.`,
+    `RO ${ro} - ${customer}'s ticket needs to be finalized and handed to Mitch. Clean up the notes, confirm the charges match, and let's get this one closed out.`,
   morningGreeting: (name, count, firstPriority) =>
     `Good morning, ${name}. You've got ${count} active jobs today. Your first priority is ${firstPriority}. Let's make it a strong one.`,
   nothingOverdue: () =>
-    `You're in good shape right now — nothing overdue. Keep the momentum going and stay ahead of the DVIs when they land.`,
+    `You're in good shape right now - nothing overdue. Keep the momentum going and stay ahead of the DVIs when they land.`,
   confirmResponse: (step, ro, nextStep, mins) =>
-    `Got it — ${step} logged for RO ${ro} at ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}. That took ${mins} minutes. Next: ${nextStep}.`,
+    `Got it - ${step} logged for RO ${ro} at ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}. That took ${mins} minutes. Next: ${nextStep}.`,
 };
 
-// ── Drew's workflow buckets ────────────────────────────────────────
+// -- Drew's workflow buckets ----------------------------------------
 const BUCKETS = [
   {
-    id: 'unknown', step: 'STEP 1', title: 'Needs Attention — Status Unknown',
+    id: 'unknown', step: 'STEP 1', title: 'Needs Attention - Status Unknown',
     statuses: ['unknown'],
     timing: 20, urgent: true,
-    action: 'Check AutoFlow · clarify what is happening with this job · update status',
-    help: 'This job has no clear status. Check AutoFlow and find out where it actually stands. Update the status so the board can route it correctly. Do not let unknown jobs sit — they are invisible to everyone.',
+    action: 'Check AutoFlow - clarify what is happening with this job - update status',
+    help: 'This job has no clear status. Check AutoFlow and find out where it actually stands. Update the status so the board can route it correctly. Do not let unknown jobs sit - they are invisible to everyone.',
     nextStep: 'Update status in AutoFlow so job routes correctly',
-    callieUrgent: (j, mins) => `Drew — RO ${j.ro}, ${j.customer || 'Unknown'} has been sitting with no clear status for ${mins} minutes. Something needs to happen here. Check AutoFlow and tell me where this one actually stands.`,
+    callieUrgent: (j, mins) => `Drew - RO ${j.ro}, ${j.customer || 'Unknown'} has been sitting with no clear status for ${mins} minutes. Something needs to happen here. Check AutoFlow and tell me where this one actually stands.`,
   },
   {
-    id: 'servicing', step: 'STEP 2', title: 'In Production — Monitor & Mid-Job Check',
+    id: 'servicing', step: 'STEP 2', title: 'In Production - Monitor & Mid-Job Check',
     statuses: ['servicing'],
     timing: 120, urgent: false,
-    action: 'Check tech progress · take mid-job photos on larger jobs · post activity update · notify Mitch if timeline changes',
-    help: 'Job is actively being worked on. On larger jobs — teardowns, engine work, gasket jobs, anything over 2 hours — take mid-job photos around the halfway point. Post a Tekmetric activity update with current stage, visible progress, and rough completion time. If the timeline is shifting, tell Mitch immediately so he can update the customer.',
+    action: 'Check tech progress - take mid-job photos on larger jobs - post activity update - notify Mitch if timeline changes',
+    help: 'Job is actively being worked on. On larger jobs - teardowns, engine work, gasket jobs, anything over 2 hours - take mid-job photos around the halfway point. Post a Tekmetric activity update with current stage, visible progress, and rough completion time. If the timeline is shifting, tell Mitch immediately so he can update the customer.',
     nextStep: 'Flag incoming soon when within 2 hours of completion',
   },
   {
-    id: 'parts', step: 'STEP 3', title: 'Parts — Verify Received & Staged',
+    id: 'parts', step: 'STEP 3', title: 'Parts - Verify Received & Staged',
     statuses: ['parts'],
     timing: 60, urgent: false,
-    action: 'Check if parts arrived · verify against RO · stage next to vehicle · update status',
+    action: 'Check if parts arrived - verify against RO - stage next to vehicle - update status',
     help: 'Check the parts status. If arrived: pull them, verify every part against the RO, and stage them next to the vehicle. Update AutoFlow so the board reflects reality. If still waiting: confirm the ETA with the supplier and make sure Mitch has updated the customer.',
     nextStep: 'Notify Mitch when parts are staged and ready to go',
   },
 ];
 
-// ── State ─────────────────────────────────────────────────────────
+// -- State ---------------------------------------------------------
 let boardState = null;
 let confirmations = JSON.parse(localStorage.getItem('drew_confirms') || '{}');
 let notes = JSON.parse(localStorage.getItem('drew_notes') || '{}');
@@ -296,7 +296,7 @@ async function handleOverride(ro, fromStatus, select) {
   }
 }
 
-// ── Render ────────────────────────────────────────────────────────
+// -- Render --------------------------------------------------------
 function render() {
   if (!boardState) return;
   const jobs = boardState.jobs || [];
@@ -401,7 +401,7 @@ function render() {
 
         const confirmHtml = conf
           ? `<div class="text-right">
-               <div class="text-[10px] text-emerald-500 mono">✓ confirmed</div>
+               <div class="text-[10px] text-emerald-500 mono">[confirmed] confirmed</div>
                <div class="text-[10px] text-zinc-600 mono">${fmtTime(conf.ts)}</div>
              </div>`
           : `<button class="confirm-btn" onclick="handleConfirm('${escJs(ro)}','${b.id}',${mins === null ? 'null' : mins},this)">
@@ -451,7 +451,7 @@ function render() {
           </button>
         </div>
         <div id="help-${b.id}" class="help-panel px-5 py-3 border-b border-white/5 bg-zinc-900/50">
-          <div class="text-[10px] mono text-violet-400 uppercase tracking-widest mb-2">◆ Callie</div>
+          <div class="text-[10px] mono text-violet-400 uppercase tracking-widest mb-2">[Callie] Callie</div>
           <p class="text-xs text-zinc-300 leading-relaxed">${escHtml(b.help)}</p>
         </div>
         <div class="pt-3 pb-1">${cardsHtml}</div>
@@ -515,13 +515,13 @@ async function handleConfirm(ro, bucketId, mins, btn) {
   // Update button area
   const card = btn.closest('.job-card');
   btn.outerHTML = `<div class="text-right">
-    <div class="text-[10px] text-emerald-500 mono">✓ confirmed</div>
+    <div class="text-[10px] text-emerald-500 mono">[confirmed] confirmed</div>
     <div class="text-[10px] text-zinc-600 mono">${fmtTime(new Date().toISOString())}</div>
   </div>`;
   // Show Callie response
   const callieDiv = card.querySelector('.callie-bubble');
   if (callieDiv) {
-    callieDiv.innerHTML = `<span class="text-violet-400 mono text-[10px]">◆ Callie — </span>${escHtml(msg)}`;
+    callieDiv.innerHTML = `<span class="text-violet-400 mono text-[10px]">[Callie] Callie - </span>${escHtml(msg)}`;
   }
   card.classList.remove('pulse-urgent');
   setTimeout(render, 500);
