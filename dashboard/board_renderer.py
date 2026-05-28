@@ -349,9 +349,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
             return (
                 '<div class="mt-3 flex flex-wrap gap-2">' +
-                    '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + phoneCls + '" data-helper="communication" data-ro="' + escapeHtml(job.ro || "") + '" type="button">&#9990; Communication</button>' +
-                    '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + clockCls + '" data-helper="productivity" data-ro="' + escapeHtml(job.ro || "") + '" type="button">â± Productivity</button>' +
-                    '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + dataCls + '" data-helper="data" data-ro="' + escapeHtml(job.ro || "") + '" type="button">ðŸ§  Data</button>' +
+                    '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + phoneCls + '" data-helper="communication" data-ro="' + escapeHtml(job.ro || "") + '" type="button">[CALL] Communication</button>' +
+                    '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + clockCls + '" data-helper="productivity" data-ro="' + escapeHtml(job.ro || "") + '" type="button">Productivity</button>' +
+                    '<button class="chip-button helper-chip rounded-full border px-3 py-1 text-xs font-semibold' + dataCls + '" data-helper="data" data-ro="' + escapeHtml(job.ro || "") + '" type="button">Data</button>' +
                 '</div>'
             );
         }
@@ -834,10 +834,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 '<div class="rounded-2xl bg-zinc-900 p-4">' +
                     '<div class="text-xs uppercase tracking-wide text-zinc-500">Action Center</div>' +
                     '<div class="mt-3 flex flex-wrap gap-2">' +
-                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="communication" type="button">&#9990; Customer Update</button>' +
-                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="productivity" type="button">â± Productivity Check</button>' +
-                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="data" type="button">ðŸ§  Board / Data Fix</button>' +
-                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="missing" type="button">âš  Missing Info</button>' +
+                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="communication" type="button">[CALL] Customer Update</button>' +
+                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="productivity" type="button">Productivity Check</button>' +
+                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="data" type="button">Board / Data Fix</button>' +
+                        '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="missing" type="button">[!] Missing Info</button>' +
                         '<button class="modal-mode rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800" data-mode="hermes" type="button">Ask Callie</button>' +
                     "</div>" +
                     '<div class="mt-4 text-sm font-semibold text-zinc-200" id="modal-mode-label">' + escapeHtml(labels[focusMode] || labels.details) + "</div>" +
@@ -923,7 +923,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         '<div>AutoFlow DVI: <span class="text-zinc-300">' + escapeHtml(sourceTruths.autoflow_dvi_status || "unknown") + '</span></div>' +
                         '<div>External / manual note: <span class="text-zinc-300">' + escapeHtml(sourceTruths.manual_external_status || "not connected") + '</span></div>' +
                         '<div class="pt-2 text-xs text-zinc-400">Primary source: ' + escapeHtml(sourceTruths.primary_source || "autoflow") + ' - Fallback: ' + escapeHtml(sourceTruths.fallback_source || "manual_review") + '</div>' +
-                        '<div class="text-xs text-zinc-500">Trust scores â€” AutoFlow: ' + escapeHtml(String(trustScores.autoflow || 90)) + ' - Manual review: ' + escapeHtml(String(trustScores.manual_review || 40)) + '</div>' +
+                        '<div class="text-xs text-zinc-500">Trust scores - AutoFlow: ' + escapeHtml(String(trustScores.autoflow || 90)) + ' - Manual review: ' + escapeHtml(String(trustScores.manual_review || 40)) + '</div>' +
                     '</div></div>' +
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Board Decision</div><div class="mt-2 space-y-2 text-sm text-zinc-100">' +
                         '<div>Chosen source: <span class="text-zinc-300">' + escapeHtml(boardChoice.chosen_source || "unknown") + '</span></div>' +
@@ -1348,7 +1348,7 @@ def _is_status_explainer_question(question):
 def _build_callie_prompt(question, job=None, mode="general"):
     insights = _load_callie_insights()
     prompt_lines = [
-        "You are Callie â€” calm, practical, supportive air-traffic-control copilot for Callahan Auto & Diesel.",
+        "You are Callie - calm, practical, supportive air-traffic-control copilot for Callahan Auto & Diesel.",
         f"Shop pulse: {_trim_text(insights.get('shop_summary', 'Busy shop'), 180)}",
         f"Interaction mode: {mode}",
     ]
