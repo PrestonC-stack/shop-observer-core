@@ -1,0 +1,6 @@
+# Callahan Auto & Diesel — Sprint 1 Dependencies
+# Install with: pip install -r requirements_sprint1.txt
+
+pyyaml>=6.0
+requests>=2.28.0
+python-dotenv>=1.0.0
