@@ -1,0 +1,116 @@
+# Callahan Auto & Diesel — DVI Gate Rules
+# Local deterministic rules only. No AI. No API calls.
+# Edit thresholds here without touching code.
+
+version: "1.0"
+
+# Item status values from AutoFlow API
+status_codes:
+  pass: "2"
+  concern: "1"
+  not_inspected: ""
+
+# Minimum photo requirement per flagged item
+photo_rules:
+  concern_requires_photo: true
+  min_photos_for_concern: 1
+
+# Notes that are considered too vague on their own
+vague_note_keywords:
+  - "needs brakes"
+  - "needs replacement"
+  - "needs repair"
+  - "bad"
+  - "worn"
+  - "leaking"
+  - "check"
+  - "needs diag"
+  - "recommend replace"
+  - "failed"
+  - "needs attention"
+  - "see notes"
+  - "monitor"
+  - "inspect"
+  - "needs work"
+
+# Minimum note length (chars) to not be flagged as blank
+min_note_length: 5
+
+# Categories that require measurements when flagged
+measurement_required_categories:
+  - "Brakes"
+  - "Tires"
+  - "Battery"
+
+# Keywords that indicate a measurement is present in a note
+measurement_keywords:
+  - "mm"
+  - "%"
+  - "psi"
+  - "cca"
+  - "volt"
+  - "inch"
+  - "tread"
+  - "pad"
+  - "rotor"
+  - "32nd"
+  - "good for"
+  - "remaining"
+
+# Brake-specific items that require measurements
+brake_items:
+  - "Front Pads"
+  - "Rear Pads / Shoes"
+  - "Front Rotors"
+  - "Rear Rotors / Drums"
+
+# Tire-specific items that require tread/psi data
+tire_items:
+  - "Tires"
+  - "LF"
+  - "RF"
+  - "LR"
+  - "RR"
+
+# Leak items that require location and severity
+leak_items:
+  - "Fluid Leaks"
+  - "Engine Oil"
+  - "Transmission Fluid"
+  - "Differential Fluid"
+  - "Power Steering Fluid"
+  - "Brake Fluid"
+  - "Coolant/antifreeze"
+
+# Safety categories — always evaluated regardless of status color
+safety_categories:
+  - "Brakes"
+  - "Tires"
+  - "Battery"
+
+# Safety items — always evaluated
+safety_items:
+  - "Front Pads"
+  - "Rear Pads / Shoes"
+  - "Front Rotors"
+  - "Rear Rotors / Drums"
+  - "Front Calipers"
+  - "Rear Calipers / Cylinders"
+  - "Brake Lines and Fittings"
+  - "Brake Hoses"
+  - "Tires"
+  - "Warning Lights"
+  - "Headlights"
+  - "Tail Lights"
+  - "Windshield and Windows"
+
+# Override settings
+overrides:
+  who_can_override_review: ["Drew", "Mitch", "Preston"]
+  who_can_override_rework_required: ["Drew", "Mitch", "Preston"]
+  override_requires_reason: true
+
+# Stale rework escalation
+stale_rework:
+  escalate_after_minutes: 45
+  escalate_to: "both_advisors"
