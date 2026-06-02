@@ -186,6 +186,6 @@ def save_slip(review: DVIReview, output_dir: str = "state/dvi_reviews") -> str:
     import os
     os.makedirs(output_dir, exist_ok=True)
     path = os.path.join(output_dir, f"rework_slip_{review.ro}.html")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(generate_html_slip(review))
     return path
