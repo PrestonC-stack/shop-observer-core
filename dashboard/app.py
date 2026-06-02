@@ -414,6 +414,33 @@ def bay_performance():
 
 
 
+
+from dashboard.dvi_page import render_dvi_page
+from pathlib import Path as _Path
+
+@app.route("/dvi")
+def dvi_workflow():
+    return render_dvi_page()
+
+@app.route("/dvi/slip/<ro>")
+def dvi_slip(ro):
+    slip_path = _Path(__file__).parent.parent / "state" / "dvi_reviews" / f"rework_slip_{ro}.html"
+    if slip_path.exists():
+        return slip_path.read_text(encoding="utf-8")
+    return "Slip not found", 404
+
+@app.route("/dvi/acknowledge/<ro>")
+def dvi_acknowledge(ro):
+    from core.state.state_manager import load_dvi_review, save_dvi_review
+    from core.timeline.job_timeline import log_advisor_acknowledged
+    review = load_dvi_review(ro)
+    if review:
+        review.advisor_acknowledged = True
+        save_dvi_review(review)
+        log_advisor_acknowledged(ro, "Advisor", "Acknowledged via board")
+    return f"<script>window.location='/dvi'</script>"
+
+
 if __name__ == "__main__":
     print(" Starting Country Club Advisor Command Board on 127.0.0.1:8080")
     app.run(host="127.0.0.1", port=8080, debug=False, threaded=True, use_reloader=False)
