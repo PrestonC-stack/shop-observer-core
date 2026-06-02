@@ -28,6 +28,8 @@ ACTIVE_ROS_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_active_ros_state.py"
 SHOP_STATE_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_shop_state.py"
 BOARD_STATE_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_board_state.py"
 
+
+from core.cas.dvi_trigger import handle_webhook_event
 app = Flask(__name__)
 bridge = HermesWebhookBridge()   # ← Hermes Bridge
 
@@ -164,6 +166,7 @@ def receive_autoflow_webhook():
 
     # Your original logic continues
     _append_event(payload, received_at)
+    handle_webhook_event(payload, received_at)
     _rebuild_advisor_tasks()
     state_rebuild = _rebuild_local_state()
     
