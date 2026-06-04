@@ -128,8 +128,16 @@ def render_dvi_page() -> str:
         if slip_path.exists():
             slip_link = f'<a href="/dvi/slip/{r["ro"]}" target="_blank" style="background:#c00;color:#fff;padding:3px 10px;border-radius:4px;font-size:12px;text-decoration:none;margin-left:8px;">Print Slip</a>'
 
+        result = r.get("result") or r.get("review_status", "")
+        acknowledged = bool(r.get("acknowledged") or r.get("advisor_acknowledged"))
+        pulse_class = ""
+        if not acknowledged and result == "REWORK_REQUIRED":
+            pulse_class = "pulse-red"
+        elif not acknowledged and result == "REVIEW":
+            pulse_class = "pulse-amber"
+
         attention_rows += f"""
-        <tr style="border-bottom:1px solid #333;">
+        <tr class="{pulse_class}" style="border-bottom:1px solid #333;">
             <td style="padding:10px;font-weight:bold;">RO {r['ro']}</td>
             <td style="padding:10px;">{r.get('customer','')}</td>
             <td style="padding:10px;">{r.get('vehicle','')}</td>
@@ -208,6 +216,16 @@ def render_dvi_page() -> str:
         table {{width:100%;border-collapse:collapse;background:#1a1a1a;border-radius:6px;overflow:hidden;}}
         th {{padding:10px;text-align:left;background:#222;color:#888;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;}}
         tr:hover {{background:#222;}}
+        .pulse-red, .pulse-red td {{animation:pulseRed 1.6s ease-in-out infinite;}}
+        .pulse-amber, .pulse-amber td {{animation:pulseAmber 1.8s ease-in-out infinite;}}
+        @keyframes pulseRed {{
+            0%,100% {{box-shadow:0 0 0 rgba(220,38,38,0);}}
+            50% {{box-shadow:0 0 18px rgba(220,38,38,0.85);}}
+        }}
+        @keyframes pulseAmber {{
+            0%,100% {{box-shadow:0 0 0 rgba(245,158,11,0);}}
+            50% {{box-shadow:0 0 18px rgba(245,158,11,0.85);}}
+        }}
         .timestamp {{color:#888;font-size:12px;}}
         @media print {{body{{background:#fff;color:#000;}} .nav{{display:none;}}}}
     </style>
