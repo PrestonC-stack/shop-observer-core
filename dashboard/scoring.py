@@ -62,8 +62,8 @@ def _load_latest_transition_timestamps(path=TRANSITIONS_PATH):
                 except json.JSONDecodeError:
                     continue
 
-                ro_number = str(event.get("ro_number") or "").strip()
-                timestamp = _parse_transition_timestamp(event.get("timestamp"))
+                ro_number = str(event.get("ro") or "").strip()
+                timestamp = _parse_transition_timestamp(event.get("received_at"))
                 if not ro_number or not timestamp:
                     continue
 
