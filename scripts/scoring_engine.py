@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 APPROVAL_STALE_HOURS = 4
@@ -12,9 +14,53 @@ INACTIVE_STATUSES = {"scheduled-not here","dvi only- not here","apache job","clo
 DREW_OWNED_STATUSES = {"online /stage","ready for tech","awaiting tech","testing","dvi updates","technical advisement","technical overview","servicing","qc","advisor qc review","advisor finalize ro","waiting parts"}
 MITCH_OWNED_STATUSES = {"drop off/ tow-in","advisor estimate","waiting approval","ordering parts","ready"}
 NEAR_CLOSEOUT_STATUSES = {"advisor finalize ro","advisor qc review","qc","ready"}
+TRANSITIONS_PATH = Path(__file__).resolve().parents[1] / "data" / "status_transitions" / "transitions.jsonl"
+latest_transition_by_ro = {}
 
 def _now_utc():
     return datetime.now(timezone.utc)
+
+def _parse_transition_received_at(value):
+    if not value:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
+
+def _load_latest_transition_by_ro():
+    latest = {}
+    try:
+        with TRANSITIONS_PATH.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                ro = str(event.get("ro") or "").strip()
+                received_at = _parse_transition_received_at(event.get("received_at"))
+                if not ro or received_at is None:
+                    continue
+
+                current = latest.get(ro)
+                if current is None or received_at > current:
+                    latest[ro] = received_at
+    except OSError:
+        return {}
+    return latest
+
+def _refresh_transition_cache():
+    global latest_transition_by_ro
+    latest_transition_by_ro = _load_latest_transition_by_ro()
+
+_refresh_transition_cache()
 
 def _hours_since(dt_value):
     if not dt_value:
@@ -74,6 +120,10 @@ def _etc_hours_remaining(job):
         return 999.0
 
 def _last_update_hours(job):
+    ro = str(job.get("ticket_reference") or job.get("invoice") or "").strip()
+    transition_ts = latest_transition_by_ro.get(ro)
+    if transition_ts is not None:
+        return round((_now_utc() - transition_ts).total_seconds() / 3600, 1)
     return _hours_since(job.get("last_updated_at") or job.get("last_activity_at") or job.get("generated_at"))
 
 def _last_customer_contact_hours(job):
@@ -290,6 +340,7 @@ def score_job(job):
     }
 
 def score_all_jobs(shop_state):
+    _refresh_transition_cache()
     priority_order = {"P1": 0, "P2A": 1, "P2B": 2, "P2C": 3, "P3": 4, "P4": 5}
     scored = []
     for job in shop_state.get("jobs", []):
