@@ -1,5 +1,4 @@
 import json
-import json
 import os
 from datetime import datetime, timedelta
 
@@ -15,6 +14,7 @@ WEBHOOK_EVENT_LOG_PATHS = [
     os.path.join(REPO_ROOT, "state", "webhook_events.jsonl"),
     os.path.join(REPO_ROOT, "data", "autoflow_events", "autoflow_webhook_events.jsonl"),
 ]
+
 
 def _append_jsonl(path, payload):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -41,6 +41,27 @@ def _read_jsonl(path):
     except Exception:
         return []
     return rows
+
+
+def _inject_dvi_status(jobs):
+    dvi_dir = os.path.join(REPO_ROOT, "state", "dvi_reviews")
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        ro = str(job.get("ro") or "").strip()
+        if not ro:
+            job["dvi_review_status"] = "NO_DVI"
+            continue
+        review_path = os.path.join(dvi_dir, f"{ro}.json")
+        if not os.path.exists(review_path):
+            job["dvi_review_status"] = "NO_DVI"
+            continue
+        try:
+            with open(review_path, "r", encoding="utf-8") as f:
+                review = json.load(f)
+            job["dvi_review_status"] = review.get("review_status", "NO_DVI")
+        except Exception:
+            job["dvi_review_status"] = "NO_DVI"
 
 
 def _recent_source_activity(jobs, limit=8):
@@ -322,6 +343,7 @@ def _load_board_state():
         if isinstance(payload, dict):
             board_state = _apply_timestamp_fallbacks(_apply_action_state(_apply_override_state(payload)))
             jobs = board_state.get("jobs", []) if isinstance(board_state.get("jobs"), list) else []
+            _inject_dvi_status(jobs)
             board_state["fetched_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             board_state["activity_feed"] = _recent_source_activity(jobs)
             board_state["ai_activity_feed"] = _recent_ai_activity()
