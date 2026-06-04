@@ -413,9 +413,9 @@ function render() {
                   <span class="text-base font-black text-zinc-100">${escHtml(j.customer || 'Unknown')}</span>
                   ${moneyTag}
                   <span class="text-[10px] mono text-zinc-600">RO ${escHtml(ro)}</span>
-                  ${noteBadge}
-${j.dvi_review_status === 'REWORK_REQUIRED' ? '<a href="/dvi" title="DVI: Rework Required"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#dc2626;margin-left:4px;vertical-align:middle;box-shadow:0 0 4px #dc2626;"></span></a>' : j.dvi_review_status === 'REVIEW' ? '<a href="/dvi" title="DVI: Needs Review"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#d97706;margin-left:4px;vertical-align:middle;box-shadow:0 0 4px #d97706;"></span></a>' : j.dvi_review_status === 'PASS' ? '<a href="/dvi" title="DVI: Clear"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#16a34a;margin-left:4px;vertical-align:middle;"></span></a>' : ''}
-                </div>
+${noteBadge}
+                  ${j.dvi_review_status === 'REWORK_REQUIRED' ? '<a href="/dvi" title="DVI: Rework Required"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#dc2626;margin-left:4px;vertical-align:middle;box-shadow:0 0 4px #dc2626;"></span></a>' : j.dvi_review_status === 'REVIEW' ? '<a href="/dvi" title="DVI: Needs Review"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#d97706;margin-left:4px;vertical-align:middle;box-shadow:0 0 4px #d97706;"></span></a>' : j.dvi_review_status === 'PASS' ? '<a href="/dvi" title="DVI: Clear"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#16a34a;margin-left:4px;vertical-align:middle;"></span></a>' : ''}
+</div>
                 <div class="text-xs text-zinc-400 mb-2">${escHtml(j.vehicle || '')}</div>
                 <div class="text-xs ${timeClass} mono mb-3">${fmtMins(mins)} in status</div>
                 <div class="callie-bubble rounded-xl px-3 py-2 text-xs text-zinc-300 leading-relaxed">
