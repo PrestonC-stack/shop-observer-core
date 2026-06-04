@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -120,7 +120,7 @@ def _etc_hours_remaining(job):
         return 999.0
 
 def _last_update_hours(job):
-    ro = str(job.get("ticket_reference") or job.get("invoice") or "").strip()
+    ro = str(job.get("ro") or "").strip()
     transition_ts = latest_transition_by_ro.get(ro)
     if transition_ts is not None:
         return round((_now_utc() - transition_ts).total_seconds() / 3600, 1)
@@ -203,7 +203,7 @@ def _assign_priority(status, job, flags):
     return "P3", f"Active and progressing - status: {status}"
 
 def _build_next_action(priority, status, owner, flags, job):
-    ro = job.get("ticket_reference") or job.get("invoice") or "this RO"
+    ro = job.get("ro") or "this RO"
     customer = job.get("customer_name") or "customer"
     if priority == "P1":
         if status == "ready":
@@ -301,7 +301,7 @@ def score_job(job):
     status = _normalize_status(raw_status)
     if _is_inactive(status):
         return {
-            "ticket_reference": job.get("ticket_reference") or job.get("invoice"),
+            "ticket_reference": job.get("ro"),
             "priority": "INACTIVE",
             "owner": "None",
             "board_signal": "clear",
@@ -318,7 +318,7 @@ def score_job(job):
     bay_message = _build_bay_message(priority, status, flags, job)
     signal = _board_signal(priority, flags)
     return {
-        "ticket_reference": job.get("ticket_reference") or job.get("invoice"),
+        "ticket_reference": job.get("ro"),
         "customer_name": job.get("customer_name", ""),
         "vehicle": job.get("vehicle", ""),
         "advisor_name": job.get("advisor_name") or job.get("service_writer", ""),
