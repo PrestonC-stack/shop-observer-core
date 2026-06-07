@@ -372,7 +372,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     '<div class="flex items-start justify-between gap-3">' +
                         "<div>" +
                             '<div class="text-lg font-black">' + escapeHtml(job.ro || "Unknown RO") + "</div>" +
-                            '<div class="text-sm font-semibold text-zinc-200">' + escapeHtml(job.customer || "Unknown Customer") + "</div>" +
+                            '<div class="text-sm font-semibold text-zinc-200">' + escapeHtml(job.customer || "Unknown Customer") + (job.dvi_review_status === 'REWORK_REQUIRED' ? ' <a href="/dvi" title="DVI: Rework Required"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#dc2626;margin-left:4px;vertical-align:middle;box-shadow:0 0 4px #dc2626;"></span></a>' : job.dvi_review_status === 'REVIEW' ? ' <a href="/dvi" title="DVI: Needs Review"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#d97706;margin-left:4px;vertical-align:middle;box-shadow:0 0 4px #d97706;"></span></a>' : job.dvi_review_status === 'PASS' ? ' <a href="/dvi" title="DVI: Clear"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#16a34a;margin-left:4px;vertical-align:middle;"></span></a>' : '') + "</div>" +
                             '<div class="text-xs text-zinc-400">' + escapeHtml(job.vehicle || "Unknown Vehicle") + "</div>" +
                         "</div>" +
                         '<div class="space-y-1 text-right">' +
