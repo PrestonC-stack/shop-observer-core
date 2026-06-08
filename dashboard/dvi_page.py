@@ -118,6 +118,14 @@ def render_dvi_page() -> str:
         emoji, bg, fg = colors.get(status, ("?", "#888", "#fff"))
         return f'<span style="background:{bg};color:{fg};padding:2px 8px;border-radius:4px;font-size:12px;font-weight:bold;">{emoji} {status}</span>'
 
+    def build_packet_link(review):
+        ro = str(review.get("ro", "")).strip()
+        review_status = review.get("review_status", "")
+        review_path = DVI_REVIEWS_DIR / f"{ro}.json"
+        if not ro or review_status not in ("PASS", "REVIEW", "REWORK_REQUIRED") or not review_path.exists():
+            return ""
+        return f'<a href="/dvi/packet/{ro}" target="_blank" style="background:#1e40af;color:#fff;padding:3px 10px;border-radius:4px;font-size:12px;text-decoration:none;margin-left:8px;">Build Packet</a>'
+
     # Build needs attention section
     attention_rows = ""
     for r in sorted(needs_attention, key=lambda x: x.get("dvi_pulled_at", ""), reverse=True):
@@ -138,7 +146,7 @@ def render_dvi_page() -> str:
 
         attention_rows += f"""
         <tr class="{pulse_class}" style="border-bottom:1px solid #333;">
-            <td style="padding:10px;font-weight:bold;">RO {r['ro']}</td>
+            <td style="padding:10px;font-weight:bold;">RO {r['ro']}{build_packet_link(r)}</td>
             <td style="padding:10px;">{r.get('customer','')}</td>
             <td style="padding:10px;">{r.get('vehicle','')}</td>
             <td style="padding:10px;">{status_badge(r.get('review_status',''))}</td>
@@ -175,7 +183,7 @@ def render_dvi_page() -> str:
         packet_check = "✓" if r.get("cleared_for_estimate") else "—"
         completed_rows += f"""
         <tr style="border-bottom:1px solid #333;">
-            <td style="padding:10px;font-weight:bold;">RO {r['ro']}</td>
+            <td style="padding:10px;font-weight:bold;">RO {r['ro']}{build_packet_link(r)}</td>
             <td style="padding:10px;">{r.get('customer','')}</td>
             <td style="padding:10px;">{r.get('vehicle','')}</td>
             <td style="padding:10px;">{r.get('technician','—')}</td>

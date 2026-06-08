@@ -422,6 +422,11 @@ from pathlib import Path as _Path
 def dvi_workflow():
     return render_dvi_page()
 
+@app.route("/dvi/packet/<ro>")
+def dvi_packet(ro):
+    from dashboard.packet_page import render_packet_page
+    return render_packet_page(ro)
+
 @app.route("/dvi/slip/<ro>")
 def dvi_slip(ro):
     slip_path = _Path(__file__).parent.parent / "state" / "dvi_reviews" / f"rework_slip_{ro}.html"
