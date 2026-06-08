@@ -91,7 +91,7 @@ Start-CallahanServiceWindow `
     -ForegroundColor "White" `
     -ServiceName "CALLAHAN BOARD" `
     -PortLabel "8080" `
-    -RunCommand "python dashboard\advisor_task_viewer.py"
+    -RunCommand "python dashboard\app.py"
 
 Start-Sleep -Seconds 4
 
