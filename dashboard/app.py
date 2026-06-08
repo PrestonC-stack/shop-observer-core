@@ -40,6 +40,12 @@ def board():
     return Response(html, mimetype="text/html")
 
 
+@app.route("/v2")
+def board_v2():
+    from dashboard.board_v2 import render_board_v2
+    return render_board_v2()
+
+
 @app.route("/healthz")
 def healthz():
     return {"status": "ok"}, 200
