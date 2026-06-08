@@ -46,6 +46,19 @@ def board_v2():
     return render_board_v2()
 
 
+@app.route("/v2/hitlist")
+def board_v2_hitlist():
+    from dashboard.board_v2 import render_hitlist_page
+    return render_hitlist_page()
+
+
+@app.route("/api/search")
+def api_search():
+    from dashboard.board_v2 import search_results
+    q = request.args.get("q", "").strip().lower()
+    return jsonify(search_results(q))
+
+
 @app.route("/healthz")
 def healthz():
     return {"status": "ok"}, 200

@@ -1,33 +1,52 @@
 """
-AdviseMe Command Board v2.
+AdviseMe Command Board v3.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from flask import Response
 
 from board_loader import _load_board_state
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    def load_dotenv(*_args, **_kwargs):
+        return False
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DVI_REVIEWS_DIR = REPO_ROOT / "state" / "dvi_reviews"
+JOB_HISTORY_DIR = REPO_ROOT / "state" / "job_history"
 PRIORITY_ORDER = {"P1": 0, "P2": 1, "P2A": 1, "P2B": 1, "P2C": 1, "P3": 2, "P4": 3}
 
 
 def _priority(job: dict) -> str:
-    return str(job.get("priority_lane") or job.get("priority") or "P4").upper()
+    raw = str(job.get("priority_lane") or job.get("priority") or "P4").upper()
+    return "P2" if raw.startswith("P2") else raw
 
 
-def _risk_rank(job: dict) -> int:
-    return 0 if str(job.get("risk_level") or "").upper() == "CRITICAL" else 1
+def _status(job: dict) -> str:
+    return str(job.get("workflow_status") or job.get("status") or "").strip().lower()
 
 
-def _incoming_rank(job: dict) -> int:
-    incoming = job.get("incoming_soon")
-    return 0 if isinstance(incoming, dict) and incoming.get("active") is True else 1
+def _waiting(job: dict) -> str:
+    return str(job.get("waiting_on") or "").strip()
+
+
+def _is_p1(job: dict) -> bool:
+    return _priority(job) == "P1" or str(job.get("risk_level") or "").upper() == "CRITICAL"
+
+
+def _incoming(job: dict) -> bool:
+    value = job.get("incoming_soon")
+    return isinstance(value, dict) and value.get("active") is True
 
 
 def _packet_built(ro) -> bool:
@@ -35,633 +54,183 @@ def _packet_built(ro) -> bool:
     return bool(ro_text and (DVI_REVIEWS_DIR / f"packet_{ro_text}.json").exists())
 
 
-def _dvi_review_meta(ro) -> dict:
-    ro_text = str(ro or "").strip()
-    path = DVI_REVIEWS_DIR / f"{ro_text}.json"
-    if not ro_text or not path.exists():
-        return {"flag_count": 0, "critical_count": 0}
+def _load_json(path: Path) -> dict:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return {"flag_count": 0, "critical_count": 0}
+        return {}
+
+
+def _dvi_meta(ro) -> dict:
+    data = _load_json(DVI_REVIEWS_DIR / f"{str(ro or '').strip()}.json")
     flags = data.get("flags", []) if isinstance(data, dict) else []
     if not isinstance(flags, list):
         flags = []
-    critical = sum(1 for flag in flags if isinstance(flag, dict) and flag.get("severity") == "critical")
-    return {"flag_count": len(flags), "critical_count": critical}
+    return {
+        "exists": bool(data),
+        "review_status": data.get("review_status", ""),
+        "flag_count": len(flags),
+        "critical_count": sum(1 for flag in flags if isinstance(flag, dict) and flag.get("severity") == "critical"),
+        "flags": flags[:8],
+    }
+
+
+def _packet_summary(ro) -> dict:
+    data = _load_json(DVI_REVIEWS_DIR / f"packet_{str(ro or '').strip()}.json")
+    return {
+        "exists": bool(data),
+        "drag_order": data.get("drag_order", [])[:6] if isinstance(data.get("drag_order"), list) else [],
+    }
 
 
 def _sort_key(job: dict):
     return (
         PRIORITY_ORDER.get(_priority(job), 9),
-        _risk_rank(job),
-        _incoming_rank(job),
+        0 if _is_p1(job) else 1,
+        0 if _incoming(job) else 1,
         str(job.get("ro") or ""),
     )
 
 
-def render_board_v2() -> Response:
-    board_state = _load_board_state()
-    jobs = board_state.get("jobs", []) if isinstance(board_state, dict) else []
-    enriched_jobs = []
+def _enriched_jobs() -> list[dict]:
+    board = _load_board_state()
+    jobs = board.get("jobs", []) if isinstance(board, dict) else []
+    enriched = []
     for job in jobs:
         if not isinstance(job, dict):
             continue
         row = dict(job)
-        row["packet_built"] = _packet_built(row.get("ro"))
-        row["dvi_review_meta"] = _dvi_review_meta(row.get("ro"))
-        enriched_jobs.append(row)
-    enriched_jobs.sort(key=_sort_key)
+        ro = row.get("ro")
+        row["packet_built"] = _packet_built(ro)
+        row["dvi_review_meta"] = _dvi_meta(ro)
+        row["packet_summary"] = _packet_summary(ro)
+        enriched.append(row)
+    enriched.sort(key=_sort_key)
+    return enriched
 
-    jobs_json = json.dumps(enriched_jobs, ensure_ascii=False).replace("</", "<\\/")
-    generated_at = json.dumps(board_state.get("generated_at") or "")
-    html = HTML_TEMPLATE.replace("__BOARD_JOBS__", jobs_json).replace("__GENERATED_AT__", generated_at)
+
+def _unread_conversation_count() -> int:
+    try:
+        load_dotenv(REPO_ROOT / ".env")
+        api_key = os.environ.get("AUTOFLOW_API_KEY")
+        if not api_key:
+            return 0
+        url = "https://api.autoflow.com/api/v1/conversations?" + urlencode({"status": "unread", "limit": 50})
+        request = Request(url, headers={"Authorization": f"Bearer {api_key}"}, method="GET")
+        with urlopen(request, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if isinstance(payload, list):
+            return len(payload)
+        if isinstance(payload, dict):
+            for key in ("conversations", "data", "items", "results"):
+                if isinstance(payload.get(key), list):
+                    return len(payload[key])
+            if isinstance(payload.get("count"), int):
+                return payload["count"]
+    except Exception:
+        return 0
+    return 0
+
+
+def render_board_v2() -> Response:
+    board = _load_board_state()
+    jobs = _enriched_jobs()
+    generated_at = board.get("generated_at", "") if isinstance(board, dict) else ""
+    html = (
+        HTML_TEMPLATE
+        .replace("__BOARD_JOBS__", json.dumps(jobs, ensure_ascii=False).replace("</", "<\\/"))
+        .replace("__GENERATED_AT__", json.dumps(generated_at))
+        .replace("__INBOX_UNREAD__", str(_unread_conversation_count()))
+    )
     return Response(html, mimetype="text/html")
+
+
+def search_results(query: str) -> list[dict]:
+    q = str(query or "").strip().lower()
+    if len(q) < 2:
+        return []
+    results = []
+    board = _load_board_state()
+    for job in board.get("jobs", []) if isinstance(board, dict) else []:
+        if not isinstance(job, dict):
+            continue
+        if q in str(job.get("ro", "")).lower() or q in str(job.get("customer", "")).lower() or q in str(job.get("vehicle", "")).lower():
+            results.append({
+                "type": "active",
+                "ro": job.get("ro"),
+                "customer": job.get("customer"),
+                "vehicle": job.get("vehicle"),
+                "status": job.get("workflow_status"),
+            })
+    if JOB_HISTORY_DIR.exists():
+        for ro_dir in JOB_HISTORY_DIR.iterdir():
+            if ro_dir.is_dir() and q in ro_dir.name.lower():
+                results.append({"type": "history", "ro": ro_dir.name, "customer": "Historical RO", "vehicle": "", "status": "closed"})
+    return results[:20]
+
+
+def render_hitlist_page() -> Response:
+    jobs = _enriched_jobs()[:20]
+    rows = "".join(
+        "<tr>"
+        f"<td>{idx}</td><td>{_html(job.get('ro'))}</td><td>{_html(job.get('customer'))}</td>"
+        f"<td>{_html(job.get('vehicle'))}</td><td>{_html(_priority(job))}</td>"
+        f"<td>{_html(job.get('hermes_next_action') or job.get('next_action'))}</td>"
+        f"<td>{_html(job.get('waiting_on'))}</td><td>{_html(job.get('hours_in_status', ''))}</td>"
+        f"<td>{_html(job.get('dvi_review_status', 'NO_DVI'))}</td>"
+        "</tr>"
+        for idx, job in enumerate(jobs, start=1)
+    )
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Daily Hit List</title>
+<style>
+body{{margin:0;background:#050816;color:#fff;font-family:Inter,Arial,sans-serif;padding:24px;}}
+.top{{display:flex;justify-content:space-between;align-items:start;border-bottom:1px solid #334155;padding-bottom:16px;margin-bottom:20px;}}
+h1{{margin:0;font-size:24px;letter-spacing:.08em;}} .sub{{color:#A855F7;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.16em;margin-top:6px;}}
+button{{background:#1E293B;color:#fff;border:1px solid #334155;border-radius:8px;padding:8px 14px;font-weight:800;}}
+table{{width:100%;border-collapse:collapse;background:#0B1220;border:1px solid #1E293B;}} th,td{{padding:10px;border-bottom:1px solid #1E293B;text-align:left;font-size:12px;}} th{{color:#94A3B8;text-transform:uppercase;font-size:10px;letter-spacing:.08em;}}
+@media print{{body{{background:#fff;color:#000;padding:0;}}button{{display:none;}}table{{border-color:#000;}}th,td{{border-color:#ccc;color:#000;}}.sub{{color:#000;}}}}
+</style></head><body><div class="top"><div><h1>CALLAHAN AUTO & DIESEL — DAILY HIT LIST</h1><div class="sub">Powered by AdviseMe.ai</div></div><button onclick="window.print()">Print</button></div>
+<table><thead><tr><th>#</th><th>RO</th><th>Customer</th><th>Vehicle</th><th>Priority</th><th>Next Action</th><th>Owner</th><th>Time</th><th>Status Dots</th></tr></thead><tbody>{rows}</tbody></table></body></html>"""
+    return Response(html, mimetype="text/html")
+
+
+def _html(value) -> str:
+    return str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
 HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AdviseMe Command Board</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg-main: #050816;
-            --bg-card: #0F172A;
-            --bg-panel: #0B1220;
-            --border-soft: #1E293B;
-            --border-medium: #334155;
-            --text-primary: #F8FAFC;
-            --text-secondary: #CBD5E1;
-            --text-muted: #94A3B8;
-            --text-faint: #64748B;
-            --status-immediate: #FF3B30;
-            --status-immediate-bg: rgba(255,59,48,0.12);
-            --status-immediate-border: rgba(255,59,48,0.75);
-            --status-immediate-glow: rgba(255,59,48,0.48);
-            --status-customer: #FF9500;
-            --status-customer-bg: rgba(255,149,0,0.12);
-            --status-customer-border: rgba(255,149,0,0.70);
-            --status-customer-glow: rgba(255,149,0,0.40);
-            --status-progress: #3B82F6;
-            --status-progress-bg: rgba(59,130,246,0.12);
-            --status-progress-border: rgba(59,130,246,0.65);
-            --status-ready: #22C55E;
-            --status-ready-bg: rgba(34,197,94,0.13);
-            --status-ready-border: rgba(34,197,94,0.68);
-            --status-parts: #00E5FF;
-            --status-parts-bg: rgba(0,229,255,0.12);
-            --status-parts-border: rgba(0,229,255,0.68);
-            --status-ai: #A855F7;
-            --status-ai-bg: rgba(168,85,247,0.14);
-            --status-ai-border: rgba(168,85,247,0.72);
-            --status-ai-glow: rgba(168,85,247,0.45);
-            --p1-bg: #FF2D2D;
-            --p2-bg: #FF7A00;
-            --p3-bg: #FFD400;
-            --p3-text: #111827;
-        }
-
-        * { box-sizing: border-box; }
-        html, body { height: 100%; }
-        body {
-            margin: 0;
-            height: 100vh;
-            overflow: hidden;
-            display: grid;
-            grid-template-rows: 78px 1fr 190px 56px;
-            grid-template-columns: 1fr;
-            background: radial-gradient(circle at top left, #111B3A 0%, #050816 38%, #020617 100%);
-            color: var(--text-primary);
-            font-family: Inter, system-ui, -apple-system, sans-serif;
-        }
-
-        .topbar {
-            grid-row: 1;
-            display: grid;
-            grid-template-columns: 240px 1fr 440px;
-            align-items: center;
-            gap: 12px;
-            padding: 10px;
-            border-bottom: 1px solid var(--border-soft);
-            background: rgba(2, 6, 23, 0.72);
-        }
-        .brand-main { font-size: 18px; font-weight: 800; color: #fff; letter-spacing: 0.03em; }
-        .brand-sub { margin-top: 3px; font-size: 10px; font-weight: 700; letter-spacing: 0.16em; color: var(--status-ai); text-transform: uppercase; }
-        .kpis { display: flex; justify-content: center; gap: 8px; min-width: 0; }
-        .kpi {
-            width: 90px;
-            height: 56px;
-            border-radius: 10px;
-            border: 1px solid var(--border-soft);
-            background: var(--bg-card);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }
-        .kpi .num { font-size: 28px; font-weight: 900; line-height: 1; }
-        .kpi .label { margin-top: 5px; font-size: 9px; font-weight: 700; letter-spacing: 0.06em; color: var(--text-faint); text-transform: uppercase; }
-        .top-actions { display: grid; grid-template-columns: 108px 1fr; align-items: center; gap: 12px; }
-        .clock { text-align: right; }
-        .clock-time { font-size: 20px; font-weight: 800; color: #fff; line-height: 1; }
-        .clock-date, .last-update { margin-top: 4px; font-size: 11px; color: var(--text-secondary); }
-        .action-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-        .action-buttons a {
-            height: 28px;
-            border-radius: 6px;
-            border: 1px solid var(--border-medium);
-            background: transparent;
-            color: var(--text-muted);
-            font-size: 10px;
-            font-weight: 700;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            padding: 0 9px;
-        }
-        .legend {
-            position: fixed;
-            top: 78px;
-            left: 0;
-            right: 0;
-            z-index: 15;
-            height: 22px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 14px;
-            border-bottom: 1px solid rgba(30,41,59,0.75);
-            background: rgba(5, 8, 22, 0.88);
-            color: var(--text-faint);
-            font-size: 9px;
-            font-weight: 700;
-        }
-        .legend-dot, .status-dot {
-            display: inline-block;
-            border-radius: 999px;
-            vertical-align: middle;
-        }
-        .legend-dot { width: 8px; height: 8px; margin-right: 4px; }
-
-        .board {
-            grid-row: 2;
-            display: grid;
-            grid-template-columns: repeat(6, minmax(180px, 1fr));
-            gap: 10px;
-            padding: 32px 10px 10px;
-            overflow: hidden;
-        }
-        .column {
-            min-width: 0;
-            overflow-y: auto;
-            padding: 10px;
-            border-radius: 16px;
-            border: 1px solid var(--border-soft);
-            background: rgba(15,23,42,0.62);
-        }
-        .column::-webkit-scrollbar, .drawer::-webkit-scrollbar { width: 7px; }
-        .column::-webkit-scrollbar-thumb, .drawer::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 999px; }
-        .column-header {
-            height: 56px;
-            border-radius: 12px;
-            margin-bottom: 10px;
-            padding: 0 12px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border: 1px solid;
-            font-size: 12px;
-            font-weight: 900;
-            letter-spacing: 0.04em;
-            text-transform: uppercase;
-        }
-        .count-badge { min-width: 28px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: rgba(255,255,255,0.08); color: #fff; }
-        .immediate { color: var(--status-immediate); background: var(--status-immediate-bg); border-color: var(--status-immediate-border); box-shadow: 0 0 22px var(--status-immediate-glow); }
-        .customer { color: var(--status-customer); background: var(--status-customer-bg); border-color: var(--status-customer-border); box-shadow: 0 0 18px var(--status-customer-glow); }
-        .other { color: #FFD400; background: rgba(255,212,0,0.11); border-color: rgba(255,212,0,0.60); }
-        .progress { color: var(--status-progress); background: var(--status-progress-bg); border-color: var(--status-progress-border); }
-        .ready { color: var(--status-ready); background: var(--status-ready-bg); border-color: var(--status-ready-border); }
-        .parts { color: var(--status-parts); background: var(--status-parts-bg); border-color: var(--status-parts-border); }
-
-        .job-card {
-            min-height: 120px;
-            border-radius: 14px;
-            background: linear-gradient(180deg, rgba(15,23,42,0.96), rgba(2,6,23,0.94));
-            border: 1px solid var(--border-medium);
-            padding: 12px;
-            margin-bottom: 10px;
-            cursor: pointer;
-            transition: all 0.18s ease;
-        }
-        .job-card:hover { transform: translateY(-2px); border-color: var(--text-faint); }
-        .job-card.p1 { animation: p1Pulse 2.4s ease-in-out infinite; }
-        @keyframes p1Pulse {
-            0%,100% { box-shadow: 0 0 18px rgba(255,59,48,.24); }
-            50% { box-shadow: 0 0 34px rgba(255,59,48,.55); }
-        }
-        .card-top, .card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-        .ro { font-size: 16px; font-weight: 900; color: #fff; }
-        .priority {
-            height: 24px;
-            min-width: 31px;
-            padding: 0 8px;
-            border-radius: 7px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 11px;
-            font-weight: 800;
-            color: #fff;
-        }
-        .priority.p1 { background: var(--p1-bg); }
-        .priority.p2 { background: var(--p2-bg); }
-        .priority.p3 { background: var(--p3-bg); color: var(--p3-text); }
-        .priority.p4 { background: var(--status-ready); color: #052e16; }
-        .customer-name { margin-top: 8px; font-size: 13px; font-weight: 600; color: #E2E8F0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .vehicle { margin-top: 3px; font-size: 12px; font-weight: 500; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .action { margin-top: 10px; font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .detail { margin-top: 5px; font-size: 11px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .small-pill { height: 20px; border-radius: 999px; padding: 0 8px; display: inline-flex; align-items: center; font-size: 10px; font-weight: 800; text-transform: uppercase; border: 1px solid currentColor; }
-        .time-waiting { font-size: 12px; font-weight: 800; }
-        .incoming-pill { margin-top: 8px; display: inline-flex; height: 20px; align-items: center; border-radius: 999px; padding: 0 8px; background: rgba(255,212,0,0.12); border: 1px solid rgba(255,212,0,0.62); color: #FFD400; font-size: 10px; font-weight: 900; }
-        .dots { margin-top: 10px; display: flex; gap: 7px; }
-        .status-dot { width: 7px; height: 7px; }
-        .green { background: var(--status-ready); }
-        .amber { background: var(--status-customer); }
-        .red { background: var(--status-immediate); animation: dotPulse 1.2s ease-in-out infinite; }
-        .gray { background: var(--border-medium); }
-        @keyframes dotPulse {
-            0%,100% { box-shadow: 0 0 0 rgba(255,59,48,0); }
-            50% { box-shadow: 0 0 8px rgba(255,59,48,.8); }
-        }
-
-        .drawer {
-            position: fixed;
-            right: 0;
-            top: 0;
-            z-index: 80;
-            width: 360px;
-            height: 100vh;
-            overflow-y: auto;
-            padding: 16px;
-            background: rgba(11,18,32,0.97);
-            border-left: 1px solid var(--border-medium);
-            transform: translateX(360px);
-            transition: transform 0.26s cubic-bezier(0.2,0.8,0.2,1);
-        }
-        .drawer.open { transform: translateX(0); }
-        .drawer-head { position: relative; padding-right: 32px; }
-        .drawer-title { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 900; color: #fff; }
-        .drawer-sub { margin-top: 4px; color: var(--text-muted); font-size: 12px; }
-        .close { position: absolute; top: 0; right: 0; width: 28px; height: 28px; border: 1px solid var(--border-medium); border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }
-        .photo-row { margin-top: 16px; display: grid; grid-template-columns: 140px 1fr; gap: 12px; }
-        .photo { width: 140px; height: 88px; border-radius: 10px; background: #020617; border: 1px dashed var(--border-medium); color: var(--text-faint); display: flex; align-items: center; justify-content: center; font-size: 11px; }
-        .field { margin-bottom: 7px; }
-        .field-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
-        .field-value { font-size: 12px; color: var(--text-primary); font-weight: 700; }
-        .tabs { margin-top: 16px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
-        .tab { height: 30px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); font-size: 10px; font-weight: 800; cursor: pointer; }
-        .tab.active { background: linear-gradient(135deg,#6D28D9,#4F46E5); color: white; box-shadow: 0 0 18px rgba(168,85,247,0.40); }
-        .ai-box { margin-top: 14px; border-radius: 14px; padding: 14px; background: linear-gradient(135deg,rgba(88,28,135,0.38),rgba(30,41,59,0.88)); border: 1px solid rgba(168,85,247,0.72); box-shadow: 0 0 28px rgba(168,85,247,0.28); }
-        .ai-label { color: var(--status-ai); font-size: 10px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
-        .ai-content { margin-top: 8px; display: grid; grid-template-columns: 1fr 76px; gap: 12px; align-items: center; color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
-        .score-ring { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; background: conic-gradient(var(--status-ai) var(--score), rgba(255,255,255,.08) 0); box-shadow: 0 0 18px rgba(168,85,247,.35); }
-        .drawer-button { margin-top: 12px; height: 30px; width: 100%; border: 1px solid rgba(34,197,94,.65); border-radius: 8px; background: rgba(34,197,94,.18); color: #bbf7d0; font-weight: 900; cursor: pointer; }
-        .drawer-panel { margin-top: 14px; }
-        .drawer-card { border: 1px solid var(--border-soft); border-radius: 12px; padding: 12px; background: rgba(15,23,42,.62); color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
-        .drawer-card a { color: var(--status-parts); font-weight: 900; }
-
-        .analytics {
-            grid-row: 3;
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 10px;
-            padding: 0 10px 10px;
-        }
-        .analytics-card { border: 1px solid var(--border-soft); border-radius: 14px; background: rgba(11,18,32,.86); padding: 14px; min-width: 0; overflow: hidden; }
-        .analytics-card h3 { margin: 0 0 10px; font-size: 12px; color: var(--text-primary); letter-spacing: .06em; text-transform: uppercase; }
-        .analytics-card.purple { border-color: rgba(168,85,247,0.55); }
-        .analytics-card.pink { border-color: rgba(255,0,110,0.45); background: linear-gradient(180deg, rgba(255,0,110,0.08), rgba(11,18,32,.86)); }
-        .analytics-card.cyan { border-color: rgba(0,229,255,0.48); }
-        .radar-row, .bottle-row { display: flex; justify-content: space-between; gap: 8px; color: var(--text-secondary); font-size: 11px; margin: 7px 0; }
-        .big-number { font-size: 42px; font-weight: 900; color: var(--text-primary); line-height: 1; }
-        .italic-note { margin-top: 10px; color: var(--text-faint); font-size: 11px; font-style: italic; line-height: 1.35; }
-        .alertbar {
-            grid-row: 4;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 0 14px;
-            overflow-x: auto;
-            background: rgba(11,18,32,0.95);
-            border-top: 1px solid var(--border-soft);
-        }
-        .alert-pill { height: 40px; border-radius: 10px; padding: 0 14px; display: inline-flex; align-items: center; white-space: nowrap; font-size: 11px; font-weight: 700; border: 1px solid; }
-        .alert-pill.red { color: var(--status-immediate); background: var(--status-immediate-bg); border-color: var(--status-immediate-border); }
-        .alert-pill.orange { color: var(--status-customer); background: var(--status-customer-bg); border-color: var(--status-customer-border); }
-        .alert-pill.yellow { color: #FFD400; background: rgba(255,212,0,.10); border-color: rgba(255,212,0,.55); }
-        .alert-pill.cyan { color: var(--status-parts); background: var(--status-parts-bg); border-color: var(--status-parts-border); }
-        .alert-pill.purple { color: var(--status-ai); background: var(--status-ai-bg); border-color: var(--status-ai-border); }
-        @media (max-width: 1280px) {
-            .topbar { grid-template-columns: 210px 1fr 360px; }
-            .kpi { width: 78px; }
-            .board { grid-template-columns: repeat(3, minmax(220px, 1fr)); overflow-y: auto; }
-            body { overflow: auto; grid-template-rows: 78px minmax(700px, auto) auto 56px; }
-            .analytics { grid-template-columns: repeat(2, 1fr); }
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AdviseMe Command Board v3</title>
+<style>
+:root{--bg-main:#050816;--bg-card:#0F172A;--bg-panel:#0B1220;--border-soft:#1E293B;--border-medium:#334155;--text-primary:#FFFFFF;--text-secondary:#CBD5E1;--text-muted:#94A3B8;--text-faint:#64748B;--status-immediate:#FF3B30;--status-immediate-bg:rgba(255,59,48,0.12);--status-immediate-border:rgba(255,59,48,0.75);--status-immediate-glow:rgba(255,59,48,0.48);--status-customer:#FF9500;--status-customer-bg:rgba(255,149,0,0.12);--status-customer-border:rgba(255,149,0,0.70);--status-customer-glow:rgba(255,149,0,0.40);--status-progress:#3B82F6;--status-progress-bg:rgba(59,130,246,0.12);--status-progress-border:rgba(59,130,246,0.65);--status-ready:#22C55E;--status-ready-bg:rgba(34,197,94,0.13);--status-ready-border:rgba(34,197,94,0.68);--status-parts:#00E5FF;--status-parts-bg:rgba(0,229,255,0.12);--status-parts-border:rgba(0,229,255,0.68);--status-ai:#A855F7;--status-ai-bg:rgba(168,85,247,0.14);--status-ai-border:rgba(168,85,247,0.72);--status-ai-glow:rgba(168,85,247,0.45);--p1-bg:#FF2D2D;--p2-bg:#FF7A00;--p3-bg:#FFD400;--p3-text:#111827}
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:radial-gradient(circle at top left,#111B3A 0%,#050816 38%,#020617 100%);height:100vh;overflow:hidden;display:grid;grid-template-columns:72px 1fr;grid-template-rows:1fr;font-family:Inter,ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;color:#FFFFFF}
+.sidebar{width:72px;height:100vh;background:#070B18;border-right:1px solid var(--border-soft);padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:4px;overflow-y:auto}.logo{font-size:32px;color:var(--status-ai);font-weight:900;line-height:1;margin:2px 0 0}.az{color:var(--text-faint);font-size:9px;font-weight:900;margin-bottom:10px}.nav-item{position:relative;width:60px;min-height:58px;border-radius:12px;margin:0 6px;color:var(--text-muted);display:flex;flex-direction:column;align-items:center;justify-content:center;text-decoration:none;border:1px solid transparent;background:transparent;cursor:pointer}.nav-item.active{background:linear-gradient(135deg,rgba(168,85,247,0.35),rgba(59,130,246,0.20));border:1px solid rgba(168,85,247,0.75);box-shadow:0 0 20px rgba(168,85,247,0.30)}.nav-icon{font-size:18px}.nav-label{font-size:9px;margin-top:4px}.badge{position:absolute;right:4px;top:4px;background:var(--status-immediate);color:#fff;border-radius:999px;min-width:18px;height:18px;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center}
+.main{display:grid;grid-template-rows:72px 1fr 185px 52px;min-width:0}.topbar{display:grid;grid-template-columns:240px 1fr 320px;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border-soft);background:rgba(2,6,23,.68)}.shop{font-size:15px;font-weight:800;color:#fff}.powered{margin-top:4px;font-size:10px;font-weight:800;letter-spacing:.2em;color:var(--status-ai);text-shadow:0 0 12px rgba(168,85,247,.6);text-transform:uppercase}.kpis{display:flex;justify-content:center;gap:8px}.kpi{width:85px;height:56px;background:var(--bg-card);border:1px solid var(--border-soft);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center}.kpi-num{font-size:36px;font-weight:900;line-height:1}.kpi-label{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint)}.right{display:grid;grid-template-columns:98px 1fr;gap:8px;align-items:center}.time{text-align:right}.clock{font-size:22px;font-weight:800;color:#fff;line-height:1}.date,.weather{font-size:11px;color:var(--text-secondary);margin-top:3px}.updated{font-size:10px;color:var(--text-faint);margin-top:3px}.advisor{position:relative}.advisor-btn,.tiny{height:26px;border-radius:6px;border:1px solid var(--border-medium);background:transparent;color:var(--text-muted);font-size:10px;font-weight:800;padding:0 7px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}.tiny:hover,.advisor-btn:hover{background:var(--border-soft);color:#fff}.actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px;margin-top:5px}.advisor-menu{display:none;position:absolute;right:0;top:30px;width:168px;background:var(--bg-panel);border:1px solid var(--border-medium);border-radius:10px;padding:6px;z-index:100}.advisor.open .advisor-menu{display:block}.advisor-menu a,.advisor-menu button{display:block;width:100%;padding:8px;border:0;background:transparent;color:var(--text-secondary);text-align:left;text-decoration:none;border-radius:7px;font-size:12px}.advisor-menu a:hover,.advisor-menu button:hover{background:var(--border-soft);color:#fff}.help{position:absolute;right:8px;top:6px;width:22px;height:22px;border-radius:999px;border:1px solid var(--border-medium);background:#0F172A;color:#94A3B8;cursor:pointer}
+.legend{height:24px;grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid var(--border-soft);background:rgba(5,8,22,.86);font-size:9px;color:var(--text-faint)}.legend-left{display:flex;gap:11px;align-items:center}.legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}.search{width:200px;background:var(--bg-card);border:1px solid var(--border-medium);border-radius:6px;color:#F8FAFC;font-size:12px;padding:4px 10px}.search-results{margin-left:8px;color:var(--text-faint);font-size:10px}
+.board{position:relative;display:grid;grid-template-rows:24px 1fr;min-height:0}.columns{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;padding:10px;min-height:0;overflow:hidden}.col{background:rgba(15,23,42,.62);border:1px solid var(--border-soft);border-radius:16px;padding:10px;overflow-y:auto;min-width:0}.col-head{height:56px;border-radius:12px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;border:1px solid;font-size:12px;font-weight:900;letter-spacing:.04em;text-transform:uppercase}.count{min-width:28px;height:24px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.08);color:#fff}.immediate{color:var(--status-immediate);background:var(--status-immediate-bg);border-color:var(--status-immediate-border);box-shadow:0 0 20px var(--status-immediate-glow)}.customer{color:var(--status-customer);background:var(--status-customer-bg);border-color:var(--status-customer-border)}.other{color:#FFD400;background:rgba(255,212,0,.10);border-color:rgba(255,212,0,.60)}.progress{color:var(--status-progress);background:var(--status-progress-bg);border-color:var(--status-progress-border)}.ready{color:var(--status-ready);background:var(--status-ready-bg);border-color:var(--status-ready-border)}.parts{color:var(--status-parts);background:var(--status-parts-bg);border-color:var(--status-parts-border)}
+.card{min-height:120px;border-radius:14px;background:linear-gradient(180deg,rgba(var(--rgb),.05) 0%,rgba(15,23,42,.96) 100%);border:1px solid rgb(var(--rgb));padding:12px;margin-bottom:10px;cursor:pointer;transition:all .18s ease}.card:hover{transform:translateY(-2px)}.card.p1{animation:p1Pulse 2.4s ease-in-out infinite}.card.card-selected{transform:scale(1.02);border-width:2px;z-index:5;box-shadow:0 0 28px rgba(168,85,247,.50)}@keyframes p1Pulse{0%,100%{box-shadow:0 0 24px rgba(255,59,48,.38)}50%{box-shadow:0 0 44px rgba(255,59,48,.72)}}.card-top,.card-bottom{display:flex;justify-content:space-between;gap:8px;align-items:center}.ro{font-size:18px;font-weight:900;color:#fff}.pri{height:24px;border-radius:7px;padding:0 8px;font-size:11px;font-weight:800;display:flex;align-items:center}.pri.P1{background:var(--p1-bg);color:#fff}.pri.P2{background:var(--p2-bg);color:#fff}.pri.P3{background:var(--p3-bg);color:var(--p3-text)}.pri.P4{background:var(--status-ready);color:#052e16}.cust{margin-top:8px;font-size:13px;font-weight:600;color:#E2E8F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.veh{margin-top:3px;font-size:12px;font-weight:500;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.act{margin-top:10px;font-size:14px;font-weight:900;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.detail{margin-top:5px;font-size:11px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pill{height:20px;border-radius:999px;padding:0 8px;display:inline-flex;align-items:center;font-size:10px;font-weight:900;text-transform:uppercase;border:1px solid currentColor}.time-badge{font-size:12px;font-weight:800}.incoming{margin-top:8px;display:inline-flex;height:20px;align-items:center;border-radius:999px;padding:0 8px;background:rgba(255,212,0,.12);border:1px solid rgba(255,212,0,.62);color:#FFD400;font-size:10px;font-weight:900}.dots{margin-top:9px;display:flex;gap:7px}.dot{width:7px;height:7px;border-radius:999px;display:inline-block}.green{background:var(--status-ready)}.amber{background:var(--status-customer)}.red{background:var(--status-immediate);animation:dotPulse 1.2s ease-in-out infinite}.gray{background:var(--border-medium)}@keyframes dotPulse{50%{box-shadow:0 0 8px rgba(255,59,48,.8)}}
+.drawer{position:fixed;right:0;top:0;z-index:80;width:360px;height:100vh;overflow-y:auto;padding:16px;background:rgba(11,18,32,.97);border-left:1px solid var(--border-medium);transform:translateX(360px);transition:transform .26s cubic-bezier(.2,.8,.2,1)}.drawer.open{transform:translateX(0)}.drawer-head{position:relative;padding-right:32px}.drawer-title{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:900;color:#fff}.drawer-sub{margin-top:4px;color:var(--text-muted);font-size:12px}.close{position:absolute;right:0;top:0;width:28px;height:28px;border:1px solid var(--border-medium);border-radius:8px;background:transparent;color:var(--text-muted);cursor:pointer}.photo-row{margin-top:16px;display:grid;grid-template-columns:140px 1fr;gap:12px}.sil{width:140px;height:80px;border-radius:10px;background:#020617;border:1px dashed var(--border-medium);display:flex;flex-direction:column;align-items:center;justify-content:center}.sil svg{width:140px;height:70px}.sil-label{font-size:10px;color:var(--text-faint);margin-top:-2px}.field{margin-bottom:7px}.fl{font-size:10px;color:var(--text-muted);text-transform:uppercase}.fv{font-size:12px;color:#fff;font-weight:700}.tabs{margin-top:16px;display:grid;grid-template-columns:repeat(5,1fr);gap:5px}.tab{height:30px;border:0;border-radius:8px;background:transparent;color:var(--text-muted);font-size:10px;font-weight:800;cursor:pointer}.tab.active{background:linear-gradient(135deg,#6D28D9,#4F46E5);color:#fff;box-shadow:0 0 18px rgba(168,85,247,.40)}.ai-box{margin-top:14px;border-radius:14px;padding:14px;background:linear-gradient(135deg,rgba(88,28,135,.38),rgba(30,41,59,.88));border:1px solid rgba(168,85,247,.72);box-shadow:0 0 28px rgba(168,85,247,.28)}.ai-label{color:var(--status-ai);font-size:10px;font-weight:900;letter-spacing:.12em;text-transform:uppercase}.ai-content{margin-top:8px;display:grid;grid-template-columns:1fr 76px;gap:12px;align-items:center;color:var(--text-secondary);font-size:12px;line-height:1.45}.ring{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;background:conic-gradient(var(--status-ai) var(--score),rgba(255,255,255,.08) 0)}.drawer-card{margin-top:14px;border:1px solid var(--border-soft);border-radius:12px;padding:12px;background:rgba(15,23,42,.62);color:var(--text-secondary);font-size:12px;line-height:1.5}.drawer-card a,.link{color:var(--status-parts);font-weight:900}.drawer-actions{position:sticky;bottom:0;margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px;background:rgba(11,18,32,.95);padding-top:10px}.drawer-actions a{height:30px;border-radius:8px;border:1px solid var(--border-medium);display:flex;align-items:center;justify-content:center;color:var(--text-secondary);text-decoration:none;font-size:11px;font-weight:900}
+.analytics{display:grid;grid-template-columns:repeat(5,minmax(240px,1fr));gap:10px;padding:0 10px 10px;overflow-x:auto}.a-card{border:1px solid var(--border-soft);border-radius:14px;background:rgba(11,18,32,.86);padding:12px;min-width:0}.a-card h3{margin:0 0 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase}.purple{border-color:rgba(168,85,247,.55)}.pink{border-color:rgba(255,0,110,.45);background:linear-gradient(180deg,rgba(255,0,110,.08),rgba(11,18,32,.86))}.cyan{border-color:rgba(0,229,255,.48)}.radar{display:grid;grid-template-columns:120px 1fr;gap:10px}.radar-svg{width:120px;height:120px}.sweep{transform-origin:60px 60px;animation:radarSweep 3s linear infinite}@keyframes radarSweep{to{transform:rotate(360deg)}}.row{display:flex;justify-content:space-between;gap:8px;color:var(--text-secondary);font-size:11px;margin:6px 0}.big{font-size:36px;font-weight:900;color:var(--status-ready)}.note{margin-top:8px;color:var(--text-faint);font-size:10px;font-style:italic;line-height:1.35}.alertbar{display:flex;gap:10px;align-items:center;padding:0 16px;overflow-x:auto;background:rgba(11,18,32,.95);border-top:1px solid var(--border-soft)}.alert-pill{height:40px;border-radius:10px;padding:0 14px;display:inline-flex;align-items:center;white-space:nowrap;font-size:11px;font-weight:700;border:1px solid}.overlay,.demo-banner{position:fixed;z-index:9999}.overlay{inset:0;background:rgba(2,6,23,.86);display:none;align-items:center;justify-content:center}.overlay.show{display:flex}.overlay-card{width:min(520px,90vw);border:1px solid var(--status-ai-border);border-radius:18px;background:var(--bg-panel);padding:28px;text-align:center;box-shadow:0 0 40px rgba(168,85,247,.24)}.overlay-icon{font-size:48px}.overlay-title{font-size:22px;font-weight:900;margin:10px 0}.overlay-msg{color:var(--text-secondary);line-height:1.55}.overlay button{margin-top:18px;height:34px;border-radius:8px;border:1px solid var(--border-medium);background:#111827;color:#fff;padding:0 18px}.demo-banner{display:none;top:0;left:50%;transform:translateX(-50%);background:linear-gradient(90deg,rgba(168,85,247,.9),rgba(59,130,246,.9));color:#fff;font-size:13px;font-weight:800;padding:6px 24px;border-radius:0 0 12px 12px;letter-spacing:.1em}.demo-banner.show{display:block}.flash-card{box-shadow:0 0 60px rgba(168,85,247,.85)!important}.green-sweep{box-shadow:0 0 48px rgba(34,197,94,.72)!important}
+@media(max-width:1200px){body{overflow:auto}.columns{grid-template-columns:repeat(3,minmax(220px,1fr));overflow-y:auto}.analytics{grid-template-columns:repeat(2,minmax(260px,1fr));height:auto}.main{grid-template-rows:72px minmax(700px,auto) auto 52px}.drawer{width:100%;transform:translateX(100%)}}@media(max-width:768px){body{display:block;overflow:auto}.sidebar{position:fixed;bottom:0;left:0;right:0;top:auto;width:100%;height:66px;flex-direction:row;z-index:90;overflow-x:auto}.logo,.az{display:none}.nav-item{min-width:58px}.main{display:block;padding-bottom:66px}.topbar{grid-template-columns:1fr;height:auto}.legend{position:static;flex-wrap:wrap;height:auto;padding:8px}.columns{grid-template-columns:1fr;padding:8px}.analytics{display:none}.drawer{display:none}.card.expanded{min-height:220px}.actions{justify-content:flex-start}}
+</style>
 </head>
 <body>
-    <header class="topbar">
-        <div>
-            <div class="brand-main">CALLAHAN AUTO & DIESEL</div>
-            <div class="brand-sub">Powered by AdviseMe.ai</div>
-        </div>
-        <div id="kpis" class="kpis"></div>
-        <div class="top-actions">
-            <div class="clock">
-                <div id="clock-time" class="clock-time">--:--</div>
-                <div id="clock-date" class="clock-date">--</div>
-                <div id="last-update" class="last-update">Last updated --</div>
-            </div>
-            <div class="action-buttons">
-                <a href="/api/morning-briefing" target="_blank">Morning Brief</a>
-                <a href="/api/afternoon-briefing" target="_blank">Afternoon Brief</a>
-                <a href="/sanity-check" target="_blank">Sanity Check</a>
-                <a href="/sanity-check" target="_blank">Tech Sheet</a>
-            </div>
-        </div>
-    </header>
-    <div class="legend">
-        <span><span class="legend-dot" style="background:var(--status-immediate)"></span>Red=Advisor action now</span>
-        <span><span class="legend-dot" style="background:var(--status-customer)"></span>Orange=Customer owns</span>
-        <span><span class="legend-dot" style="background:var(--status-progress)"></span>Blue=Tech/Drew</span>
-        <span><span class="legend-dot" style="background:var(--status-ready)"></span>Green=Ready/Mitch</span>
-        <span><span class="legend-dot" style="background:var(--status-parts)"></span>Cyan=Parts</span>
-        <span><span class="legend-dot" style="background:var(--status-ai)"></span>Purple=AI insight</span>
-        <span><span class="legend-dot" style="background:#FF006E"></span>Pink=Comeback</span>
-        <span><span class="legend-dot" style="background:#FFD400"></span>Yellow=Incoming soon</span>
-    </div>
-    <main id="board" class="board"></main>
-    <aside id="drawer" class="drawer"></aside>
-    <section id="analytics" class="analytics"></section>
-    <footer id="alertbar" class="alertbar"></footer>
-
-    <script>
-        let BOARD_JOBS = __BOARD_JOBS__;
-        let GENERATED_AT = __GENERATED_AT__;
-        let selectedJob = null;
-        let activeDrawerTab = "overview";
-        let lastRefreshAt = new Date();
-
-        const columns = [
-            { id: "immediate", title: "Need Immediate Action", cls: "immediate", color: "var(--status-immediate)" },
-            { id: "customer", title: "Waiting / Customer", cls: "customer", color: "var(--status-customer)" },
-            { id: "other", title: "Waiting / Other", cls: "other", color: "#FFD400" },
-            { id: "progress", title: "In Progress", cls: "progress", color: "var(--status-progress)" },
-            { id: "ready", title: "Ready to Close", cls: "ready", color: "var(--status-ready)" },
-            { id: "parts", title: "Parts / Inventory", cls: "parts", color: "var(--status-parts)" }
-        ];
-
-        function esc(value) {
-            return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-        }
-        function status(job) { return String(job.workflow_status || "").toLowerCase(); }
-        function waiting(job) { return String(job.waiting_on || ""); }
-        function priority(job) {
-            const raw = String(job.priority_lane || job.priority || "P3").toUpperCase();
-            return raw.startsWith("P2") ? "P2" : raw;
-        }
-        function incoming(job) { return Boolean(job.incoming_soon && job.incoming_soon.active === true); }
-        function isP1(job) { return priority(job) === "P1" || String(job.risk_level || "").toUpperCase() === "CRITICAL"; }
-        function inList(value, list) { return list.includes(String(value || "").toLowerCase()); }
-        function columnFor(job) {
-            const s = status(job);
-            const w = waiting(job);
-            if (isP1(job)) return "immediate";
-            if (w === "Mitch" && ["waiting approval", "advisor estimate"].includes(s)) return "customer";
-            if (["External Hold", "Needs Review", "Preston"].includes(w)) return "other";
-            if (["servicing", "awaiting tech", "testing", "qc", "dvi updates", "ready for tech", "technical advisement"].includes(s)) return "progress";
-            if (["ready", "advisor finalize ro", "advisor qc review", "technical overview", "qc"].includes(s)) return "ready";
-            if (["ordering parts", "waiting parts"].includes(s)) return "parts";
-            return "other";
-        }
-        function jobAction(job) { return job.hermes_next_action || job.next_action || job.workflow_status || "Review job"; }
-        function hoursLabel(job) {
-            const num = Number(job.hours_in_status);
-            if (!Number.isFinite(num)) return job.workflow_status || "--";
-            const total = Math.round(num * 60);
-            const h = Math.floor(total / 60);
-            const m = total % 60;
-            if (h >= 24) return Math.floor(h / 24) + "d " + (h % 24) + "h";
-            if (h && m) return h + "h " + m + "m";
-            if (h) return h + "h";
-            return m + "m";
-        }
-        function progressPercent(job) {
-            const p = Number(job.progress_percent);
-            if (Number.isFinite(p)) return Math.max(0, Math.min(100, p));
-            if (priority(job) === "P1") return 92;
-            if (priority(job) === "P2") return 68;
-            if (priority(job) === "P3") return 52;
-            return 36;
-        }
-        function dot(cls, label) { return '<span class="status-dot ' + cls + '" title="' + esc(label) + '"></span>'; }
-        function statusDots(job) {
-            const dvi = String(job.dvi_review_status || "NO_DVI").toUpperCase();
-            const s = status(job);
-            const ticketGreen = ["waiting approval","ordering parts","waiting parts","awaiting tech","servicing","qc","advisor qc review","advisor finalize ro","ready"];
-            const callGreen = ["waiting approval","ordering parts","waiting parts","awaiting tech","servicing","qc","advisor qc review","advisor finalize ro","ready"];
-            const qcGreen = ["qc","advisor qc review","advisor finalize ro","ready"];
-            return [
-                dvi === "PASS" ? dot("green", "DVI pass") : dvi === "REVIEW" ? dot("amber", "DVI review") : dvi === "REWORK_REQUIRED" ? dot("red", "DVI rework") : dot("gray", "No DVI"),
-                ticketGreen.includes(s) ? dot("green", "Ticket built") : s === "technical advisement" ? dot("amber", "Technical advisement") : dot("gray", "Ticket pending"),
-                callGreen.includes(s) ? dot("green", "Customer called") : dot("gray", "Call not verified"),
-                qcGreen.includes(s) ? dot("green", "QC done") : dot("gray", "QC pending"),
-                dot("gray", "Appointment not built")
-            ].join("");
-        }
-        function kpis() {
-            const waitingCust = BOARD_JOBS.filter(j => waiting(j) === "Mitch" && ["waiting approval", "advisor estimate"].includes(status(j))).length;
-            const progress = BOARD_JOBS.filter(j => ["servicing", "awaiting tech"].includes(status(j))).length;
-            const ready = BOARD_JOBS.filter(j => ["ready", "advisor finalize ro", "advisor qc review"].includes(status(j))).length;
-            const parts = BOARD_JOBS.filter(j => ["ordering parts", "waiting parts"].includes(status(j))).length;
-            return [
-                ["ACTIVE ROs", BOARD_JOBS.length, "#38BDF8"],
-                ["NEED ACTION", BOARD_JOBS.filter(isP1).length, "#FF3B30"],
-                ["WAITING CUST", waitingCust, "#FF9500"],
-                ["IN PROGRESS", progress, "#3B82F6"],
-                ["READY CLOSE", ready, "#22C55E"],
-                ["PARTS", parts, "#00E5FF"]
-            ];
-        }
-        function renderKpis() {
-            document.getElementById("kpis").innerHTML = kpis().map(([label, count, color]) =>
-                '<div class="kpi"><div class="num" style="color:' + color + '">' + count + '</div><div class="label">' + label + '</div></div>'
-            ).join("");
-        }
-        function renderBoard() {
-            const board = document.getElementById("board");
-            board.innerHTML = columns.map(col => {
-                const jobs = BOARD_JOBS.filter(j => columnFor(j) === col.id);
-                return '<section class="column">' +
-                    '<div class="column-header ' + col.cls + '"><span>' + col.title + '</span><span class="count-badge">' + jobs.length + '</span></div>' +
-                    jobs.map(j => renderCard(j, col)).join("") +
-                '</section>';
-            }).join("");
-            board.querySelectorAll(".job-card").forEach(card => {
-                card.addEventListener("click", () => {
-                    const ro = card.dataset.ro;
-                    selectedJob = BOARD_JOBS.find(j => String(j.ro || "") === ro) || null;
-                    activeDrawerTab = "overview";
-                    renderDrawer();
-                });
-            });
-        }
-        function renderCard(job, col) {
-            const p = priority(job);
-            const pillCls = p.toLowerCase();
-            const tech = job.technician || job.assigned_technician || "No tech";
-            const bottom = col.id === "parts" ? "RELAY" : col.id === "ready" ? "READY" : "WAITING";
-            return '<article class="job-card ' + (isP1(job) ? "p1" : "") + '" data-ro="' + esc(job.ro || "") + '" style="border-color:' + col.color + '">' +
-                '<div class="card-top"><div class="ro">RO' + esc(job.ro || "") + '</div><span class="priority ' + pillCls + '">' + p + '</span></div>' +
-                '<div class="customer-name">' + esc(job.customer || "Unknown") + '</div>' +
-                '<div class="vehicle">' + esc(job.vehicle || "Unknown vehicle") + '</div>' +
-                '<div class="action" style="color:' + col.color + '">' + esc(jobAction(job)) + '</div>' +
-                '<div class="detail">' + esc(tech) + ' · ' + esc(job.workflow_status || "unknown") + '</div>' +
-                '<div class="card-bottom"><span class="small-pill" style="color:' + col.color + '">' + bottom + '</span><span class="time-waiting" style="color:' + col.color + '">' + esc(hoursLabel(job)) + '</span></div>' +
-                (incoming(job) ? '<div class="incoming-pill">INCOMING</div>' : '') +
-                '<div class="dots">' + statusDots(job) + '</div>' +
-            '</article>';
-        }
-        function renderDrawer() {
-            const drawer = document.getElementById("drawer");
-            if (!selectedJob) { drawer.classList.remove("open"); drawer.innerHTML = ""; return; }
-            const job = selectedJob;
-            const col = columns.find(c => c.id === columnFor(job)) || columns[2];
-            drawer.classList.add("open");
-            const p = priority(job);
-            const insight = job.hermes_score_reason || job.hermes_next_action || "No AI recommendation recorded yet.";
-            drawer.innerHTML = '<div class="drawer-head">' +
-                '<button class="close" id="drawer-close">X</button>' +
-                '<div class="drawer-title">RO' + esc(job.ro || "") + '<span class="priority ' + p.toLowerCase() + '">' + p + '</span></div>' +
-                '<div class="drawer-sub">' + esc(job.customer || "Unknown") + ' · ' + esc(job.workflow_status || "unknown") + '</div>' +
-                '<div style="margin-top:8px"><span class="small-pill" style="color:' + col.color + '">' + col.title + '</span></div>' +
-            '</div>' +
-            '<div class="photo-row"><div class="photo">No vehicle photo</div><div>' +
-                field("Owner", waiting(job) || "Unassigned") +
-                field("Next Move", jobAction(job)) +
-                field("Waiting On", waiting(job) || "Unknown") +
-                field("Time Waiting", hoursLabel(job)) +
-            '</div></div>' +
-            '<div class="tabs">' + ["overview","dvi","packet","history","files"].map(tab => '<button class="tab ' + (activeDrawerTab === tab ? "active" : "") + '" data-tab="' + tab + '">' + tab.charAt(0).toUpperCase() + tab.slice(1) + '</button>').join("") + '</div>' +
-            renderDrawerTab(job, insight);
-            document.getElementById("drawer-close").addEventListener("click", () => { selectedJob = null; renderDrawer(); });
-            drawer.querySelectorAll(".tab").forEach(btn => btn.addEventListener("click", () => { activeDrawerTab = btn.dataset.tab; renderDrawer(); }));
-        }
-        function field(label, value) {
-            return '<div class="field"><div class="field-label">' + esc(label) + '</div><div class="field-value">' + esc(value) + '</div></div>';
-        }
-        function renderDrawerTab(job, insight) {
-            if (activeDrawerTab === "overview") {
-                const pct = progressPercent(job);
-                return '<section class="drawer-panel">' +
-                    '<div class="ai-box"><div class="ai-label">AI Recommendation</div><div class="ai-content"><div>' + esc(insight) + '</div><div class="score-ring" style="--score:' + pct + '%">' + pct + '%</div></div>' +
-                    (waiting(job) === "Mitch" ? '<button class="drawer-button">Call Customer Now</button>' : '') + '</div>' +
-                    '<div class="drawer-card" style="margin-top:14px">' +
-                    field("Technician", job.technician || job.assigned_technician || "No tech assigned") +
-                    field("Progress", pct + "%") +
-                    field("Sold Hours", job.sold_hours || "Not connected") +
-                    field("Labor Remaining", job.labor_hours_remaining || "Not connected") +
-                    '</div></section>';
-            }
-            if (activeDrawerTab === "dvi") {
-                const meta = job.dvi_review_meta || {};
-                return '<section class="drawer-panel"><div class="drawer-card">' +
-                    field("DVI Status", job.dvi_review_status || "NO_DVI") +
-                    field("Flag Count", meta.flag_count || 0) +
-                    field("Critical Flags", meta.critical_count || 0) +
-                    '<a href="/dvi/packet/' + encodeURIComponent(job.ro || "") + '" target="_blank">Build Packet</a>' +
-                '</div></section>';
-            }
-            if (activeDrawerTab === "packet") {
-                return '<section class="drawer-panel"><div class="drawer-card">' +
-                    (job.packet_built ? 'Packet ready — <a href="/dvi/packet/' + encodeURIComponent(job.ro || "") + '" target="_blank">view full packet</a>' : '<a href="/dvi/packet/' + encodeURIComponent(job.ro || "") + '" target="_blank">Build Packet</a>') +
-                '</div></section>';
-            }
-            return '<section class="drawer-panel"><div class="drawer-card" style="color:var(--status-ai)">AI agents training — full history intelligence coming soon</div></section>';
-        }
-        function renderAnalytics() {
-            const top = [...BOARD_JOBS].sort((a,b) => (isP1(b) - isP1(a)) || (progressPercent(b) - progressPercent(a))).slice(0,4);
-            const sold = BOARD_JOBS.reduce((sum, job) => sum + (Number(job.sold_hours) || 0), 0);
-            const waitingCustomer = BOARD_JOBS.filter(j => waiting(j) === "Mitch").length;
-            const parts = BOARD_JOBS.filter(j => ["ordering parts", "waiting parts"].includes(status(j))).length;
-            const dviRework = BOARD_JOBS.filter(j => String(j.dvi_review_status || "").toUpperCase() === "REWORK_REQUIRED").length;
-            const noTech = BOARD_JOBS.filter(j => !(j.technician || j.assigned_technician)).length;
-            document.getElementById("analytics").innerHTML =
-                '<div class="analytics-card purple"><h3>AI Priority Radar</h3>' + top.map((j,i) => '<div class="radar-row"><span>#' + (i+1) + ' RO' + esc(j.ro) + ' ' + esc(j.customer || '') + '</span><strong>' + progressPercent(j) + '%</strong></div>').join("") + '<div class="italic-note">Full radar intelligence — AdviseMe.ai agents calibrating...</div></div>' +
-                '<div class="analytics-card"><h3>Shop Today</h3><div class="big-number">' + BOARD_JOBS.length + '</div><div class="radar-row"><span>Sold Hours</span><strong>' + sold.toFixed(1) + '</strong></div><div class="italic-note">Hours projection — TekMetric integration coming soon</div></div>' +
-                '<div class="analytics-card"><h3>Bottlenecks</h3><div class="bottle-row"><span>Waiting on Customer</span><strong>' + waitingCustomer + '</strong></div><div class="bottle-row"><span>Parts delayed</span><strong>' + parts + '</strong></div><div class="bottle-row"><span>DVI rework</span><strong>' + dviRework + '</strong></div><div class="bottle-row"><span>No tech assigned</span><strong>' + noTech + '</strong></div><div class="italic-note">Pattern engine — AI training in progress</div></div>' +
-                '<div class="analytics-card pink"><h3>Comeback Watch</h3><div style="color:#FF006E;font-size:12px;line-height:1.5">AdviseMe.ai comeback detection agents warming up. Pattern recognition active after 30 days of shop data.</div></div>' +
-                '<div class="analytics-card cyan"><h3>Parts Snapshot</h3><div class="big-number" style="color:var(--status-parts)">' + parts + '</div><div class="italic-note" style="color:var(--status-parts)">Connecting to parts intelligence neural network — AdviseMe.ai inventory agents initializing</div></div>';
-        }
-        function renderAlerts() {
-            const p1 = BOARD_JOBS.filter(isP1).length;
-            const approvals = BOARD_JOBS.filter(j => status(j) === "waiting approval").length;
-            const rework = BOARD_JOBS.filter(j => String(j.dvi_review_status || "").toUpperCase() === "REWORK_REQUIRED").length;
-            const parts = BOARD_JOBS.filter(j => ["ordering parts", "waiting parts"].includes(status(j))).length;
-            document.getElementById("alertbar").innerHTML =
-                '<span class="alert-pill red">' + p1 + ' P1 jobs need immediate action</span>' +
-                '<span class="alert-pill orange">' + approvals + ' estimates waiting customer decision</span>' +
-                '<span class="alert-pill yellow">' + rework + ' DVI rework required</span>' +
-                '<span class="alert-pill cyan">' + parts + ' jobs waiting on parts</span>' +
-                '<span class="alert-pill purple">AdviseMe.ai monitoring ' + BOARD_JOBS.length + ' active ROs</span>';
-        }
-        function renderAll() {
-            renderKpis();
-            renderBoard();
-            renderAnalytics();
-            renderAlerts();
-            renderDrawer();
-            updateLastUpdated();
-        }
-        function updateClock() {
-            const now = new Date();
-            document.getElementById("clock-time").textContent = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-            document.getElementById("clock-date").textContent = now.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
-            updateLastUpdated();
-        }
-        function updateLastUpdated() {
-            const seconds = Math.max(0, Math.floor((new Date() - lastRefreshAt) / 1000));
-            document.getElementById("last-update").textContent = "Last updated " + seconds + " seconds ago";
-        }
-        function refreshData() {
-            fetch("/api/board-state", { cache: "no-store" })
-                .then(response => response.json())
-                .then(payload => {
-                    const existing = new Map(BOARD_JOBS.map(j => [String(j.ro || ""), j]));
-                    BOARD_JOBS = (Array.isArray(payload.jobs) ? payload.jobs : []).map(job => {
-                        const old = existing.get(String(job.ro || "")) || {};
-                        return Object.assign({}, job, {
-                            packet_built: Boolean(old.packet_built || job.packet_built),
-                            dvi_review_meta: old.dvi_review_meta || job.dvi_review_meta || { flag_count: 0, critical_count: 0 }
-                        });
-                    });
-                    GENERATED_AT = payload.generated_at || new Date().toLocaleTimeString();
-                    lastRefreshAt = new Date();
-                    if (selectedJob) selectedJob = BOARD_JOBS.find(j => String(j.ro || "") === String(selectedJob.ro || "")) || null;
-                    renderAll();
-                })
-                .catch(() => { document.getElementById("last-update").textContent = "Last updated unavailable"; });
-        }
-        updateClock();
-        renderAll();
-        setInterval(updateClock, 1000);
-        setInterval(refreshData, 60000);
-    </script>
+<div id="demo-banner" class="demo-banner">⚡ DEMO MODE — AdviseMe.ai Command Center Preview <button onclick="toggleDemo(false)" style="margin-left:14px">Exit Demo</button></div>
+<nav class="sidebar" id="sidebar"></nav>
+<section class="main"><header class="topbar"><div><div class="shop">CALLAHAN AUTO & DIESEL</div><div class="powered">Powered by AdviseMe.ai</div></div><div id="kpis" class="kpis"></div><div class="right"><div class="time"><div id="clock" class="clock">--:--</div><div id="date" class="date">--</div><div id="weather" class="weather"></div><div id="updated" class="updated">Last updated 0s ago</div></div><div><div class="advisor" id="advisor"><button class="advisor-btn" onclick="toggleAdvisor()">Main Board ▾</button><div class="advisor-menu"><a href="/v2" target="_blank">Main Board</a><a href="/mitch" target="_blank">Mitch</a><a href="/drew" target="_blank">Drew</a><a href="/preston" target="_blank">Preston</a><button onclick="placeholder('Technicians','🏆')">Technicians</button><button onclick="placeholder('KPI Targets','🏆')">KPI Targets</button><button onclick="toggleDemo(true)">Demo Mode</button></div></div><div class="actions"><a class="tiny" href="/api/morning-briefing" target="_blank">Morning Brief</a><a class="tiny" href="/api/afternoon-briefing" target="_blank">Afternoon Brief</a><a class="tiny" href="/sanity-check" target="_blank">Sanity Check</a><a class="tiny" href="/v2/hitlist" target="_blank">Hit List</a><a class="tiny" href="/sanity-check" target="_blank">Tech Sheet</a></div></div></div><button class="help" onclick="shortcuts()">?</button></header><main class="board"><div class="legend"><div class="legend-left"><span><span class="legend-dot" style="background:#FF3B30"></span>Advisor action now</span><span><span class="legend-dot" style="background:#FF9500"></span>Customer owns</span><span><span class="legend-dot" style="background:#3B82F6"></span>Tech/Drew</span><span><span class="legend-dot" style="background:#22C55E"></span>Ready/Mitch</span><span><span class="legend-dot" style="background:#00E5FF"></span>Parts</span><span><span class="legend-dot" style="background:#A855F7"></span>Callie insight</span><span><span class="legend-dot" style="background:#FF006E"></span>Comeback</span><span><span class="legend-dot" style="background:#FFD400"></span>Incoming soon</span></div><div><input id="search" class="search" placeholder="Search RO, customer..."><span id="search-results" class="search-results"></span></div></div><div id="columns" class="columns"></div></main><section id="analytics" class="analytics"></section><footer id="alertbar" class="alertbar"></footer></section><aside id="drawer" class="drawer"></aside><div id="overlay" class="overlay"><div class="overlay-card"><div id="overlay-icon" class="overlay-icon"></div><div id="overlay-title" class="overlay-title"></div><div id="overlay-msg" class="overlay-msg"></div><button onclick="closeOverlay()">Close</button></div></div>
+<script>
+const REAL_JOBS=__BOARD_JOBS__;let BOARD_JOBS=[...REAL_JOBS];let GENERATED_AT=__GENERATED_AT__;let INBOX_UNREAD=__INBOX_UNREAD__;let selected=null;let drawerTab='overview';let lastRefresh=new Date();let demo=false;let ticker=null;let demoStep=0;let extraAlerts=[];let lastP1Set=new Set(BOARD_JOBS.filter(isP1).map(j=>String(j.ro)));const columns=[['immediate','🔴 NEED IMMEDIATE ACTION','immediate',[255,59,48]],['customer','🟠 WAITING / CUSTOMER','customer',[255,149,0]],['other','🟡 WAITING / OTHER','other',[255,212,0]],['progress','🔵 IN PROGRESS','progress',[59,130,246]],['ready','🟢 READY TO CLOSE','ready',[34,197,94]],['parts','🔷 PARTS / INVENTORY','parts',[0,229,255]]];const placeholders={Customers:'AdviseMe.ai customer intelligence agents initializing. Full customer history, vehicle records, and communication timeline connects after TekMetric integration. This will become your complete customer command center.',Parts:'AdviseMe.ai parts intelligence neural network calibrating. Inventory tracking, supplier integration, and predictive ordering unlocks after parts API connection. Your parts will never be a surprise again.',Alerts:'AdviseMe.ai alert engine active and monitoring AutoFlow activity stream. Advanced alert intelligence — pattern-based warnings, predictive flags, and proactive shop coaching — activates progressively as shop data accumulates.',Schedule:'AdviseMe.ai scheduling agents warming up. AutoFlow appointment sync and smart scheduling — two-option booking, labor-aware slots, and seasonal intelligence — connects after API integration. Your future work pipeline will book itself.','KPI Targets':'AdviseMe.ai performance intelligence initializing. Front-of-house vs back-of-house productivity tracking, advisor and technician scorecards, and shop-wide KPI dashboards connect after TekMetric integration. The tug of war begins soon.',Accounting:'AdviseMe.ai financial intelligence agents calibrating. Gross profit margins, labor rate analysis, parts cost tracking, and profitability dashboards connect after accounting API integration.',Callie:'Callie is your AI shop copilot — always watching, always ready. Ask Callie anything about any job on the board. Full Callie intelligence, proactive coaching, and pattern-based recommendations expand progressively as your shop data grows.'};
+const DEMO_JOBS=[{ro:'13502',customer:'Mitch',vehicle:'2021 Ford F250 Powerstroke',priority_lane:'P1',risk_level:'CRITICAL',waiting_on:'Mitch',workflow_status:'waiting approval',next_action:'CALL CUSTOMER',hermes_next_action:'Customer viewed estimate 3x. Call now.',hours_in_status:5.7,dvi_review_status:'REWORK_REQUIRED',progress_percent:92,technician:'Alex',incoming_soon:{active:false}},{ro:'13508',customer:'Drew',vehicle:'2019 Chevy Silverado 1500',priority_lane:'P1',risk_level:'CRITICAL',waiting_on:'Mitch',workflow_status:'advisor estimate',next_action:'APPROVAL OVERDUE',hours_in_status:6.1,dvi_review_status:'REVIEW',progress_percent:78,technician:'Jose',incoming_soon:{active:false}},{ro:'13511',customer:'Luis',vehicle:'Toyota Tacoma',priority_lane:'P1',risk_level:'CRITICAL',waiting_on:'Drew',workflow_status:'ready',next_action:'READY TO CLOSE',hours_in_status:1.2,dvi_review_status:'PASS',progress_percent:95,technician:'Marco',incoming_soon:{active:true,next_stage:'Closeout'}},{ro:'13475',customer:'Sarah Miller',vehicle:'Honda Odyssey',priority_lane:'P2',waiting_on:'Mitch',workflow_status:'waiting approval',next_action:'ESTIMATE SENT',hours_in_status:4.2,dvi_review_status:'PASS',progress_percent:64,technician:'Alex'},{ro:'13498',customer:'Ben Carter',vehicle:'Jeep Cherokee',priority_lane:'P2',waiting_on:'External Hold',workflow_status:'waiting parts',next_action:'PARTS DELAY',hours_in_status:18,dvi_review_status:'NO_DVI',progress_percent:30,technician:'TBD'},{ro:'13445',customer:'Rosa Lee',vehicle:'Dodge Durango',priority_lane:'P2',waiting_on:'Drew',workflow_status:'servicing',next_action:'IN PROGRESS',hours_in_status:2.5,dvi_review_status:'PASS',progress_percent:72,technician:'Jose',incoming_soon:{active:true,next_stage:'QC'}},{ro:'13490',customer:'Nate Kim',vehicle:'Ford F-350 Super Duty',priority_lane:'P2',waiting_on:'Preston',workflow_status:'technical advisement',next_action:'TECH REVIEW',hours_in_status:1.9,dvi_review_status:'REVIEW',progress_percent:45,technician:'Marco'},{ro:'13436',customer:'Ava Green',vehicle:'Toyota RAV4',priority_lane:'P3',waiting_on:'Drew',workflow_status:'servicing',next_action:'QC COMPLETE',hours_in_status:.5,dvi_review_status:'PASS',progress_percent:88,technician:'Alex'},{ro:'13491',customer:'Omar Ruiz',vehicle:'Honda Pilot',priority_lane:'P3',waiting_on:'Drew',workflow_status:'awaiting tech',next_action:'ASSIGN TECH',hours_in_status:1.1,dvi_review_status:'NO_DVI',progress_percent:22,technician:''},{ro:'13499',customer:'Emily Stone',vehicle:'Toyota Camry',priority_lane:'P3',waiting_on:'Needs Review',workflow_status:'dvi updates',next_action:'DVI IN REVIEW',hours_in_status:.7,dvi_review_status:'REVIEW',progress_percent:55,technician:'Sam'},{ro:'13515',customer:'Cal Brooks',vehicle:'Chevy Silverado 2500 Duramax',priority_lane:'P3',waiting_on:'Drew',workflow_status:'waiting parts',next_action:'PARTS QUOTE',hours_in_status:3.4,dvi_review_status:'PASS',progress_percent:40,technician:'Alex'},{ro:'13521',customer:'Jenny Park',vehicle:'Honda CR-V',priority_lane:'P4',waiting_on:'External Hold',workflow_status:'scheduled-not here',next_action:'MONITOR',hours_in_status:0,dvi_review_status:'NO_DVI',progress_percent:10,technician:''},{ro:'13522',customer:'Tom Hall',vehicle:'Ford Ranger',priority_lane:'P4',waiting_on:'External Hold',workflow_status:'dvi only- not here',next_action:'WAITING ARRIVAL',hours_in_status:0,dvi_review_status:'NO_DVI',progress_percent:8,technician:''},{ro:'13523',customer:'Ivy Cole',vehicle:'Honda Odyssey',priority_lane:'P2',waiting_on:'Mitch',workflow_status:'advisor estimate',next_action:'PRICE ESTIMATE',hours_in_status:2.2,dvi_review_status:'PASS',progress_percent:58,technician:'Sam'},{ro:'13524',customer:'Leo Grant',vehicle:'Jeep Grand Cherokee',priority_lane:'P3',waiting_on:'Drew',workflow_status:'testing',next_action:'VERIFY CONCERN',hours_in_status:1.5,dvi_review_status:'NO_DVI',progress_percent:35,technician:'Jose'}];
+function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}function st(j){return String(j.workflow_status||'').toLowerCase()}function wait(j){return String(j.waiting_on||'')}function pri(j){let p=String(j.priority_lane||'P3').toUpperCase();return p.startsWith('P2')?'P2':p}function isP1(j){return pri(j)==='P1'||String(j.risk_level||'').toUpperCase()==='CRITICAL'}function inc(j){return !!(j.incoming_soon&&j.incoming_soon.active)}function colFor(j){const s=st(j),w=wait(j);if(isP1(j))return'immediate';if(w==='Mitch'&&['waiting approval','advisor estimate','technical advisement'].includes(s))return'customer';if(['External Hold','Needs Review','Preston'].includes(w)||['online /stage','scheduled-not here','dvi only- not here','drop off/ tow-in'].includes(s))return'other';if(w==='Drew'&&['servicing','awaiting tech','testing','dvi updates','ready for tech','technical advisement','qc','advisor qc review'].includes(s))return'progress';if(['ready','advisor finalize ro','technical overview','advisor qc review'].includes(s))return'ready';if(['ordering parts','waiting parts'].includes(s))return'parts';return'other'}function action(j){return j.hermes_next_action||j.next_action||j.workflow_status||'Review job'}function hours(j){const n=Number(j.hours_in_status);if(!isFinite(n))return j.workflow_status||'--';const t=Math.round(n*60),h=Math.floor(t/60),m=t%60;if(h>=24)return Math.floor(h/24)+'d '+h%24+'h';if(h&&m)return h+'h '+m+'m';if(h)return h+'h';return m+'m'}function pct(j){const p=Number(j.progress_percent);return isFinite(p)?Math.max(0,Math.min(100,p)):pri(j)==='P1'?90:pri(j)==='P2'?68:pri(j)==='P3'?48:24}function dot(c,t){return'<span class="dot '+c+'" title="'+esc(t)+'"></span>'}function dots(j){const d=String(j.dvi_review_status||'NO_DVI').toUpperCase(),s=st(j);return[d==='PASS'?dot('green','DVI'):d==='REVIEW'?dot('amber','DVI review'):d==='REWORK_REQUIRED'?dot('red','DVI rework'):dot('gray','No DVI'),['waiting approval','ordering parts','waiting parts','awaiting tech','servicing','qc','advisor qc review','advisor finalize ro','ready'].includes(s)?dot('green','Ticket'):dot('gray','Ticket'),['waiting approval','ordering parts','waiting parts'].includes(s)?dot('green','Call'):dot('gray','Call'),['qc','advisor qc review','advisor finalize ro','ready'].includes(s)?dot('green','QC'):dot('gray','QC'),dot('gray','Appt')].join('')}function vehicleType(v){const s=String(v||'').toLowerCase();const has=a=>a.some(x=>s.includes(x.toLowerCase()));if(has(['Powerstroke','Cummins','Duramax']))return['Diesel Truck','truck'];if(has(['F-250','F-350','F-450','Ram 2500','Ram 3500','Sierra 2500','Sierra 3500','Silverado 2500','Silverado 3500','Super Duty','Duramax']))return['HD Truck','truck'];if(has(['F-150','Ranger','Tacoma','Tundra','Colorado','Canyon','Frontier','Ridgeline','Maverick','Ram 1500','Sierra 1500','Silverado 1500']))return['Truck','truck'];if(has(['Expedition','Suburban','Tahoe','Yukon','Navigator','Armada','Sequoia','Excursion']))return['Full SUV','suv'];if(has(['Explorer','Pilot','Pathfinder','4Runner','Highlander','Durango','Grand Cherokee','Commander','Traverse','Enclave']))return['SUV','suv'];if(has(['RAV4','CR-V','Equinox','Escape','Rogue','Tucson','Sportage','CX-5','Cherokee','Compass','Trax','Encore']))return['Compact SUV','suv'];if(has(['Odyssey','Sienna','Caravan','Grand Caravan','Pacifica','Quest','Sedona','Entourage']))return['Minivan','van'];return['Sedan','sedan']}function silhouette(v){const [label,type]=vehicleType(v);const path=type==='truck'?'M18 44 L28 26 H88 L104 38 H124 L130 50 H18 Z M34 50 A8 8 0 1 0 34 66 A8 8 0 0 0 34 50 M108 50 A8 8 0 1 0 108 66 A8 8 0 0 0 108 50':type==='suv'?'M16 46 L28 30 H86 L110 38 L124 52 H16 Z M34 52 A8 8 0 1 0 34 68 A8 8 0 0 0 34 52 M106 52 A8 8 0 1 0 106 68 A8 8 0 0 0 106 52':type==='van'?'M12 48 L20 28 H104 L126 45 V56 H12 Z M32 54 A8 8 0 1 0 32 70 A8 8 0 0 0 32 54 M106 54 A8 8 0 1 0 106 70 A8 8 0 0 0 106 54':'M18 50 L32 34 H88 L112 50 H124 V58 H18 Z M36 56 A7 7 0 1 0 36 70 A7 7 0 0 0 36 56 M104 56 A7 7 0 1 0 104 70 A7 7 0 0 0 104 56';return'<div class="sil"><svg viewBox="0 0 140 80"><path d="'+path+'" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.15)" stroke-width="1"/></svg><div class="sil-label">'+label+'</div></div>'}
+function renderSidebar(){const items=[['🏠','Board','/v2','active'],['📋','DVI','/dvi','link'],['📦','Packets','/dvi','link'],['📥','Inbox','https://app.autoflow.com','inbox'],['👤','Customers','','ph'],['🔧','Parts','','ph'],['⚠️','Alerts','','ph'],['📅','Schedule','','ph'],['📊','Analytics','/analytics','link'],['🏆','KPI Targets','','ph'],['💰','Accounting','','ph'],['🤖','Callie','','ph'],['⚙️','Settings','','ph']];document.getElementById('sidebar').innerHTML='<div class="logo">A</div><div class="az">AZ</div>'+items.map(i=>'<a class="nav-item '+(i[3]==='active'?'active':'')+'" '+(i[3]==='ph'?'href="#" onclick="placeholder(\\''+i[1]+'\\',\\''+i[0]+'\\');return false"':'href="'+i[2]+'" target="'+(i[3]==='active'?'_self':'_blank')+'"')+'><span class="nav-icon">'+i[0]+'</span><span class="nav-label">'+i[1]+'</span>'+(i[3]==='inbox'&&INBOX_UNREAD>0?'<span class="badge">'+INBOX_UNREAD+'</span>':'')+'</a>').join('')}function renderKpis(){const waiting=BOARD_JOBS.filter(j=>wait(j)==='Mitch'&&(st(j).includes('approval')||st(j).includes('estimate'))).length,prog=BOARD_JOBS.filter(j=>['servicing','awaiting tech','testing'].includes(st(j))).length,ready=BOARD_JOBS.filter(j=>['ready','advisor finalize ro'].includes(st(j))).length,parts=BOARD_JOBS.filter(j=>['ordering parts','waiting parts'].includes(st(j))).length;const arr=[['ACTIVE ROs',BOARD_JOBS.length,'#38BDF8'],['NEED ACTION',BOARD_JOBS.filter(j=>pri(j)==='P1').length,'#FF3B30'],['WAITING CUST',waiting,'#FF9500'],['IN PROGRESS',prog,'#3B82F6'],['READY CLOSE',ready,'#22C55E'],['PARTS',parts,'#00E5FF']];document.getElementById('kpis').innerHTML=arr.map(x=>'<div class="kpi"><div class="kpi-num" style="color:'+x[2]+'">'+x[1]+'</div><div class="kpi-label">'+x[0]+'</div></div>').join('')}
+function visibleJobs(){const q=document.getElementById('search')?.value.toLowerCase().trim()||'';return q?BOARD_JOBS.filter(j=>String(j.ro).toLowerCase().includes(q)||String(j.customer).toLowerCase().includes(q)||String(j.vehicle).toLowerCase().includes(q)):BOARD_JOBS}function renderColumns(){const data=visibleJobs();document.getElementById('columns').innerHTML=columns.map(c=>{const jobs=data.filter(j=>colFor(j)===c[0]);return'<section class="col"><div class="col-head '+c[2]+'"><span>'+c[1]+'</span><span class="count">'+jobs.length+'</span></div>'+jobs.map(j=>card(j,c)).join('')+'</section>'}).join('');document.querySelectorAll('.card').forEach(el=>el.onclick=()=>{selected=BOARD_JOBS.find(j=>String(j.ro)===el.dataset.ro);drawerTab='overview';renderDrawer();renderColumns()})}function card(j,c){const p=pri(j),rgb=c[3].join(','),sel=selected&&String(selected.ro)===String(j.ro);return'<article class="card '+(isP1(j)?'p1 ':'')+(sel?'card-selected ':'')+'" data-ro="'+esc(j.ro)+'" style="--rgb:'+rgb+'"><div class="card-top"><div class="ro">RO'+esc(j.ro)+'</div><span class="pri '+p+'">'+p+'</span></div><div class="cust">'+esc(j.customer||'Unknown')+'</div><div class="veh">'+esc(j.vehicle||'Unknown vehicle')+'</div><div class="act" style="color:rgb('+rgb+')">'+esc(action(j))+'</div><div class="detail">'+esc(j.technician||j.assigned_technician||'No tech')+' · '+esc(hours(j))+'</div><div class="card-bottom"><span class="pill" style="color:rgb('+rgb+')">'+esc(st(j)||'status')+'</span><span class="time-badge" style="color:rgb('+rgb+')">'+esc(hours(j))+'</span></div>'+(inc(j)?'<div class="incoming">⚡ INCOMING</div>':'')+'<div class="dots">'+dots(j)+'</div></article>'}
+function renderDrawer(){const d=document.getElementById('drawer');if(!selected){d.classList.remove('open');d.innerHTML='';return}const j=selected,p=pri(j),c=columns.find(x=>x[0]===colFor(j))||columns[2],ins=j.hermes_score_reason||j.hermes_next_action||'Callie is watching this job for the next best move.';d.classList.add('open');d.innerHTML='<div class="drawer-head"><button class="close" onclick="selected=null;renderDrawer();renderColumns()">X</button><div class="drawer-title">RO'+esc(j.ro)+' <span class="pri '+p+'">'+p+'</span></div><div class="drawer-sub">'+esc(j.customer)+' · '+esc(st(j))+'</div></div><div class="photo-row">'+silhouette(j.vehicle)+'<div>'+field('Owner',wait(j)||'Unassigned')+field('Next Move',action(j))+field('Waiting On',wait(j)||'Unknown')+field('Time Waiting',hours(j))+'</div></div><div class="tabs">'+['overview','dvi','packet','history','files'].map(t=>'<button class="tab '+(drawerTab===t?'active':'')+'" onclick="drawerTab=\\''+t+'\\';renderDrawer()">'+t[0].toUpperCase()+t.slice(1)+'</button>').join('')+'</div>'+drawerPanel(j,ins)+'<div class="drawer-actions"><a href="/api/board-action" target="_blank">Call Log</a><a href="/dvi/packet/'+encodeURIComponent(j.ro)+'" target="_blank">Build Packet</a><a href="/dvi" target="_blank">View DVI</a><a href="/api/board-action" target="_blank">Add Note</a></div>'}function field(l,v){return'<div class="field"><div class="fl">'+esc(l)+'</div><div class="fv">'+esc(v)+'</div></div>'}function drawerPanel(j,ins){const meta=j.dvi_review_meta||{},pack=j.packet_summary||{};if(drawerTab==='overview')return'<div class="ai-box"><div class="ai-label">CALLIE INSIGHT</div><div class="ai-content"><div>'+esc(ins)+'</div><div class="ring" style="--score:'+pct(j)+'%">'+pct(j)+'%</div></div>'+(wait(j)==='Mitch'?'<button class="tiny" style="width:100%;margin-top:12px;color:#bbf7d0;border-color:#22C55E">Call Customer Now</button>':'')+'<a class="tiny" style="width:100%;margin-top:8px;color:#bfdbfe;border-color:#3B82F6" href="/dvi/packet/'+encodeURIComponent(j.ro)+'" target="_blank">Build Packet</a></div>';if(drawerTab==='dvi')return'<div class="drawer-card">'+(meta.exists?field('DVI Status',meta.review_status||j.dvi_review_status)+field('Flag Count',meta.flag_count||0)+field('Critical',meta.critical_count||0):'No DVI on file for this RO')+'<br><a href="/dvi/packet/'+encodeURIComponent(j.ro)+'" target="_blank">Build Packet</a></div>';if(drawerTab==='packet')return'<div class="drawer-card">'+(j.packet_built?'Packet ready — <a href="/dvi/packet/'+encodeURIComponent(j.ro)+'" target="_blank">View Full Packet →</a><ul>'+((pack.drag_order||[]).map(x=>'<li>'+esc(x)+'</li>').join(''))+'</ul>':'<a href="/dvi/packet/'+encodeURIComponent(j.ro)+'" target="_blank">Build Packet</a>')+'</div>';if(drawerTab==='history')return'<div class="drawer-card" style="color:var(--status-ai);text-align:center">🤖<br>AdviseMe.ai job intelligence agents building your history layer. Full timeline, audit trail, and pattern analysis unlocks progressively as shop data accumulates.</div>';return'<div class="drawer-card" style="color:var(--status-ai);text-align:center">🤖<br>AdviseMe.ai document intelligence coming soon. Upload estimates, photos, and RO documents directly to each job. AI will audit, verify, and flag discrepancies automatically.</div>'}
+function renderAnalytics(){const top=[...BOARD_JOBS].sort((a,b)=>(isP1(b)-isP1(a))||pct(b)-pct(a)).slice(0,4),sold=BOARD_JOBS.reduce((s,j)=>s+(Number(j.labor_hours_completed)||0),0),wc=BOARD_JOBS.filter(j=>wait(j)==='Mitch').length,parts=BOARD_JOBS.filter(j=>['ordering parts','waiting parts'].includes(st(j))).length,rework=BOARD_JOBS.filter(j=>String(j.dvi_review_status).toUpperCase()==='REWORK_REQUIRED').length,notech=BOARD_JOBS.filter(j=>!(j.technician||j.assigned_technician)).length,comeback=BOARD_JOBS.filter(j=>JSON.stringify(j.alerts||[]).toLowerCase().includes('comeback'));document.getElementById('analytics').innerHTML='<div class="a-card purple"><h3>AI Priority Radar</h3><div class="radar"><svg class="radar-svg" viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" fill="none" stroke="rgba(168,85,247,.2)"/><circle cx="60" cy="60" r="36" fill="none" stroke="rgba(168,85,247,.15)"/><circle cx="60" cy="60" r="20" fill="none" stroke="rgba(168,85,247,.08)"/><line class="sweep" x1="60" y1="60" x2="60" y2="8" stroke="#A855F7"/></svg><div>'+top.map((j,i)=>'<div class="row"><span>#'+(i+1)+' RO'+esc(j.ro)+' '+esc(j.customer)+'</span><b>'+(['CRITICAL','HIGH','MEDIUM','LOW'][i]||'LOW')+'</b></div>').join('')+'</div></div><div class="note">AdviseMe.ai intelligence agents calibrating from AutoFlow activity stream. Pattern recognition unlocks after TekMetric integration.</div></div><div class="a-card"><h3>Shop Today</h3><div class="big">'+BOARD_JOBS.length+'</div><div class="row"><span>Sold hours</span><b>'+sold.toFixed(1)+'</b></div><div class="note">Hours projection connects after TekMetric integration. Sold hours shown are live from AutoFlow.</div></div><div class="a-card"><h3>Bottlenecks</h3>'+[['Waiting on customer',wc,'#FF9500'],['Parts delayed',parts,'#00E5FF'],['DVI rework',rework,'#FFD400'],['No tech assigned',notech,'#FF3B30']].map(x=>'<div class="row"><span><span class="legend-dot" style="background:'+x[2]+'"></span>'+x[0]+'</span><b>'+x[1]+'</b></div>').join('')+'<div class="note">Pattern recognition engine active. Deep bottleneck intelligence unlocks after 30 days of shop data.</div></div><div class="a-card pink"><h3>Comeback Watch</h3><div style="color:#FF006E;font-size:12px;line-height:1.45">AdviseMe.ai comeback detection agents warming up. Monitoring AutoFlow activity for return patterns. Full intelligence active after TekMetric integration.</div>'+comeback.map(j=>'<div class="row"><span>RO'+esc(j.ro)+'</span><b>Comeback</b></div>').join('')+'</div><div class="a-card cyan"><h3>Parts Snapshot</h3><div class="big" style="color:var(--status-parts)">'+parts+'</div><div class="note" style="color:var(--status-parts)">AdviseMe.ai inventory intelligence agents initializing. Parts neural network connects after supplier API integration.</div></div>'}
+function renderAlerts(){const p1=BOARD_JOBS.filter(isP1).length,ap=BOARD_JOBS.filter(j=>st(j)==='waiting approval').length,rw=BOARD_JOBS.filter(j=>String(j.dvi_review_status).toUpperCase()==='REWORK_REQUIRED').length,parts=BOARD_JOBS.filter(j=>['ordering parts','waiting parts'].includes(st(j))).length;let a=[];if(p1)a.push(['red',p1+' P1 jobs need immediate action']);if(ap)a.push(['orange',ap+' estimates need customer']);if(rw)a.push(['yellow',rw+' DVI rework required']);if(parts)a.push(['cyan',parts+' jobs waiting on parts']);if(INBOX_UNREAD>0)a.push(['purple',INBOX_UNREAD+' unread customer messages']);a.push(['purple','AdviseMe.ai monitoring '+BOARD_JOBS.length+' active ROs']);a=extraAlerts.concat(a);document.getElementById('alertbar').innerHTML=a.map(x=>'<span class="alert-pill '+x[0]+'">'+x[1]+'</span>').join('')}function renderAll(){renderSidebar();renderKpis();renderColumns();renderDrawer();renderAnalytics();renderAlerts();updated()}function updated(){document.getElementById('updated').textContent='Last updated '+Math.floor((new Date()-lastRefresh)/1000)+'s ago'}function clock(){const n=new Date();document.getElementById('clock').textContent=n.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});document.getElementById('date').textContent=n.toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'});updated()}function weather(){const c=localStorage.getItem('adv_weather'),t=Number(localStorage.getItem('adv_weather_t')||0);if(c&&Date.now()-t<600000){document.getElementById('weather').textContent=c;return}fetch('https://wttr.in/Mesa,AZ?format=%t+%C').then(r=>r.text()).then(txt=>{localStorage.setItem('adv_weather',txt);localStorage.setItem('adv_weather_t',Date.now());document.getElementById('weather').textContent=txt}).catch(()=>{})}function chime(freq=440,dur=.1,vol=.15){try{const ctx=new (window.AudioContext||window.webkitAudioContext)(),osc=ctx.createOscillator(),gain=ctx.createGain();osc.frequency.value=freq;gain.gain.value=vol;osc.connect(gain);gain.connect(ctx.destination);osc.start();osc.stop(ctx.currentTime+dur)}catch(e){}}function refresh(){const before=new Set(BOARD_JOBS.filter(isP1).map(j=>String(j.ro)));fetch('/api/board-state',{cache:'no-store'}).then(r=>r.json()).then(p=>{BOARD_JOBS=Array.isArray(p.jobs)?p.jobs:BOARD_JOBS;GENERATED_AT=p.generated_at||GENERATED_AT;lastRefresh=new Date();const after=new Set(BOARD_JOBS.filter(isP1).map(j=>String(j.ro)));for(const ro of after){if(!before.has(ro))chime(520,.15,.12)}renderAll()}).catch(()=>{})}function searchRemote(q){if(q.length<2){document.getElementById('search-results').textContent='';return}fetch('/api/search?q='+encodeURIComponent(q)).then(r=>r.json()).then(x=>document.getElementById('search-results').textContent=x.length+' results').catch(()=>{})}function toggleAdvisor(){document.getElementById('advisor').classList.toggle('open')}function closeOverlay(){document.getElementById('overlay').classList.remove('show')}function placeholder(name,icon){document.getElementById('overlay-icon').textContent=icon;document.getElementById('overlay-title').textContent=name;document.getElementById('overlay-msg').textContent=placeholders[name]||'AdviseMe.ai module initializing.';document.getElementById('overlay').classList.add('show')}function shortcuts(){placeholder('Keyboard Shortcuts','?');document.getElementById('overlay-msg').innerHTML='ESC — Close drawer<br>/ — Focus search bar<br>R — Refresh board<br>M — Morning Brief<br>P — Print current view<br>D — Toggle demo mode'}function toggleDemo(on){demo=on;if(demo){BOARD_JOBS=JSON.parse(JSON.stringify(DEMO_JOBS));document.getElementById('demo-banner').classList.add('show');INBOX_UNREAD=0;demoStep=0;ticker=setInterval(demoTick,4000)}else{if(ticker)clearInterval(ticker);BOARD_JOBS=[...REAL_JOBS];document.getElementById('demo-banner').classList.remove('show')}renderAll()}function demoTick(){const cards=document.querySelectorAll('.card');if(cards[0]){cards[0].classList.add('flash-card');setTimeout(()=>cards[0].classList.remove('flash-card'),1100)}const events=[()=>extra('green','Customer approved — RO 13502 $2,847'),()=>{const j=BOARD_JOBS.find(x=>x.ro==='13475');if(j){j.waiting_on='Drew';j.workflow_status='servicing'}},()=>{INBOX_UNREAD=3;chime()},()=>{if(selected)selected.hermes_score_reason='Customer viewed estimate 3x. 94% approval likelihood. Recommend calling within 20 minutes.'},()=>extra('cyan','4 parts arrived'),()=>extra('red','RO 13508 — approval overdue 6h — customer contact required NOW'),()=>{BOARD_JOBS[0].labor_hours_completed=(Number(BOARD_JOBS[0].labor_hours_completed)||0)+.5},()=>{document.querySelector('.radar-svg')?.classList.add('flash-card')},()=>{const c=[...document.querySelectorAll('.card')].find(x=>x.dataset.ro==='13445');if(c){c.classList.add('green-sweep');setTimeout(()=>c.classList.remove('green-sweep'),1500)}}];events[demoStep%events.length]();demoStep++;renderAll()}function extra(cls,msg){extraAlerts.unshift([cls,msg]);setTimeout(()=>{extraAlerts=extraAlerts.filter(x=>x[1]!==msg);renderAlerts()},5000)}
+document.getElementById('search').addEventListener('input',e=>{renderColumns();searchRemote(e.target.value.trim().toLowerCase())});document.addEventListener('keydown',e=>{if(e.key==='Escape'){selected=null;renderDrawer();document.getElementById('search').value='';renderColumns()}if(e.key==='/'){e.preventDefault();document.getElementById('search').focus()}if(e.key.toLowerCase()==='r')refresh();if(e.key.toLowerCase()==='m')window.open('/api/morning-briefing','_blank');if(e.key.toLowerCase()==='p')window.print();if(e.key.toLowerCase()==='d')toggleDemo(!demo)});if(INBOX_UNREAD>0)setTimeout(()=>chime(440,.1,.15),600);renderAll();clock();weather();setInterval(clock,1000);setInterval(refresh,60000);
+</script>
 </body>
-</html>
-"""
+</html>"""
