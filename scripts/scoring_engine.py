@@ -10,10 +10,36 @@ OVERDUE_HOURS = 24
 DISPATCH_STALE_HOURS = 2
 STUCK_HOURS = 8
 
-INACTIVE_STATUSES = {"scheduled-not here","dvi only- not here","apache job","close","closed"}
+INACTIVE_STATUSES = {"apache job","close","closed"}
 DREW_OWNED_STATUSES = {"online /stage","ready for tech","awaiting tech","testing","dvi updates","technical advisement","technical overview","servicing","qc","advisor qc review","advisor finalize ro","waiting parts"}
 MITCH_OWNED_STATUSES = {"drop off/ tow-in","advisor estimate","waiting approval","ordering parts","ready"}
 NEAR_CLOSEOUT_STATUSES = {"advisor finalize ro","advisor qc review","qc","ready"}
+REAL_STATUSES = {
+    "aaa", "call_shop", "checkin", "finished", "inspecting", "k_mech_complete",
+    "parts", "qc", "ready", "servicing", "unknown", "waiting approval",
+    "advisor estimate", "ordering parts", "waiting parts", "technical advisement",
+    "dvi updates", "ready for tech", "awaiting tech", "testing", "advisor qc review",
+    "advisor finalize ro", "technical overview", "scheduled-not here",
+    "dvi only- not here", "drop off/ tow-in", "online /stage",
+}
+STATUS_DISPLAY_MAP = {
+    "finished": "Ready to Close",
+    "ready": "Ready — Notify Customer",
+    "inspecting": "DVI In Progress",
+    "checkin": "Checking In",
+    "k_mech_complete": "Mech Complete — Advisor Action",
+    "qc": "QC Review",
+    "servicing": "In Service",
+    "call_shop": "Customer Follow-Up",
+    "parts": "Waiting on Parts",
+    "ordering parts": "Parts Ordered",
+    "waiting parts": "Parts Inbound",
+    "waiting approval": "Waiting Customer Decision",
+    "advisor estimate": "Building Estimate",
+    "technical advisement": "Tech Advisement",
+    "unknown": "Needs Review",
+    "aaa": "Status Unknown — Fix in AutoFlow",
+}
 TRANSITIONS_PATH = Path(__file__).resolve().parents[1] / "data" / "status_transitions" / "transitions.jsonl"
 latest_transition_by_ro = {}
 
@@ -80,6 +106,9 @@ def _normalize_status(raw):
     if not raw:
         return "unknown"
     return str(raw).strip().lower()
+
+def _clean_status(status):
+    return STATUS_DISPLAY_MAP.get(status, status)
 
 def _is_inactive(status):
     return status in INACTIVE_STATUSES
@@ -168,39 +197,47 @@ def _detect_risk_flags(status, job):
     return flags
 
 def _assign_priority(status, job, flags):
-    if status in NEAR_CLOSEOUT_STATUSES:
-        return "P1", "Near closeout - vehicle ready to collect or finalize"
-    if "etc_overdue" in flags:
-        return "P1", "ETC overdue - customer promise is broken, call now"
-    if "etc_approaching" in flags:
-        return "P1", "ETC approaching within 2 hours - advisor must prepare now"
-    if "approval_stale" in flags:
-        return "P1", f"Approval waiting {_last_update_hours(job):.0f}h - customer contact overdue"
-    if "ready_not_collected" in flags:
-        return "P1", "Vehicle marked Ready - customer not notified or pickup delayed"
-    if "customer_contact_overdue" in flags:
-        return "P1", "Customer update overdue - risk of customer calling first"
-    if "no_customer_concern" in flags and status in {"online /stage","ready for tech","awaiting tech","testing","drop off/ tow-in","unknown"}:
-        return "P2A", "No customer concern captured - job cannot move without intake"
-    if status == "unknown":
-        return "P2A", "Status unknown - nobody can explain what this job is waiting on"
-    if status in {"ready for tech","awaiting tech"} and "dispatch_stale" in flags:
-        return "P2B", "Awaiting tech too long - dispatch is stuck"
-    if status in {"testing","dvi updates"} and "dvi_missing" in flags:
-        return "P2B", "In testing/DVI but no DVI completion signal yet"
-    if status in {"ready for tech","awaiting tech","testing","dvi updates"}:
-        return "P2B", "Waiting on tech or DVI - advisor should stay ahead"
-    if status == "advisor estimate" and "dvi_missing" in flags:
-        return "P2C", "Advisor estimate stage but DVI not complete - cannot build estimate"
-    if status in {"technical advisement","technical overview"}:
-        return "P2C", "Waiting on technical direction before advisor can proceed"
-    if status == "waiting parts" and _parts_on_order(job) and not _parts_arrived(job):
-        return "P4", "Waiting on external parts - legitimate hold (Drew monitors ETA)"
-    if status == "waiting approval" and "approval_stale" not in flags:
-        return "P4", "Waiting on customer decision - advisor has made contact"
-    if "no_movement" in flags:
-        return "P3", f"Active but no movement in {_last_update_hours(job):.0f}h - watch this"
-    return "P3", f"Active and progressing - status: {status}"
+    hours_in_status = _last_update_hours(job)
+    waiting_on = str(job.get("waiting_on") or "").strip()
+    dvi_status = str(job.get("dvi_review_status") or "").strip().upper()
+    dvi_acknowledged = bool(job.get("dvi_acknowledged") or job.get("dvi_review_acknowledged") or job.get("acknowledged"))
+    override = str(job.get("priority_override") or job.get("human_priority_override") or job.get("manual_priority") or "").strip().upper()
+
+    if override == "P1":
+        return "P1", "Human override set priority to P1"
+    if status == "ready" and waiting_on == "Mitch":
+        return "P1", "Ready vehicle is waiting on Mitch to notify customer"
+    if status == "finished" and waiting_on == "Mitch" and hours_in_status > 4:
+        return "P1", "Finished vehicle has waited over 4 hours for Mitch closeout"
+    if status == "waiting approval" and hours_in_status > 4:
+        return "P1", "Customer approval has been waiting over 4 hours"
+    if dvi_status == "REWORK_REQUIRED" and not dvi_acknowledged:
+        return "P1", "DVI rework required and not acknowledged"
+
+    if status == "finished" and hours_in_status <= 4:
+        return "P2", "Finished today - closeout action needed"
+    if status in {"k_mech_complete", "call_shop"}:
+        return "P2", "Advisor action needed today"
+    if status in {"qc", "advisor qc review"}:
+        return "P2", "QC review needs advisor attention today"
+    if status in {"ordering parts", "waiting parts"} and hours_in_status > 8:
+        return "P2", "Parts status has waited over 8 hours"
+    if status == "waiting approval" and hours_in_status <= 4:
+        return "P2", "Waiting customer decision - follow up today"
+
+    if status in {"servicing", "awaiting tech", "testing", "dvi updates", "ready for tech", "inspecting", "checkin"}:
+        return "P3", "Active job - monitor progress"
+    if status in {"ordering parts", "waiting parts"} and hours_in_status <= 8:
+        return "P3", "Parts process active - monitor ETA"
+
+    if status in {"parts", "scheduled-not here", "dvi only- not here", "drop off/ tow-in", "online /stage"}:
+        return "P4", "Low priority watch status"
+    if status in {"unknown", "aaa"}:
+        return "P4", "Junk or unknown status - watch and clean up"
+    if waiting_on == "External Hold":
+        return "P4", "External hold - watch only"
+
+    return "P4", f"Unmapped status - watch only: {status}"
 
 def _build_next_action(priority, status, owner, flags, job):
     ro = job.get("ro") or "this RO"
@@ -300,6 +337,7 @@ def score_job(job):
     raw_status = job.get("workflow_status") or job.get("current_status") or "unknown"
     status = _normalize_status(raw_status)
     if _is_inactive(status):
+        hours_in_status = _last_update_hours(job)
         return {
             "ticket_reference": job.get("ro"),
             "priority": "INACTIVE",
@@ -309,7 +347,9 @@ def score_job(job):
             "bay_message": "",
             "risk_flags": [],
             "score_reason": f"Status '{raw_status}' is inactive - excluded from board",
-            "hours_in_status": _last_update_hours(job),
+            "hours_in_status": hours_in_status,
+            "stale": hours_in_status > OVERDUE_HOURS,
+            "clean_status": _clean_status(status),
         }
     flags = _detect_risk_flags(status, job)
     priority, reason = _assign_priority(status, job, flags)
@@ -317,6 +357,7 @@ def score_job(job):
     next_action = _build_next_action(priority, status, owner, flags, job)
     bay_message = _build_bay_message(priority, status, flags, job)
     signal = _board_signal(priority, flags)
+    hours_in_status = _last_update_hours(job)
     return {
         "ticket_reference": job.get("ro"),
         "customer_name": job.get("customer_name", ""),
@@ -331,7 +372,9 @@ def score_job(job):
         "bay_message": bay_message,
         "risk_flags": flags,
         "autoflow_status": raw_status,
-        "hours_in_status": _last_update_hours(job),
+        "hours_in_status": hours_in_status,
+        "stale": hours_in_status > OVERDUE_HOURS,
+        "clean_status": _clean_status(status),
         "etc_hours_remaining": _etc_hours_remaining(job),
         "has_dvi": _has_dvi(job),
         "parts_on_order": _parts_on_order(job),
@@ -341,7 +384,7 @@ def score_job(job):
 
 def score_all_jobs(shop_state):
     _refresh_transition_cache()
-    priority_order = {"P1": 0, "P2A": 1, "P2B": 2, "P2C": 3, "P3": 4, "P4": 5}
+    priority_order = {"P1": 0, "P2": 1, "P2A": 1, "P2B": 2, "P2C": 3, "P3": 4, "P4": 5}
     scored = []
     for job in shop_state.get("jobs", []):
         result = score_job(job)
