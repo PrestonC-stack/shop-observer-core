@@ -21,6 +21,8 @@ except ImportError:  # pragma: no cover - runtime convenience if dotenv is unava
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DVI_REVIEWS_DIR = REPO_ROOT / "state" / "dvi_reviews"
 SHOP_STATE_PATH = REPO_ROOT / "state" / "shop_state.json"
+JOB_HISTORY_DIR = REPO_ROOT / "state" / "job_history"
+API_COSTS_PATH = REPO_ROOT / "data" / "api_costs" / "api_costs.jsonl"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-opus-4-6"
 
@@ -63,6 +65,44 @@ def _parse_packet_json(text: str) -> dict:
         if cleaned.lower().startswith("json"):
             cleaned = cleaned[4:].strip()
     return json.loads(cleaned)
+
+
+def _save_job_history_packet(ro: str, packet: dict, timestamp: str) -> None:
+    try:
+        history_dir = JOB_HISTORY_DIR / ro
+        history_dir.mkdir(parents=True, exist_ok=True)
+        history_path = history_dir / f"packet_{timestamp}.json"
+        history_path.write_text(json.dumps(packet, indent=2, ensure_ascii=False), encoding="utf-8")
+    except OSError as error:
+        print(f"Packet history save failed for RO {ro}: {error}")
+
+
+def _append_api_cost_log(entry: dict) -> None:
+    try:
+        API_COSTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with API_COSTS_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as error:
+        print(f"Packet API cost log failed: {error}")
+
+
+def _safe_int(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def log_packet_cache_hit(ro: str) -> None:
+    _append_api_cost_log({
+        "timestamp": datetime.utcnow().isoformat(),
+        "action": "packet_cache_hit",
+        "ro": str(ro),
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "estimated_cost_usd": 0.0,
+        "cached": True,
+    })
 
 
 def _build_prompt(ro: str, review: dict, job: dict) -> str:
@@ -191,9 +231,27 @@ def generate_packet(ro):
             response_payload = json.loads(response.read().decode("utf-8"))
 
         packet = _parse_packet_json(_extract_response_text(response_payload))
-        packet["generated_at"] = datetime.utcnow().isoformat()
+        generated_at = datetime.utcnow().isoformat()
+        packet["generated_at"] = generated_at
         output_path = DVI_REVIEWS_DIR / f"packet_{ro}.json"
         output_path.write_text(json.dumps(packet, indent=2, ensure_ascii=False), encoding="utf-8")
+        _save_job_history_packet(ro, packet, datetime.utcnow().strftime("%Y%m%d_%H%M%S"))
+
+        usage = response_payload.get("usage", {}) if isinstance(response_payload.get("usage"), dict) else {}
+        input_tokens = _safe_int(usage.get("input_tokens"))
+        output_tokens = _safe_int(usage.get("output_tokens"))
+        estimated_cost = (input_tokens * 0.000003) + (output_tokens * 0.000015)
+        _append_api_cost_log({
+            "timestamp": generated_at,
+            "action": "packet_generate",
+            "ro": ro,
+            "customer": str(packet.get("customer") or ""),
+            "vehicle": str(packet.get("vehicle") or ""),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "estimated_cost_usd": estimated_cost,
+            "cached": False,
+        })
         return packet
     except (HTTPError, URLError, OSError, json.JSONDecodeError, ValueError) as error:
         return {"error": "Packet generation failed", "detail": str(error)}
