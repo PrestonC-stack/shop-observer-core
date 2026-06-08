@@ -69,6 +69,7 @@ def _build_prompt(ro: str, review: dict, job: dict) -> str:
     customer = _job_value(job, "customer_name", "customer") or str(review.get("customer", ""))
     vehicle = _job_value(job, "vehicle") or str(review.get("vehicle", ""))
     mileage = _job_value(job, "mileage", "odometer")
+    mileage = mileage or "Not recorded"
     month = datetime.now().strftime("%B %Y")
     dvi_findings_json = json.dumps(review, indent=2, ensure_ascii=False)
 
@@ -190,6 +191,7 @@ def generate_packet(ro):
             response_payload = json.loads(response.read().decode("utf-8"))
 
         packet = _parse_packet_json(_extract_response_text(response_payload))
+        packet["generated_at"] = datetime.utcnow().isoformat()
         output_path = DVI_REVIEWS_DIR / f"packet_{ro}.json"
         output_path.write_text(json.dumps(packet, indent=2, ensure_ascii=False), encoding="utf-8")
         return packet

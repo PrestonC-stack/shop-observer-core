@@ -67,7 +67,6 @@ def _render_parts_items(items) -> str:
 
 def _render_job(job: dict) -> str:
     category = str(job.get("category", "CONCERN")).upper()
-    number = _escape(job.get("number", ""))
     title = _escape(job.get("title", "Untitled job"))
     header_class = _header_class(category)
     addon_banner = ""
@@ -83,7 +82,7 @@ def _render_job(job: dict) -> str:
 
     return f"""
     <section class="job-block">
-        <div class="job-header {header_class}">{_escape(category)} {number} — {title}</div>
+        <div class="job-header {header_class}">{title}</div>
         {addon_banner}
         <div class="job-body">
             {addon_toggle}
