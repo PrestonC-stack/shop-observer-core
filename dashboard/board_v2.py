@@ -138,7 +138,7 @@ def render_board_v2() -> Response:
     generated_at = board.get("generated_at", "") if isinstance(board, dict) else ""
     html = (
         HTML_TEMPLATE
-        .replace("__BOARD_JOBS__", json.dumps(jobs, ensure_ascii=False).replace("</", "<\\/"))
+        .replace("__BOARD_JOBS__", json.dumps(jobs, ensure_ascii=True).replace("\\", "\\\\").replace("</", "<\\/"))
         .replace("__GENERATED_AT__", json.dumps(generated_at))
         .replace("__INBOX_UNREAD__", str(_unread_conversation_count()))
     )
@@ -234,3 +234,6 @@ document.getElementById('search').addEventListener('input',e=>{renderColumns();s
 </script>
 </body>
 </html>"""
+
+
+
