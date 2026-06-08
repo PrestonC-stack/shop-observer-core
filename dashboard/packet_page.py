@@ -130,6 +130,9 @@ def render_packet_page(ro):
             packet = _load_packet(path)
         except Exception as error:
             packet = {"error": "Packet generation failed", "detail": str(error)}
+        else:
+            from core.cas.tekmetric_packet import log_packet_cache_hit
+            log_packet_cache_hit(ro)
     else:
         packet = generate_packet(ro)
 
