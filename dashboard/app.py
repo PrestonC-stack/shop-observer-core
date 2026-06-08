@@ -427,6 +427,11 @@ def dvi_packet(ro):
     from dashboard.packet_page import render_packet_page
     return render_packet_page(ro)
 
+@app.route("/sanity-check")
+def sanity_check():
+    from dashboard.sanity_check import render_sanity_check
+    return render_sanity_check()
+
 @app.route("/dvi/slip/<ro>")
 def dvi_slip(ro):
     slip_path = _Path(__file__).parent.parent / "state" / "dvi_reviews" / f"rework_slip_{ro}.html"

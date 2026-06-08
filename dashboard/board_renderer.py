@@ -87,6 +87,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <button class="top-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-panel="training-panel">Training</button>
             <button id="morning-briefing" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">Morning Briefing</button>
             <button id="afternoon-briefing-top" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">Afternoon Brief</button>
+            <a href="/sanity-check" target="_blank" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">🔍 Sanity Check</a>
             <a href="/bay-performance" target="_blank" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">Bay View</a>
         </div>
 
