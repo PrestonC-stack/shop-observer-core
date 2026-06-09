@@ -170,19 +170,34 @@ def _render_merged_findings(cache: dict) -> str:
     merged = cache.get("merged_photo_findings") if isinstance(cache, dict) else None
     if not isinstance(merged, dict):
         return PHOTO_FINDINGS_PLACEHOLDER
-    findings = [str(item).strip() for item in _as_list(merged.get("findings")) if str(item).strip()]
-    if not findings:
+    technical_summary = str(merged.get("technical_summary") or "").strip()
+    customer_explanation = str(merged.get("customer_explanation") or "").strip()
+    if not technical_summary and not customer_explanation:
         return PHOTO_FINDINGS_PLACEHOLDER
-    bullets = "".join(f"<li>{_escape(item)}</li>" for item in findings)
     timestamp = format_ts(merged.get("timestamp"))
     requested_by = _escape(merged.get("requested_by") or "unknown")
+    try:
+        findings_count = int(merged.get("findings_count") or 0)
+    except (TypeError, ValueError):
+        findings_count = 0
     return f"""
-        <section id="photo-findings-merged" class="merged-photo-findings">
-            <h2>PHOTO FINDINGS - MERGED {timestamp}</h2>
-            <div class="merged-meta">Requested by: {requested_by}</div>
-            <div class="merged-rule"></div>
-            <ul>{bullets}</ul>
-        </section>
+        <div id="photo-findings-merged">
+            <div style="border:2px solid #185FA5; border-radius:8px; padding:1.5rem; margin-bottom:1rem; background:#f8faff;">
+                <div style="font-size:11px;font-weight:600;color:#185FA5; text-transform:uppercase;letter-spacing:.08em; margin-bottom:.75rem;">
+                    Photo-Verified Technical Findings
+                    <span style="font-weight:400;color:#666;margin-left:8px;">
+                    {findings_count} photos analyzed · {requested_by} · {timestamp}
+                    </span>
+                </div>
+                <pre style="font-family:inherit;font-size:12px; line-height:1.7;white-space:pre-wrap; color:#1a1a1a;margin:0;">{_escape(technical_summary)}</pre>
+            </div>
+            <div style="border:2px solid #3B6D11; border-radius:8px; padding:1.5rem; background:#f8fff8;">
+                <div style="font-size:11px;font-weight:600;color:#3B6D11; text-transform:uppercase;letter-spacing:.08em; margin-bottom:.75rem;">
+                    Customer Explanation - advisor script
+                </div>
+                <div style="font-size:13px;line-height:1.8; color:#1a1a1a;">{_escape(customer_explanation)}</div>
+            </div>
+        </div>
     """
 
 
@@ -339,6 +354,94 @@ def _call_claude_vision(photo_b64: str, media_type: str) -> str:
         print(f"Claude API error {error.code}: {error_body[:500]}")
         raise
     return clean_ai_response_text(_extract_response_text(payload))
+
+
+def _parse_synthesis_response(text: str) -> tuple[str, str]:
+    cleaned = clean_ai_response_text(text)
+    marker = "CUSTOMER EXPLANATION"
+    if marker in cleaned:
+        technical_summary, customer_explanation = cleaned.split(marker, 1)
+    else:
+        technical_summary, customer_explanation = cleaned, ""
+    technical_summary = technical_summary.replace("TECHNICAL SUMMARY", "", 1).strip(" \n:-")
+    customer_explanation = customer_explanation.strip(" \n:-")
+    return technical_summary, customer_explanation
+
+
+def _call_claude_synthesis(packet: dict, findings: list[dict]) -> tuple[str, str]:
+    diagnostic_findings = [
+        str(item.get("finding") or "").strip()
+        for item in findings
+        if item.get("has_diagnostic_value") and str(item.get("finding") or "").strip()
+    ]
+    if not diagnostic_findings:
+        return "", ""
+
+    vehicle = str(packet.get("vehicle") or "Vehicle")
+    mileage = str(packet.get("mileage") or "Not recorded")
+    numbered_findings = "\n".join(
+        f"{index}. {finding}" for index, finding in enumerate(diagnostic_findings, start=1)
+    )
+    user_prompt = f"""
+Vehicle: {vehicle} | Mileage: {mileage}
+
+The following diagnostic evidence was observed during inspection:
+{numbered_findings}
+
+Produce TWO sections using these EXACT headers:
+
+TECHNICAL SUMMARY
+Write a precise technical summary organized by vehicle system.
+State what was observed, what it confirms or rules out, and
+the recommended repair action with justification. Use
+professional automotive terminology. This is for the repair
+order and shop records. Be factual and complete.
+
+CUSTOMER EXPLANATION
+Write what the service advisor should say to the customer
+during the vehicle presentation phone call or in person.
+Use plain language - no DTC codes, no sensor names, no
+jargon. Explain what is wrong, why it matters to them
+personally (safety, reliability, cost of waiting), and
+what happens if it is not addressed. Write in second person
+as if speaking directly to the customer. Warm but direct.
+2-4 paragraphs maximum.
+""".strip()
+
+    load_dotenv(REPO_ROOT / ".env")
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return "", "Photo synthesis unavailable: ANTHROPIC_API_KEY is not set."
+
+    body = {
+        "model": ANTHROPIC_MODEL,
+        "max_tokens": 2500,
+        "system": (
+            "You are an automotive service advisor and diagnostic report writer for a professional auto repair shop. "
+            "You translate technical diagnostic findings into two formats: one for the shop's internal records and "
+            "one the service advisor reads to the customer during the vehicle presentation call. Every statement must "
+            "be supported by the evidence provided. Never speculate beyond the evidence."
+        ),
+        "messages": [{"role": "user", "content": user_prompt}],
+    }
+    req = Request(
+        ANTHROPIC_URL,
+        data=json.dumps(body, ensure_ascii=True).encode("utf-8"),
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=45) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        error_body = error.read().decode("utf-8")
+        print(f"Claude synthesis API error {error.code}: {error_body[:500]}")
+        raise
+    return _parse_synthesis_response(_extract_response_text(payload))
 
 
 def _has_diagnostic_value(finding: str) -> bool:
@@ -614,6 +717,15 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
         .finding-row.no-value .finding-text {{color:#6b7280;}}
         .finding-suggested {{margin-top:8px;color:#64748b;font-size:12px;font-style:italic;}}
         .finding-label {{display:inline-block;margin-bottom:6px;border-radius:999px;background:#e5e7eb;color:#475569;padding:3px 8px;font-size:10px;font-weight:900;text-transform:uppercase;}}
+        .synthesis-grid {{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0;}}
+        .synthesis-box {{border-radius:12px;padding:14px;background:#fff;}}
+        .synthesis-box.tech {{border:2px solid #185FA5;background:#f8faff;}}
+        .synthesis-box.customer {{border:2px solid #3B6D11;background:#f8fff8;}}
+        .synthesis-box h3 {{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;}}
+        .synthesis-box.tech h3 {{color:#185FA5;}}
+        .synthesis-box.customer h3 {{color:#3B6D11;}}
+        .synthesis-box pre {{font-family:monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;margin:0;color:#1a1a1a;}}
+        .synthesis-box .customer-text {{font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.7;color:#1a1a1a;white-space:pre-wrap;}}
         .merge-success {{margin-top:14px;background:#dcfce7;border:1px solid #16a34a;color:#14532d;border-radius:10px;padding:12px;font-weight:900;display:flex;justify-content:space-between;gap:12px;align-items:center;}}
         .merged-photo-findings {{margin-top:28px;border:2px solid #185FA5;border-radius:12px;background:#eff6ff;padding:18px;page-break-inside:avoid;}}
         .merged-photo-findings h2 {{color:#1e3a8a;margin-bottom:8px;}}
@@ -693,11 +805,15 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
     }}
     var PHOTO_COST = {PHOTO_ANALYSIS_COST:.2f};
     var PHOTO_RO = "{_escape(ro)}";
+    var PACKET_CUSTOMER_FIRST = {json.dumps(str(packet.get("customer") or "").split()[0] if str(packet.get("customer") or "").split() else "the customer", ensure_ascii=True)};
     var photoCards = Array.prototype.slice.call(document.querySelectorAll(".photo-card"));
     var analyzeBtn = document.getElementById("analyzePhotosBtn");
     var photoCounter = document.getElementById("photoCounter");
     var findingsPanel = document.getElementById("photoFindingsPanel");
     var photoAnalysisRequester = "";
+    var latestTechnicalSummary = "";
+    var latestCustomerExplanation = "";
+    var latestFindingsCount = 0;
 
     function selectedPhotoUrls() {{
         return photoCards
@@ -729,6 +845,9 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
             findingsPanel.innerHTML = '<div class="findings-panel"><strong>No findings returned.</strong></div>';
             return;
         }}
+        latestTechnicalSummary = data.technical_summary || "";
+        latestCustomerExplanation = customerizeExplanation(data.customer_explanation || "");
+        latestFindingsCount = findings.filter(function(finding) {{ return !!finding.has_diagnostic_value; }}).length;
         var rows = findings.map(function(finding, index) {{
             var hasValue = !!finding.has_diagnostic_value;
             var checked = hasValue ? "checked" : "";
@@ -749,7 +868,18 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
             '<div class="findings-panel">' +
             '<h2>Photo findings — review before merging</h2>' +
             '<p class="photo-subtext">Uncheck any finding that is inaccurate or irrelevant before merging into the packet.</p>' +
+            '<h3>Individual photos</h3>' +
             rows +
+            '<div class="synthesis-grid">' +
+            '<div class="synthesis-box tech">' +
+            '<h3>Technical Summary — for repair order</h3>' +
+            '<pre>' + escapeHtml(latestTechnicalSummary) + '</pre>' +
+            '</div>' +
+            '<div class="synthesis-box customer">' +
+            '<h3>Customer Explanation — read this to ' + escapeHtml(PACKET_CUSTOMER_FIRST) + '</h3>' +
+            '<div class="customer-text">' + escapeHtml(latestCustomerExplanation) + '</div>' +
+            '</div>' +
+            '</div>' +
             '<button type="button" class="btn merge-btn" id="mergeFindingsBtn">Merge confirmed findings into packet</button>' +
             '<div id="mergeResult"></div>' +
             '</div>';
@@ -772,13 +902,18 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
     }}
 
     function mergeFindings(findings, btn) {{
-        if (!findings.length) return;
+        if (!findings.length && !latestTechnicalSummary && !latestCustomerExplanation) return;
         btn.disabled = true;
         btn.textContent = "Merging...";
         fetch("/dvi/packet/" + encodeURIComponent(PHOTO_RO) + "/merge-findings", {{
             method: "POST",
             headers: {{"Content-Type": "application/json"}},
-            body: JSON.stringify({{findings: findings, requested_by: photoAnalysisRequester || "unknown"}})
+            body: JSON.stringify({{
+                technical_summary: latestTechnicalSummary,
+                customer_explanation: latestCustomerExplanation,
+                requested_by: photoAnalysisRequester || "unknown",
+                findings_count: latestFindingsCount || findings.length
+            }})
         }})
         .then(function(resp) {{ return resp.json(); }})
         .then(function(data) {{
@@ -830,6 +965,10 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;");
+    }}
+
+    function customerizeExplanation(value) {{
+        return String(value || "").replace(/the customer/gi, PACKET_CUSTOMER_FIRST);
     }}
 
     if (analyzeBtn) analyzeBtn.addEventListener("click", analyzeSelectedPhotos);
@@ -885,6 +1024,8 @@ def render_packet_analyze_photos(ro):
     photo_urls = [str(url).strip() for url in _as_list(body.get("photo_urls")) if str(url).strip()]
     requested_by = str(body.get("requested_by") or "Drew").strip() or "Drew"
     findings = []
+    cache = _load_cache(ro)
+    packet = cache.get("packet") if isinstance(cache.get("packet"), dict) else {}
 
     for url in photo_urls:
         try:
@@ -902,6 +1043,13 @@ def render_packet_analyze_photos(ro):
             "suggested_merge_text": _suggested_merge_text(finding_text) if has_value else "",
         })
 
+    try:
+        technical_summary, customer_explanation = _call_claude_synthesis(packet, findings)
+    except (HTTPError, URLError, OSError, socket.timeout, json.JSONDecodeError, ValueError) as error:
+        print(f"Photo synthesis failed for RO {ro}: {error}")
+        technical_summary = ""
+        customer_explanation = "Photo synthesis failed. Review individual photo findings before presenting to the customer."
+
     cost = len(photo_urls) * PHOTO_ANALYSIS_COST
     _append_api_cost_log({
         "timestamp": datetime.utcnow().isoformat(),
@@ -915,7 +1063,6 @@ def render_packet_analyze_photos(ro):
         "cached": False,
     })
 
-    cache = _load_cache(ro)
     analyzed = set(str(item) for item in _as_list(cache.get("analyzed_photos")))
     analyzed.update(photo_urls)
     cache["analyzed_photos"] = sorted(analyzed)
@@ -923,6 +1070,8 @@ def render_packet_analyze_photos(ro):
 
     return jsonify({
         "findings": findings,
+        "technical_summary": technical_summary,
+        "customer_explanation": customer_explanation,
         "photos_analyzed": len(photo_urls),
         "cost_usd": cost,
         "requested_by": requested_by,
@@ -933,20 +1082,27 @@ def render_packet_merge_findings(ro):
     ro = str(ro).strip()
     body = request.get_json(silent=True) or {}
     requested_by = str(body.get("requested_by") or "Drew").strip() or "Drew"
-    findings = [clean_ai_response_text(item) for item in _as_list(body.get("findings")) if str(item).strip()]
+    technical_summary = clean_ai_response_text(body.get("technical_summary") or "")
+    customer_explanation = clean_ai_response_text(body.get("customer_explanation") or "")
+    try:
+        findings_count = int(body.get("findings_count") or 0)
+    except (TypeError, ValueError):
+        findings_count = 0
     cache = _load_cache(ro)
     timestamp = datetime.utcnow().isoformat()
     cache["merged_photo_findings"] = {
         "timestamp": timestamp,
         "requested_by": requested_by,
-        "findings": findings,
+        "technical_summary": technical_summary,
+        "customer_explanation": customer_explanation,
+        "findings_count": findings_count,
     }
     generation_log = cache.get("generation_log") if isinstance(cache.get("generation_log"), list) else []
     generation_log.append({
         "timestamp": timestamp,
         "trigger": "photo_findings_merged",
         "requested_by": requested_by,
-        "findings_count": len(findings),
+        "findings_count": findings_count,
         "api_cost_usd": 0,
     })
     cache["generation_log"] = generation_log
@@ -957,10 +1113,12 @@ def render_packet_merge_findings(ro):
         if PHOTO_FINDINGS_PLACEHOLDER in packet_html:
             packet_html = packet_html.replace(PHOTO_FINDINGS_PLACEHOLDER, merged_html)
         elif 'id="photo-findings-merged"' in packet_html:
-            start = packet_html.find('<section id="photo-findings-merged"')
-            end = packet_html.find("</section>", start)
-            if start != -1 and end != -1:
-                packet_html = packet_html[:start] + merged_html + packet_html[end + len("</section>"):]
+            start = packet_html.find('<div id="photo-findings-merged"')
+            if start == -1:
+                start = packet_html.find('<section id="photo-findings-merged"')
+            next_section = packet_html.find('<section class="generation-log"', start)
+            if start != -1 and next_section != -1:
+                packet_html = packet_html[:start] + merged_html + "\n\n        " + packet_html[next_section:]
             else:
                 packet_html += merged_html
         else:
@@ -968,4 +1126,4 @@ def render_packet_merge_findings(ro):
         cache["packet_html"] = packet_html
 
     _save_cache(ro, cache)
-    return jsonify({"status": "merged", "findings_count": len(findings)})
+    return jsonify({"status": "merged", "findings_count": findings_count})
