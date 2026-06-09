@@ -7,6 +7,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import socket
 import base64
 from datetime import datetime, timedelta, timezone
@@ -170,9 +171,9 @@ def _render_merged_findings(cache: dict) -> str:
     merged = cache.get("merged_photo_findings") if isinstance(cache, dict) else None
     if not isinstance(merged, dict):
         return PHOTO_FINDINGS_PLACEHOLDER
-    technical_summary = str(merged.get("technical_summary") or "").strip()
-    customer_explanation = str(merged.get("customer_explanation") or "").strip()
-    if not technical_summary and not customer_explanation:
+    ro_notes_block = str(merged.get("ro_notes_block") or "").strip()
+    unmatched_findings = str(merged.get("unmatched_findings") or "").strip()
+    if not ro_notes_block and not unmatched_findings:
         return PHOTO_FINDINGS_PLACEHOLDER
     timestamp = format_ts(merged.get("timestamp"))
     requested_by = _escape(merged.get("requested_by") or "unknown")
@@ -180,23 +181,24 @@ def _render_merged_findings(cache: dict) -> str:
         findings_count = int(merged.get("findings_count") or 0)
     except (TypeError, ValueError):
         findings_count = 0
+    unmatched_html = ""
+    if unmatched_findings:
+        unmatched_html = f"""
+          <div style="margin-top:1rem;padding:1rem; background:#fef9c3;border:1px solid #fbbf24; border-radius:6px;font-size:12px;color:#78350f;">
+            <strong>Additional findings not matched to a job block:</strong>
+            {_escape(unmatched_findings)}
+          </div>
+        """
     return f"""
-        <div id="photo-findings-merged">
-            <div style="border:2px solid #185FA5; border-radius:8px; padding:1.5rem; margin-bottom:1rem; background:#f8faff;">
-                <div style="font-size:11px;font-weight:600;color:#185FA5; text-transform:uppercase;letter-spacing:.08em; margin-bottom:.75rem;">
-                    Photo-Verified Technical Findings
-                    <span style="font-weight:400;color:#666;margin-left:8px;">
-                    {findings_count} photos analyzed · {requested_by} · {timestamp}
-                    </span>
-                </div>
-                <pre style="font-family:inherit;font-size:12px; line-height:1.7;white-space:pre-wrap; color:#1a1a1a;margin:0;">{_escape(technical_summary)}</pre>
-            </div>
-            <div style="border:2px solid #3B6D11; border-radius:8px; padding:1.5rem; background:#f8fff8;">
-                <div style="font-size:11px;font-weight:600;color:#3B6D11; text-transform:uppercase;letter-spacing:.08em; margin-bottom:.75rem;">
-                    Customer Explanation - advisor script
-                </div>
-                <div style="font-size:13px;line-height:1.8; color:#1a1a1a;">{_escape(customer_explanation)}</div>
-            </div>
+        <div id="photo-findings-merged" style="margin:2rem 0; padding:1.5rem;border:2px solid #185FA5;border-radius:8px; background:#f8faff;">
+          <div style="font-size:11px;font-weight:900;color:#185FA5; letter-spacing:.08em;text-transform:uppercase; margin-bottom:1rem;">
+            RO Notes - Copy/Paste into TekMetric
+            <span style="font-weight:400;color:#666;margin-left:8px;">
+            {findings_count} photos analyzed · {requested_by} · {timestamp}
+            </span>
+          </div>
+          <pre style="font-family:inherit;font-size:13px; line-height:1.8;white-space:pre-wrap; background:#fff;border:1px solid #cbd5e1; border-radius:6px;padding:1rem; color:#1a1a1a;margin:0;">{_escape(ro_notes_block)}</pre>
+          {unmatched_html}
         </div>
     """
 
@@ -356,56 +358,172 @@ def _call_claude_vision(photo_b64: str, media_type: str) -> str:
     return clean_ai_response_text(_extract_response_text(payload))
 
 
-def _parse_synthesis_response(text: str) -> tuple[str, str]:
+def _extract_job_titles(packet_html: str) -> list[str]:
+    pattern = r'class="job-header[^"]*">([^<]+)<'
+    job_titles = re.findall(pattern, str(packet_html or ""))
+    return [title.replace("&amp;", "&").strip() for title in job_titles if title.strip()]
+
+
+def _parse_synthesis_response(text: str) -> dict | None:
     cleaned = clean_ai_response_text(text)
-    marker = "CUSTOMER EXPLANATION"
-    if marker in cleaned:
-        technical_summary, customer_explanation = cleaned.split(marker, 1)
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        lines = [line for line in lines if not line.strip().startswith("```")]
+        cleaned = "\n".join(lines).strip()
+    try:
+        data = json.loads(cleaned)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _fallback_synthesis_data(findings: list[dict], reason: str = "") -> dict:
+    diagnostic_findings = [
+        str(item.get("finding") or "").strip()
+        for item in findings
+        if item.get("has_diagnostic_value") and str(item.get("finding") or "").strip()
+    ]
+    ro_notes = "\n".join(_suggested_merge_text(item) for item in diagnostic_findings if _suggested_merge_text(item))
+    unmatched = " ".join(diagnostic_findings[:3])
+    if reason:
+        unmatched = f"Synthesis JSON parse failed: {reason}. {unmatched}".strip()
+    return {
+        "job_findings": [],
+        "ro_notes_block": clean_ai_response_text(ro_notes),
+        "unmatched_findings": clean_ai_response_text(unmatched),
+    }
+
+
+def _clean_synthesis_data(data: dict | None, fallback_findings: list[dict]) -> dict:
+    if not isinstance(data, dict):
+        return _fallback_synthesis_data(fallback_findings, "invalid response")
+    job_findings = []
+    for item in _as_list(data.get("job_findings")):
+        if not isinstance(item, dict):
+            continue
+        job_findings.append({
+            "job_title_match": clean_ai_response_text(item.get("job_title_match") or ""),
+            "technical_note": clean_ai_response_text(item.get("technical_note") or ""),
+            "customer_script": clean_ai_response_text(item.get("customer_script") or ""),
+            "ro_note": clean_ai_response_text(item.get("ro_note") or ""),
+        })
+    return {
+        "job_findings": job_findings,
+        "ro_notes_block": clean_ai_response_text(data.get("ro_notes_block") or ""),
+        "unmatched_findings": clean_ai_response_text(data.get("unmatched_findings") or ""),
+    }
+
+
+def _render_job_finding_block(item: dict, requested_by: str, timestamp: str, customer_first: str) -> str:
+    technical_note = _escape(item.get("technical_note") or "")
+    customer_script = _escape(item.get("customer_script") or "")
+    ro_note = _escape(item.get("ro_note") or "")
+    return f"""
+<div style="margin-top:16px;padding:14px;
+border-left:4px solid #185FA5;background:#f0f7ff;
+border-radius:0 8px 8px 0;">
+  <div style="font-size:10px;font-weight:900;color:#185FA5;
+  letter-spacing:.08em;text-transform:uppercase;
+  margin-bottom:6px;">
+    Photo-Verified Finding · {_escape(requested_by)} · {timestamp}
+  </div>
+  <div style="font-size:13px;color:#1e293b;
+  line-height:1.6;margin-bottom:8px;">
+    <strong>Technical:</strong> {technical_note}
+  </div>
+  <div style="font-size:13px;color:#166534;
+  line-height:1.6;margin-bottom:8px;">
+    <strong>Tell {_escape(customer_first)}:</strong>
+    {customer_script}
+  </div>
+  <div style="font-size:11px;color:#64748b;
+  font-style:italic;line-height:1.5;">
+    <strong>RO Note:</strong> {ro_note}
+  </div>
+</div>
+"""
+
+
+def _inject_finding_into_job_block(packet_html: str, item: dict, requested_by: str, timestamp: str, customer_first: str) -> tuple[str, bool]:
+    title = clean_ai_response_text(item.get("job_title_match") or "")
+    if not title:
+        return packet_html, False
+    title_candidates = [html.escape(title, quote=False), title]
+    header_pos = -1
+    for candidate in title_candidates:
+        header_pos = packet_html.find(candidate)
+        if header_pos != -1:
+            break
+    if header_pos == -1:
+        return packet_html, False
+
+    body_start = packet_html.find('<div class="job-body">', header_pos)
+    if body_start == -1:
+        return packet_html, False
+    next_job = packet_html.find('class="job-block"', body_start + 1)
+    body_scope_end = next_job if next_job != -1 else packet_html.find('<section class="generation-log"', body_start)
+    if body_scope_end == -1:
+        body_scope_end = len(packet_html)
+    insert_pos = packet_html.rfind("</ul>", body_start, body_scope_end)
+    if insert_pos == -1:
+        insert_pos = packet_html.find("</div>", body_start)
+        if insert_pos == -1:
+            return packet_html, False
     else:
-        technical_summary, customer_explanation = cleaned, ""
-    technical_summary = technical_summary.replace("TECHNICAL SUMMARY", "", 1).strip(" \n:-")
-    customer_explanation = customer_explanation.strip(" \n:-")
-    return technical_summary, customer_explanation
+        insert_pos += len("</ul>")
+
+    injected_html = _render_job_finding_block(item, requested_by, timestamp, customer_first)
+    return packet_html[:insert_pos] + injected_html + packet_html[insert_pos:], True
 
 
-def _call_claude_synthesis(packet: dict, findings: list[dict]) -> tuple[str, str]:
+def _call_claude_synthesis(packet: dict, findings: list[dict], packet_html: str) -> dict:
     diagnostic_findings = [
         str(item.get("finding") or "").strip()
         for item in findings
         if item.get("has_diagnostic_value") and str(item.get("finding") or "").strip()
     ]
     if not diagnostic_findings:
-        return "", ""
+        return {"job_findings": [], "ro_notes_block": "", "unmatched_findings": ""}
 
     vehicle = str(packet.get("vehicle") or "Vehicle")
     mileage = str(packet.get("mileage") or "Not recorded")
+    customer_first = str(packet.get("customer") or "").split()[0] if str(packet.get("customer") or "").split() else "Customer"
+    job_titles = _extract_job_titles(packet_html)
     numbered_findings = "\n".join(
         f"{index}. {finding}" for index, finding in enumerate(diagnostic_findings, start=1)
     )
+    numbered_jobs = "\n".join(
+        f"{index}. {title}" for index, title in enumerate(job_titles, start=1)
+    ) or "No job blocks found in packet HTML."
     user_prompt = f"""
 Vehicle: {vehicle} | Mileage: {mileage}
+Customer: {customer_first}
 
 The following diagnostic evidence was observed during inspection:
 {numbered_findings}
 
-Produce TWO sections using these EXACT headers:
+The repair order contains these job blocks:
+{numbered_jobs}
 
-TECHNICAL SUMMARY
-Write a precise technical summary organized by vehicle system.
-State what was observed, what it confirms or rules out, and
-the recommended repair action with justification. Use
-professional automotive terminology. This is for the repair
-order and shop records. Be factual and complete.
+Produce a JSON response with this exact structure - no markdown,
+no code fences, just raw JSON:
 
-CUSTOMER EXPLANATION
-Write what the service advisor should say to the customer
-during the vehicle presentation phone call or in person.
-Use plain language - no DTC codes, no sensor names, no
-jargon. Explain what is wrong, why it matters to them
-personally (safety, reliability, cost of waiting), and
-what happens if it is not addressed. Write in second person
-as if speaking directly to the customer. Warm but direct.
-2-4 paragraphs maximum.
+{{
+  "job_findings": [
+    {{
+      "job_title_match": "exact job title from the list above that this finding belongs to",
+      "technical_note": "1-2 sentence factual technical finding supported by photo evidence. Professional terminology. Under 60 words.",
+      "customer_script": "1-2 sentence plain language explanation the advisor reads to the customer on the phone. No codes, no jargon. Warm and direct. Under 50 words.",
+      "ro_note": "1 sentence copy-paste ready for TekMetric RO notes field. State what was found and confirmed. Under 30 words."
+    }}
+  ],
+  "ro_notes_block": "Complete RO notes section combining all ro_note entries separated by newlines. Ready to paste into TekMetric. Under 150 words total.",
+  "unmatched_findings": "Any findings that do not clearly match a job block - brief summary, 2-3 sentences max."
+}}
+
+Only include job_findings entries where photo evidence directly
+supports that specific job. Do not force matches.
+If a finding matches multiple jobs, use the most specific one.
 """.strip()
 
     load_dotenv(REPO_ROOT / ".env")
@@ -418,9 +536,9 @@ as if speaking directly to the customer. Warm but direct.
         "max_tokens": 2500,
         "system": (
             "You are an automotive service advisor and diagnostic report writer for a professional auto repair shop. "
-            "You translate technical diagnostic findings into two formats: one for the shop's internal records and "
-            "one the service advisor reads to the customer during the vehicle presentation call. Every statement must "
-            "be supported by the evidence provided. Never speculate beyond the evidence."
+            "You translate technical diagnostic findings into concise, factual summaries that get injected directly "
+            "into specific repair order job blocks. Every statement must be supported by the evidence provided. "
+            "Never speculate beyond the evidence."
         ),
         "messages": [{"role": "user", "content": user_prompt}],
     }
@@ -441,7 +559,10 @@ as if speaking directly to the customer. Warm but direct.
         error_body = error.read().decode("utf-8")
         print(f"Claude synthesis API error {error.code}: {error_body[:500]}")
         raise
-    return _parse_synthesis_response(_extract_response_text(payload))
+    parsed = _parse_synthesis_response(_extract_response_text(payload))
+    if parsed is None:
+        return _fallback_synthesis_data(findings, "Claude returned non-JSON synthesis")
+    return _clean_synthesis_data(parsed, findings)
 
 
 def _has_diagnostic_value(finding: str) -> bool:
@@ -717,15 +838,12 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
         .finding-row.no-value .finding-text {{color:#6b7280;}}
         .finding-suggested {{margin-top:8px;color:#64748b;font-size:12px;font-style:italic;}}
         .finding-label {{display:inline-block;margin-bottom:6px;border-radius:999px;background:#e5e7eb;color:#475569;padding:3px 8px;font-size:10px;font-weight:900;text-transform:uppercase;}}
-        .synthesis-grid {{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0;}}
-        .synthesis-box {{border-radius:12px;padding:14px;background:#fff;}}
-        .synthesis-box.tech {{border:2px solid #185FA5;background:#f8faff;}}
-        .synthesis-box.customer {{border:2px solid #3B6D11;background:#f8fff8;}}
-        .synthesis-box h3 {{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;}}
-        .synthesis-box.tech h3 {{color:#185FA5;}}
-        .synthesis-box.customer h3 {{color:#3B6D11;}}
-        .synthesis-box pre {{font-family:monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;margin:0;color:#1a1a1a;}}
-        .synthesis-box .customer-text {{font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.7;color:#1a1a1a;white-space:pre-wrap;}}
+        .matched-preview {{border:2px solid #185FA5;border-radius:12px;background:#f8faff;padding:14px;margin:16px 0;}}
+        .matched-preview h3,.ro-notes-preview h3 {{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:#185FA5;}}
+        .matched-preview ul {{list-style:disc;margin-left:18px;}}
+        .matched-preview li {{font-size:13px;line-height:1.55;}}
+        .ro-notes-preview {{border:2px solid #3B6D11;border-radius:12px;background:#f8fff8;padding:14px;margin:16px 0;}}
+        .ro-notes-preview textarea {{width:100%;min-height:130px;border:1px solid #cbd5e1;border-radius:8px;padding:10px;font-size:13px;line-height:1.6;color:#1a1a1a;}}
         .merge-success {{margin-top:14px;background:#dcfce7;border:1px solid #16a34a;color:#14532d;border-radius:10px;padding:12px;font-weight:900;display:flex;justify-content:space-between;gap:12px;align-items:center;}}
         .merged-photo-findings {{margin-top:28px;border:2px solid #185FA5;border-radius:12px;background:#eff6ff;padding:18px;page-break-inside:avoid;}}
         .merged-photo-findings h2 {{color:#1e3a8a;margin-bottom:8px;}}
@@ -811,8 +929,7 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
     var photoCounter = document.getElementById("photoCounter");
     var findingsPanel = document.getElementById("photoFindingsPanel");
     var photoAnalysisRequester = "";
-    var latestTechnicalSummary = "";
-    var latestCustomerExplanation = "";
+    var latestSynthesisData = null;
     var latestFindingsCount = 0;
 
     function selectedPhotoUrls() {{
@@ -845,8 +962,7 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
             findingsPanel.innerHTML = '<div class="findings-panel"><strong>No findings returned.</strong></div>';
             return;
         }}
-        latestTechnicalSummary = data.technical_summary || "";
-        latestCustomerExplanation = customerizeExplanation(data.customer_explanation || "");
+        latestSynthesisData = data.synthesis_data || {{job_findings: [], ro_notes_block: "", unmatched_findings: ""}};
         latestFindingsCount = findings.filter(function(finding) {{ return !!finding.has_diagnostic_value; }}).length;
         var rows = findings.map(function(finding, index) {{
             var hasValue = !!finding.has_diagnostic_value;
@@ -864,23 +980,27 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
                 '</div>' +
                 '</div>';
         }}).join("");
+        var matchedRows = (latestSynthesisData.job_findings || []).map(function(item) {{
+            var preview = String(item.technical_note || "").slice(0, 40);
+            if (String(item.technical_note || "").length > 40) preview += "...";
+            return '<li><strong>' + escapeHtml(item.job_title_match || "Unmatched job") + '</strong> &rarr; ' + escapeHtml(preview) + '</li>';
+        }}).join("");
+        if (!matchedRows) matchedRows = '<li>No findings were confidently matched to packet job blocks.</li>';
         findingsPanel.innerHTML =
             '<div class="findings-panel">' +
             '<h2>Photo findings — review before merging</h2>' +
             '<p class="photo-subtext">Uncheck any finding that is inaccurate or irrelevant before merging into the packet.</p>' +
             '<h3>Individual photos</h3>' +
             rows +
-            '<div class="synthesis-grid">' +
-            '<div class="synthesis-box tech">' +
-            '<h3>Technical Summary — for repair order</h3>' +
-            '<pre>' + escapeHtml(latestTechnicalSummary) + '</pre>' +
+            '<div class="matched-preview">' +
+            '<h3>Matched findings preview</h3>' +
+            '<ul>' + matchedRows + '</ul>' +
             '</div>' +
-            '<div class="synthesis-box customer">' +
-            '<h3>Customer Explanation — read this to ' + escapeHtml(PACKET_CUSTOMER_FIRST) + '</h3>' +
-            '<div class="customer-text">' + escapeHtml(latestCustomerExplanation) + '</div>' +
+            '<div class="ro-notes-preview">' +
+            '<h3>RO Notes preview — copy anytime</h3>' +
+            '<textarea readonly>' + escapeHtml(latestSynthesisData.ro_notes_block || "") + '</textarea>' +
             '</div>' +
-            '</div>' +
-            '<button type="button" class="btn merge-btn" id="mergeFindingsBtn">Merge confirmed findings into packet</button>' +
+            '<button type="button" class="btn merge-btn" id="mergeFindingsBtn">Merge findings into job blocks</button>' +
             '<div id="mergeResult"></div>' +
             '</div>';
         var mergeBtn = document.getElementById("mergeFindingsBtn");
@@ -902,15 +1022,14 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
     }}
 
     function mergeFindings(findings, btn) {{
-        if (!findings.length && !latestTechnicalSummary && !latestCustomerExplanation) return;
+        if (!latestSynthesisData) return;
         btn.disabled = true;
         btn.textContent = "Merging...";
         fetch("/dvi/packet/" + encodeURIComponent(PHOTO_RO) + "/merge-findings", {{
             method: "POST",
             headers: {{"Content-Type": "application/json"}},
             body: JSON.stringify({{
-                technical_summary: latestTechnicalSummary,
-                customer_explanation: latestCustomerExplanation,
+                synthesis_data: latestSynthesisData,
                 requested_by: photoAnalysisRequester || "unknown",
                 findings_count: latestFindingsCount || findings.length
             }})
@@ -984,6 +1103,8 @@ def render_packet_page(ro):
 
     if cache and cache.get("packet_html"):
         log_packet_cache_hit(ro)
+        if cache.get("job_block_photo_findings_merged"):
+            return Response(str(cache.get("packet_html")), mimetype="text/html")
         packet = cache.get("packet") if isinstance(cache.get("packet"), dict) else {}
         if packet:
             return Response(_render_packet_html(ro, packet, cache=cache), mimetype="text/html")
@@ -1043,12 +1164,12 @@ def render_packet_analyze_photos(ro):
             "suggested_merge_text": _suggested_merge_text(finding_text) if has_value else "",
         })
 
+    packet_html = str(cache.get("packet_html") or "")
     try:
-        technical_summary, customer_explanation = _call_claude_synthesis(packet, findings)
+        synthesis_data = _call_claude_synthesis(packet, findings, packet_html)
     except (HTTPError, URLError, OSError, socket.timeout, json.JSONDecodeError, ValueError) as error:
         print(f"Photo synthesis failed for RO {ro}: {error}")
-        technical_summary = ""
-        customer_explanation = "Photo synthesis failed. Review individual photo findings before presenting to the customer."
+        synthesis_data = _fallback_synthesis_data(findings, str(error))
 
     cost = len(photo_urls) * PHOTO_ANALYSIS_COST
     _append_api_cost_log({
@@ -1070,8 +1191,7 @@ def render_packet_analyze_photos(ro):
 
     return jsonify({
         "findings": findings,
-        "technical_summary": technical_summary,
-        "customer_explanation": customer_explanation,
+        "synthesis_data": synthesis_data,
         "photos_analyzed": len(photo_urls),
         "cost_usd": cost,
         "requested_by": requested_by,
@@ -1082,19 +1202,22 @@ def render_packet_merge_findings(ro):
     ro = str(ro).strip()
     body = request.get_json(silent=True) or {}
     requested_by = str(body.get("requested_by") or "Drew").strip() or "Drew"
-    technical_summary = clean_ai_response_text(body.get("technical_summary") or "")
-    customer_explanation = clean_ai_response_text(body.get("customer_explanation") or "")
+    synthesis_data = _clean_synthesis_data(body.get("synthesis_data"), [])
     try:
         findings_count = int(body.get("findings_count") or 0)
     except (TypeError, ValueError):
         findings_count = 0
     cache = _load_cache(ro)
     timestamp = datetime.utcnow().isoformat()
+    timestamp_display = format_ts(timestamp)
+    packet = cache.get("packet") if isinstance(cache.get("packet"), dict) else {}
+    customer_first = str(packet.get("customer") or "").split()[0] if str(packet.get("customer") or "").split() else "customer"
     cache["merged_photo_findings"] = {
         "timestamp": timestamp,
         "requested_by": requested_by,
-        "technical_summary": technical_summary,
-        "customer_explanation": customer_explanation,
+        "synthesis_data": synthesis_data,
+        "ro_notes_block": synthesis_data.get("ro_notes_block", ""),
+        "unmatched_findings": synthesis_data.get("unmatched_findings", ""),
         "findings_count": findings_count,
     }
     generation_log = cache.get("generation_log") if isinstance(cache.get("generation_log"), list) else []
@@ -1110,6 +1233,24 @@ def render_packet_merge_findings(ro):
     merged_html = _render_merged_findings(cache)
     packet_html = str(cache.get("packet_html") or "")
     if packet_html:
+        unmatched_from_failed_matches = []
+        for item in _as_list(synthesis_data.get("job_findings")):
+            packet_html, injected = _inject_finding_into_job_block(
+                packet_html,
+                item,
+                requested_by,
+                timestamp_display,
+                customer_first,
+            )
+            if not injected:
+                summary = item.get("technical_note") or item.get("ro_note") or item.get("job_title_match")
+                if summary:
+                    unmatched_from_failed_matches.append(clean_ai_response_text(summary))
+        if unmatched_from_failed_matches:
+            existing_unmatched = str(cache["merged_photo_findings"].get("unmatched_findings") or "").strip()
+            combined_unmatched = "\n".join([existing_unmatched] + unmatched_from_failed_matches).strip()
+            cache["merged_photo_findings"]["unmatched_findings"] = combined_unmatched
+            merged_html = _render_merged_findings(cache)
         if PHOTO_FINDINGS_PLACEHOLDER in packet_html:
             packet_html = packet_html.replace(PHOTO_FINDINGS_PLACEHOLDER, merged_html)
         elif 'id="photo-findings-merged"' in packet_html:
@@ -1124,6 +1265,7 @@ def render_packet_merge_findings(ro):
         else:
             packet_html += merged_html
         cache["packet_html"] = packet_html
+        cache["job_block_photo_findings_merged"] = True
 
     _save_cache(ro, cache)
     return jsonify({"status": "merged", "findings_count": findings_count})
