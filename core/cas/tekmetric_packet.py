@@ -44,11 +44,14 @@ def format_ts(iso_string):
         dt = datetime.fromisoformat(str(iso_string).replace("Z", "+00:00"))
     except (TypeError, ValueError):
         return str(iso_string)
-    day = dt.day
+    day = str(dt.day)
     hour = dt.hour % 12 or 12
-    minute = f"{dt.minute:02d}"
+    minute = dt.strftime("%M")
     ampm = "AM" if dt.hour < 12 else "PM"
-    return f"{dt.strftime('%a %b')} {day}, {dt.year} · {hour}:{minute} {ampm}"
+    month = dt.strftime("%b")
+    year = dt.year
+    weekday = dt.strftime("%a")
+    return f"{weekday} {month} {day}, {year} · {hour}:{minute} {ampm}"
 
 
 def fetch_dvi_from_autoflow(ro):
