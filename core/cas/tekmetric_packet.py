@@ -29,6 +29,7 @@ API_COSTS_PATH = REPO_ROOT / "data" / "api_costs" / "api_costs.jsonl"
 PACKET_ERRORS_PATH = REPO_ROOT / "data" / "api_costs" / "packet_errors.jsonl"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-opus-4-6"
+PHOTO_FINDINGS_PLACEHOLDER = '<div id="photo-findings-merged"></div>'
 
 
 def _load_json(path: Path):
@@ -181,6 +182,22 @@ def _parse_packet_json(text: str, ro: str) -> dict:
             "error": "Packet generation failed — Claude response parse error",
             "detail": _packet_parse_error_html(),
         }
+
+
+def clean_ai_response_text(text: str) -> str:
+    """Normalize AI response text for Windows-safe packet rendering."""
+    response_text = str(text or "")
+    response_text = response_text.replace("\u00b0", " degrees")
+    response_text = response_text.replace("\u2014", "-")
+    response_text = response_text.replace("\u2013", "-")
+    response_text = response_text.replace("\u2018", "'")
+    response_text = response_text.replace("\u2019", "'")
+    response_text = response_text.replace("\u201c", '"')
+    response_text = response_text.replace("\u201d", '"')
+    response_text = response_text.replace("\u2026", "...")
+    response_text = response_text.replace("\u00ae", "")
+    response_text = response_text.replace("\u2122", "")
+    return response_text.encode("ascii", "ignore").decode("ascii").strip()
 
 
 def _save_job_history_packet(ro: str, packet: dict, timestamp: str) -> None:

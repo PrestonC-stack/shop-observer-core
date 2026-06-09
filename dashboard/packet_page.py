@@ -6,17 +6,41 @@ from __future__ import annotations
 
 import html
 import json
+import os
+import socket
+import base64
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
-from flask import Response, redirect, request, url_for
+from flask import Response, jsonify, redirect, request, url_for
 
-from core.cas.tekmetric_packet import build_packet, format_ts, log_packet_cache_hit, packet_cache_path
+from core.cas.tekmetric_packet import (
+    ANTHROPIC_MODEL,
+    ANTHROPIC_URL,
+    PHOTO_FINDINGS_PLACEHOLDER,
+    _extract_response_text,
+    build_packet,
+    clean_ai_response_text,
+    fetch_dvi_from_autoflow,
+    format_ts,
+    log_packet_cache_hit,
+    packet_cache_path,
+)
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - runtime convenience if dotenv is unavailable
+    def load_dotenv(*_args, **_kwargs):
+        return False
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DVI_REVIEWS_DIR = REPO_ROOT / "state" / "dvi_reviews"
+API_COSTS_PATH = REPO_ROOT / "data" / "api_costs" / "api_costs.jsonl"
 PACKET_MAX_AGE = timedelta(hours=4)
+PHOTO_ANALYSIS_COST = 0.03
 
 
 def _escape(value) -> str:
@@ -59,6 +83,244 @@ def _save_cache(ro: str, cache: dict) -> None:
     path.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _append_api_cost_log(entry: dict) -> None:
+    try:
+        API_COSTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with API_COSTS_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as error:
+        print(f"Photo analysis cost log failed: {error}")
+
+
+def _as_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    return []
+
+
+def _first_text(data: dict, *keys: str) -> str:
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _photo_url_from_value(value) -> str:
+    if isinstance(value, str) and value.lower().startswith(("http://", "https://")):
+        return value
+    if isinstance(value, dict):
+        for key in ("url", "photo_url", "image_url", "src", "href", "thumbnail_url"):
+            found = value.get(key)
+            if isinstance(found, str) and found.lower().startswith(("http://", "https://")):
+                return found
+    return ""
+
+
+def _extract_photo_entries(dvi_response) -> list[dict]:
+    entries: list[dict] = []
+    seen: set[str] = set()
+
+    def walk(node, parent_label: str = "") -> None:
+        if isinstance(node, dict):
+            label = (
+                _first_text(node, "name", "title", "item_name", "label", "description", "concern", "category")
+                or parent_label
+                or "DVI photo"
+            )
+            photos = node.get("photos")
+            if isinstance(photos, list):
+                for photo in photos:
+                    url = _photo_url_from_value(photo)
+                    if url and url not in seen:
+                        seen.add(url)
+                        entries.append({
+                            "url": url,
+                            "thumbnail_url": url,
+                            "label": label,
+                        })
+            for value in node.values():
+                walk(value, label)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, parent_label)
+
+    walk(dvi_response)
+    return entries
+
+
+def _load_dvi_photo_entries(ro: str) -> list[dict]:
+    try:
+        dvi_response = fetch_dvi_from_autoflow(ro)
+    except Exception as error:
+        print(f"Photo panel DVI fetch failed for RO {ro}: {error}")
+        return []
+    if not isinstance(dvi_response, dict):
+        return []
+    return _extract_photo_entries(dvi_response)
+
+
+def _render_merged_findings(cache: dict) -> str:
+    merged = cache.get("merged_photo_findings") if isinstance(cache, dict) else None
+    if not isinstance(merged, dict):
+        return PHOTO_FINDINGS_PLACEHOLDER
+    findings = [str(item).strip() for item in _as_list(merged.get("findings")) if str(item).strip()]
+    if not findings:
+        return PHOTO_FINDINGS_PLACEHOLDER
+    bullets = "".join(f"<li>{_escape(item)}</li>" for item in findings)
+    timestamp = format_ts(merged.get("timestamp"))
+    requested_by = _escape(merged.get("requested_by") or "unknown")
+    return f"""
+        <section id="photo-findings-merged" class="merged-photo-findings">
+            <h2>PHOTO FINDINGS - MERGED {timestamp}</h2>
+            <div class="merged-meta">Requested by: {requested_by}</div>
+            <div class="merged-rule"></div>
+            <ul>{bullets}</ul>
+        </section>
+    """
+
+
+def _render_photo_panel(ro: str, cache: dict) -> str:
+    photos = _load_dvi_photo_entries(ro)
+    analyzed = set(str(item) for item in _as_list(cache.get("analyzed_photos")))
+    if not photos:
+        return """
+        <section class="photo-panel">
+            <h2>Photo evidence review</h2>
+            <p class="photo-subtext">No photos found in AutoFlow DVI for this RO.</p>
+        </section>
+        """
+
+    cards = []
+    for idx, photo in enumerate(photos):
+        url = str(photo.get("url") or "")
+        label = str(photo.get("label") or "DVI photo")
+        is_analyzed = url in analyzed
+        classes = "photo-card analyzed selected" if is_analyzed else "photo-card"
+        checked = "true" if is_analyzed else "false"
+        badge = '<div class="photo-analyzed-badge">Analyzed</div>' if is_analyzed else ""
+        cards.append(
+            f"""
+            <button type="button" class="{classes}" data-photo-index="{idx}" data-url="{_escape(url)}" data-selected="{checked}">
+                <span class="photo-check">✓</span>
+                {badge}
+                <img src="{_escape(photo.get("thumbnail_url") or url)}" alt="{_escape(label)}" loading="lazy">
+                <span class="photo-label">{_escape(label[:30])}</span>
+            </button>
+            """
+        )
+
+    photo_data = json.dumps(photos, ensure_ascii=True)
+    return f"""
+        <section class="photo-panel" id="photoPanel">
+            <div class="photo-panel-head">
+                <div>
+                    <h2>Photo evidence review</h2>
+                    <p class="photo-subtext">Select photos for AI analysis. Choose scanner data, scope captures, damage photos, and measurement readings. Skip progress shots and overview photos.</p>
+                </div>
+            </div>
+            <div class="photo-grid" id="photoGrid">{''.join(cards)}</div>
+            <div class="photo-controls">
+                <div class="photo-counter" id="photoCounter">0 photos selected · estimated cost: ~$0.00</div>
+                <button type="button" class="btn photo-analyze" id="analyzePhotosBtn" disabled>Analyze selected photos</button>
+            </div>
+            <div id="photoFindingsPanel"></div>
+        </section>
+        <script type="application/json" id="photoData">{photo_data}</script>
+    """
+
+
+def _media_type_from_url(url: str) -> str:
+    clean = str(url or "").split("?")[0].lower()
+    if clean.endswith(".png"):
+        return "image/png"
+    if clean.endswith(".webp"):
+        return "image/webp"
+    if clean.endswith(".gif"):
+        return "image/gif"
+    return "image/jpeg"
+
+
+def _download_photo(url: str) -> tuple[str, str]:
+    req = Request(url, headers={"User-Agent": "CallahanAI/1.0"})
+    with urlopen(req, timeout=15) as response:
+        image_bytes = response.read()
+        media_type = response.headers.get_content_type() or _media_type_from_url(url)
+    return base64.b64encode(image_bytes).decode("ascii"), media_type
+
+
+def _call_claude_vision(photo_b64: str, media_type: str) -> str:
+    load_dotenv(REPO_ROOT / ".env")
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return "Photo analysis unavailable: ANTHROPIC_API_KEY is not set."
+
+    body = {
+        "model": ANTHROPIC_MODEL,
+        "max_tokens": 500,
+        "system": (
+            "You are an automotive diagnostic assistant. Analyze this photo from a vehicle inspection and describe "
+            "what you see in detail. Focus on: scanner/scan tool data (PIDs, codes, live data values, freeze frame), "
+            "oscilloscope/scope waveforms, measurement readings, visible damage or wear, warning lights or dash displays. "
+            "If this is a progress or overview photo with no diagnostic value, say so clearly. Be concise and technical."
+        ),
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": photo_b64,
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": "Describe what diagnostic information is visible in this photo and how it relates to vehicle repair.",
+                },
+            ],
+        }],
+    }
+    req = Request(
+        ANTHROPIC_URL,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    with urlopen(req, timeout=30) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    return clean_ai_response_text(_extract_response_text(payload))
+
+
+def _has_diagnostic_value(finding: str) -> bool:
+    lowered = str(finding or "").lower()
+    return not any(phrase in lowered for phrase in (
+        "no diagnostic value",
+        "progress photo",
+        "overview",
+        "cannot determine",
+    ))
+
+
+def _suggested_merge_text(finding: str) -> str:
+    text = " ".join(str(finding or "").split())
+    if not text:
+        return ""
+    sentences = []
+    for part in text.replace("! ", ". ").replace("? ", ". ").split(". "):
+        part = part.strip(" .")
+        if part:
+            sentences.append(part)
+        if len(sentences) >= 2:
+            break
+    return ". ".join(sentences)[:500].strip() + ("." if sentences else "")
+
+
 def _event_label(trigger: str) -> str:
     return {
         "initial": "Initial generation",
@@ -72,9 +334,13 @@ def _make_cache(ro: str, packet: dict, packet_html: str, previous_cache: dict | 
     cost = float(packet.get("api_cost_usd") or 0.0)
     previous_log = []
     previous_total = 0.0
+    analyzed_photos = []
+    merged_photo_findings = None
     if isinstance(previous_cache, dict):
         previous_log = previous_cache.get("generation_log", []) if isinstance(previous_cache.get("generation_log"), list) else []
         previous_total = float(previous_cache.get("total_cost_usd") or 0.0)
+        analyzed_photos = previous_cache.get("analyzed_photos", []) if isinstance(previous_cache.get("analyzed_photos"), list) else []
+        merged_photo_findings = previous_cache.get("merged_photo_findings") if isinstance(previous_cache.get("merged_photo_findings"), dict) else None
     generation_log = previous_log + [{
         "timestamp": generated_at,
         "trigger": trigger,
@@ -82,7 +348,7 @@ def _make_cache(ro: str, packet: dict, packet_html: str, previous_cache: dict | 
         "dvi_item_count": int(packet.get("dvi_item_count") or 0),
         "api_cost_usd": cost,
     }]
-    return {
+    cache = {
         "ro": ro,
         "generated_at": generated_at,
         "dvi_pulled_at": dvi_pulled_at,
@@ -90,7 +356,11 @@ def _make_cache(ro: str, packet: dict, packet_html: str, previous_cache: dict | 
         "packet": packet,
         "generation_log": generation_log,
         "total_cost_usd": previous_total + cost,
+        "analyzed_photos": analyzed_photos,
     }
+    if merged_photo_findings:
+        cache["merged_photo_findings"] = merged_photo_findings
+    return cache
 
 
 def _render_banner(cache: dict, just_regenerated: bool = False, requested_by: str = "") -> str:
@@ -222,6 +492,8 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
     cache = cache or {}
     banner_html = _render_banner(cache, just_regenerated=just_regenerated, requested_by=requested_by) if cache else ""
     generation_log_html = _render_generation_log(ro, cache) if cache else ""
+    photo_panel_html = _render_photo_panel(ro, cache)
+    merged_findings_html = _render_merged_findings(cache)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -273,11 +545,42 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
         .generation-log th,.generation-log td {{border:1px solid #cbd5e1;padding:8px;text-align:left;}}
         .generation-log th {{background:#f1f5f9;color:#334155;text-transform:uppercase;font-size:11px;letter-spacing:0.08em;}}
         .generation-log .total-row td {{font-weight:900;background:#f8fafc;}}
+        .photo-panel {{margin-top:28px;border:2px solid #d1d5db;border-radius:12px;padding:18px;background:#f8fafc;page-break-inside:avoid;}}
+        .photo-panel h2 {{margin-bottom:6px;}}
+        .photo-subtext {{margin:0 0 14px;color:#475569;line-height:1.45;font-size:14px;}}
+        .photo-grid {{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-top:14px;}}
+        .photo-card {{position:relative;border:2px solid transparent;border-radius:10px;background:#fff;padding:0 0 10px;overflow:hidden;cursor:pointer;text-align:left;box-shadow:0 2px 8px rgba(15,23,42,0.08);}}
+        .photo-card img {{display:block;width:100%;height:120px;object-fit:cover;background:#e5e7eb;}}
+        .photo-card.selected {{border-color:#EF9F27;box-shadow:0 0 0 3px rgba(239,159,39,0.18);}}
+        .photo-card.analyzed {{border-color:#16a34a;}}
+        .photo-check {{position:absolute;right:8px;top:8px;width:24px;height:24px;border-radius:999px;background:#EF9F27;color:#111827;display:none;align-items:center;justify-content:center;font-weight:900;z-index:2;}}
+        .photo-card.selected .photo-check {{display:flex;}}
+        .photo-card.analyzed .photo-check {{background:#16a34a;color:#fff;}}
+        .photo-analyzed-badge {{position:absolute;left:8px;top:8px;background:#16a34a;color:#fff;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900;text-transform:uppercase;z-index:2;}}
+        .photo-label {{display:block;padding:8px 8px 0;color:#334155;font-size:12px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
+        .photo-controls {{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:16px;}}
+        .photo-counter {{font-weight:900;color:#334155;}}
+        .btn.photo-analyze:disabled,.btn.merge-btn:disabled {{background:#cbd5e1;color:#64748b;cursor:not-allowed;}}
+        .findings-panel {{margin-top:18px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;padding:16px;}}
+        .finding-row {{display:grid;grid-template-columns:92px 28px 1fr;gap:12px;align-items:start;border:1px solid #bbf7d0;border-radius:10px;padding:12px;margin:10px 0;background:#f0fdf4;}}
+        .finding-row.no-value {{border-color:#d1d5db;background:#f3f4f6;color:#6b7280;}}
+        .finding-row img {{width:80px;height:60px;object-fit:cover;border-radius:8px;background:#e5e7eb;}}
+        .finding-row input {{margin-top:4px;}}
+        .finding-text {{font-size:13px;line-height:1.45;color:#111827;}}
+        .finding-row.no-value .finding-text {{color:#6b7280;}}
+        .finding-suggested {{margin-top:8px;color:#64748b;font-size:12px;font-style:italic;}}
+        .finding-label {{display:inline-block;margin-bottom:6px;border-radius:999px;background:#e5e7eb;color:#475569;padding:3px 8px;font-size:10px;font-weight:900;text-transform:uppercase;}}
+        .merge-success {{margin-top:14px;background:#dcfce7;border:1px solid #16a34a;color:#14532d;border-radius:10px;padding:12px;font-weight:900;display:flex;justify-content:space-between;gap:12px;align-items:center;}}
+        .merged-photo-findings {{margin-top:28px;border:2px solid #185FA5;border-radius:12px;background:#eff6ff;padding:18px;page-break-inside:avoid;}}
+        .merged-photo-findings h2 {{color:#1e3a8a;margin-bottom:8px;}}
+        .merged-meta {{font-weight:900;color:#334155;margin-bottom:10px;}}
+        .merged-rule {{height:2px;background:#93c5fd;margin:12px 0;}}
+        .merged-photo-findings li {{list-style:disc;margin-left:20px;color:#111827;}}
         .footer {{margin-top:28px;border-top:2px solid #111827;padding-top:14px;text-align:center;font-weight:900;color:#334155;}}
         @media print {{
             body {{background:#fff;padding:0;}}
             .page {{box-shadow:none;border-radius:0;max-width:none;padding:0;}}
-            .actions,.packet-banner {{display:none;}}
+            .actions,.packet-banner,.photo-panel {{display:none;}}
             .job-block {{page-break-inside:avoid;}}
             .job-header,.addon-banner {{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
         }}
@@ -316,6 +619,10 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
 
         {jobs_html}
 
+        {photo_panel_html}
+
+        {merged_findings_html}
+
         {generation_log_html}
 
         <footer class="footer">END OF PACKET — RO {_escape(ro)}<br>{generated_at}</footer>
@@ -340,6 +647,142 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
         document.body.appendChild(form);
         form.submit();
     }}
+    var PHOTO_COST = {PHOTO_ANALYSIS_COST:.2f};
+    var PHOTO_RO = "{_escape(ro)}";
+    var photoCards = Array.prototype.slice.call(document.querySelectorAll(".photo-card"));
+    var analyzeBtn = document.getElementById("analyzePhotosBtn");
+    var photoCounter = document.getElementById("photoCounter");
+    var findingsPanel = document.getElementById("photoFindingsPanel");
+
+    function selectedPhotoUrls() {{
+        return photoCards
+            .filter(function(card) {{ return card.getAttribute("data-selected") === "true"; }})
+            .map(function(card) {{ return card.getAttribute("data-url"); }})
+            .filter(Boolean);
+    }}
+
+    function updatePhotoCounter() {{
+        if (!photoCounter || !analyzeBtn) return;
+        var count = selectedPhotoUrls().length;
+        photoCounter.textContent = count + " photos selected · estimated cost: ~$" + (count * PHOTO_COST).toFixed(2);
+        analyzeBtn.disabled = count === 0;
+    }}
+
+    photoCards.forEach(function(card) {{
+        card.addEventListener("click", function() {{
+            var selected = card.getAttribute("data-selected") === "true";
+            card.setAttribute("data-selected", selected ? "false" : "true");
+            card.classList.toggle("selected", !selected);
+            updatePhotoCounter();
+        }});
+    }});
+
+    function renderFindings(data) {{
+        if (!findingsPanel) return;
+        var findings = data.findings || [];
+        if (!findings.length) {{
+            findingsPanel.innerHTML = '<div class="findings-panel"><strong>No findings returned.</strong></div>';
+            return;
+        }}
+        var rows = findings.map(function(finding, index) {{
+            var hasValue = !!finding.has_diagnostic_value;
+            var checked = hasValue ? "checked" : "";
+            var disabled = hasValue ? "" : "";
+            var cls = hasValue ? "finding-row" : "finding-row no-value";
+            var label = hasValue ? "Diagnostic finding" : "No diagnostic value - skip";
+            return '<div class="' + cls + '" data-finding-index="' + index + '">' +
+                '<img src="' + escapeHtml(finding.thumbnail_url || finding.photo_url || "") + '" alt="Photo finding">' +
+                '<input type="checkbox" class="finding-check" ' + checked + ' ' + disabled + '>' +
+                '<div>' +
+                '<span class="finding-label">' + label + '</span>' +
+                '<div class="finding-text">' + escapeHtml(finding.finding || "") + '</div>' +
+                '<div class="finding-suggested">' + escapeHtml(finding.suggested_merge_text || "") + '</div>' +
+                '</div>' +
+                '</div>';
+        }}).join("");
+        findingsPanel.innerHTML =
+            '<div class="findings-panel">' +
+            '<h2>Photo findings — review before merging</h2>' +
+            '<p class="photo-subtext">Uncheck any finding that is inaccurate or irrelevant before merging into the packet.</p>' +
+            rows +
+            '<button type="button" class="btn merge-btn" id="mergeFindingsBtn">Merge confirmed findings into packet</button>' +
+            '<div id="mergeResult"></div>' +
+            '</div>';
+        var mergeBtn = document.getElementById("mergeFindingsBtn");
+        var checks = Array.prototype.slice.call(document.querySelectorAll(".finding-check"));
+        function updateMergeButton() {{
+            mergeBtn.disabled = checks.filter(function(check) {{ return check.checked; }}).length === 0;
+        }}
+        checks.forEach(function(check) {{ check.addEventListener("change", updateMergeButton); }});
+        updateMergeButton();
+        mergeBtn.addEventListener("click", function() {{
+            var selected = [];
+            checks.forEach(function(check, idx) {{
+                if (check.checked && findings[idx] && findings[idx].suggested_merge_text) {{
+                    selected.push(findings[idx].suggested_merge_text);
+                }}
+            }});
+            mergeFindings(selected, mergeBtn);
+        }});
+    }}
+
+    function mergeFindings(findings, btn) {{
+        if (!findings.length) return;
+        btn.disabled = true;
+        btn.textContent = "Merging...";
+        fetch("/dvi/packet/" + encodeURIComponent(PHOTO_RO) + "/merge-findings", {{
+            method: "POST",
+            headers: {{"Content-Type": "application/json"}},
+            body: JSON.stringify({{findings: findings, requested_by: "Drew"}})
+        }})
+        .then(function(resp) {{ return resp.json(); }})
+        .then(function(data) {{
+            var target = document.getElementById("mergeResult");
+            target.innerHTML = '<div class="merge-success">' +
+                '<span>' + data.findings_count + ' findings merged into packet — reload to see updated packet</span>' +
+                '<button type="button" class="btn" onclick="window.location.reload()">Reload</button>' +
+                '</div>';
+        }})
+        .catch(function(error) {{
+            alert("Photo findings merge failed: " + error);
+            btn.disabled = false;
+            btn.textContent = "Merge confirmed findings into packet";
+        }});
+    }}
+
+    function analyzeSelectedPhotos() {{
+        var urls = selectedPhotoUrls();
+        if (!urls.length || !analyzeBtn) return;
+        analyzeBtn.disabled = true;
+        analyzeBtn.textContent = "Analyzing " + urls.length + " photos...";
+        fetch("/dvi/packet/" + encodeURIComponent(PHOTO_RO) + "/analyze-photos", {{
+            method: "POST",
+            headers: {{"Content-Type": "application/json"}},
+            body: JSON.stringify({{photo_urls: urls, requested_by: "Drew"}})
+        }})
+        .then(function(resp) {{ return resp.json(); }})
+        .then(function(data) {{
+            renderFindings(data);
+            analyzeBtn.textContent = "Analyze selected photos";
+            updatePhotoCounter();
+        }})
+        .catch(function(error) {{
+            alert("Photo analysis failed: " + error);
+            analyzeBtn.textContent = "Analyze selected photos";
+            updatePhotoCounter();
+        }});
+    }}
+
+    function escapeHtml(value) {{
+        return String(value || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+    }}
+
+    if (analyzeBtn) analyzeBtn.addEventListener("click", analyzeSelectedPhotos);
+    updatePhotoCounter();
     </script>
 </body>
 </html>"""
@@ -383,3 +826,95 @@ def render_packet_regenerate(ro):
         return redirect(url_for("dvi_packet", ro=ro))
     except Exception:
         return Response(packet_html, mimetype="text/html")
+
+
+def render_packet_analyze_photos(ro):
+    ro = str(ro).strip()
+    body = request.get_json(silent=True) or {}
+    photo_urls = [str(url).strip() for url in _as_list(body.get("photo_urls")) if str(url).strip()]
+    requested_by = str(body.get("requested_by") or "Drew").strip() or "Drew"
+    findings = []
+
+    for url in photo_urls:
+        try:
+            photo_b64, media_type = _download_photo(url)
+            finding_text = _call_claude_vision(photo_b64, media_type)
+        except (HTTPError, URLError, OSError, socket.timeout, json.JSONDecodeError, ValueError) as error:
+            finding_text = f"Photo could not be loaded: {error}"
+        finding_text = clean_ai_response_text(finding_text)
+        has_value = _has_diagnostic_value(finding_text)
+        findings.append({
+            "photo_url": url,
+            "thumbnail_url": url,
+            "finding": finding_text,
+            "has_diagnostic_value": has_value,
+            "suggested_merge_text": _suggested_merge_text(finding_text) if has_value else "",
+        })
+
+    cost = len(photo_urls) * PHOTO_ANALYSIS_COST
+    _append_api_cost_log({
+        "timestamp": datetime.utcnow().isoformat(),
+        "action": "photo_analysis",
+        "trigger": "photo_analysis",
+        "requested_by": requested_by,
+        "ro": ro,
+        "photos_analyzed": len(photo_urls),
+        "cost_usd": cost,
+        "estimated_cost_usd": cost,
+        "cached": False,
+    })
+
+    cache = _load_cache(ro)
+    analyzed = set(str(item) for item in _as_list(cache.get("analyzed_photos")))
+    analyzed.update(photo_urls)
+    cache["analyzed_photos"] = sorted(analyzed)
+    _save_cache(ro, cache)
+
+    return jsonify({
+        "findings": findings,
+        "photos_analyzed": len(photo_urls),
+        "cost_usd": cost,
+        "requested_by": requested_by,
+    })
+
+
+def render_packet_merge_findings(ro):
+    ro = str(ro).strip()
+    body = request.get_json(silent=True) or {}
+    requested_by = str(body.get("requested_by") or "Drew").strip() or "Drew"
+    findings = [clean_ai_response_text(item) for item in _as_list(body.get("findings")) if str(item).strip()]
+    cache = _load_cache(ro)
+    timestamp = datetime.utcnow().isoformat()
+    cache["merged_photo_findings"] = {
+        "timestamp": timestamp,
+        "requested_by": requested_by,
+        "findings": findings,
+    }
+    generation_log = cache.get("generation_log") if isinstance(cache.get("generation_log"), list) else []
+    generation_log.append({
+        "timestamp": timestamp,
+        "trigger": "photo_findings_merged",
+        "requested_by": requested_by,
+        "findings_count": len(findings),
+        "api_cost_usd": 0,
+    })
+    cache["generation_log"] = generation_log
+
+    merged_html = _render_merged_findings(cache)
+    packet_html = str(cache.get("packet_html") or "")
+    if packet_html:
+        if PHOTO_FINDINGS_PLACEHOLDER in packet_html:
+            packet_html = packet_html.replace(PHOTO_FINDINGS_PLACEHOLDER, merged_html)
+        elif 'id="photo-findings-merged"' in packet_html:
+            start = packet_html.find('<section id="photo-findings-merged"')
+            end = packet_html.find("</section>", start)
+            if start != -1 and end != -1:
+                packet_html = packet_html[:start] + merged_html + packet_html[end + len("</section>"):]
+            else:
+                packet_html += merged_html
+        else:
+            packet_html += merged_html
+        cache["packet_html"] = packet_html
+
+    _save_cache(ro, cache)
+    return jsonify({"status": "merged", "findings_count": len(findings)})
