@@ -446,6 +446,11 @@ def dvi_packet(ro):
     from dashboard.packet_page import render_packet_page
     return render_packet_page(ro)
 
+@app.route("/dvi/packet/<ro>/regenerate", methods=["POST"])
+def dvi_packet_regenerate(ro):
+    from dashboard.packet_page import render_packet_regenerate
+    return render_packet_regenerate(ro)
+
 @app.route("/sanity-check")
 def sanity_check():
     from dashboard.sanity_check import render_sanity_check
