@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import os
 import base64
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -25,6 +25,7 @@ CACHE_DIR = DVI_REVIEWS_DIR
 SHOP_STATE_PATH = REPO_ROOT / "state" / "shop_state.json"
 JOB_HISTORY_DIR = REPO_ROOT / "state" / "job_history"
 API_COSTS_PATH = REPO_ROOT / "data" / "api_costs" / "api_costs.jsonl"
+PACKET_ERRORS_PATH = REPO_ROOT / "data" / "api_costs" / "packet_errors.jsonl"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-opus-4-6"
 
@@ -38,12 +39,16 @@ def packet_cache_path(ro: str) -> Path:
 
 
 def format_ts(iso_string):
-    if not iso_string:
-        return ""
+    from datetime import datetime, timezone, timedelta
+    ARIZONA_OFFSET = timedelta(hours=-7)
+    ARIZONA_TZ = timezone(ARIZONA_OFFSET)
     try:
-        dt = datetime.fromisoformat(str(iso_string).replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return str(iso_string)
+        dt = datetime.fromisoformat(iso_string)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.astimezone(ARIZONA_TZ)
+    except Exception:
+        return iso_string
     day = str(dt.day)
     hour = dt.hour % 12 or 12
     minute = dt.strftime("%M")
@@ -109,13 +114,48 @@ def _extract_response_text(response_payload: dict) -> str:
     return str(content).strip()
 
 
-def _parse_packet_json(text: str) -> dict:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`")
-        if cleaned.lower().startswith("json"):
-            cleaned = cleaned[4:].strip()
-    return json.loads(cleaned)
+def _packet_parse_error_html() -> str:
+    return """
+      <div style='font-family:sans-serif;padding:2rem;color:#A32D2D;
+      background:#FCEBEB;border-radius:8px;margin:2rem'>
+      <h2>Packet generation failed — Claude response parse error</h2>
+      <p>The AI response contained characters that could not be parsed.
+      This has been logged. Please try regenerating the packet once.
+      If it fails again, check data/api_costs/packet_errors.jsonl
+      for the raw response.</p>
+      </div>
+      """
+
+
+def _log_packet_parse_error(ro: str, error: json.JSONDecodeError, response_text: str) -> None:
+    try:
+        PACKET_ERRORS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        error_entry = {
+            "ro": ro,
+            "error": str(error),
+            "timestamp": datetime.utcnow().isoformat(),
+            "raw_response_preview": response_text[:500],
+        }
+        with PACKET_ERRORS_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(error_entry, ensure_ascii=True) + "\n")
+    except OSError as log_error:
+        print(f"Packet parse error log failed for RO {ro}: {log_error}")
+
+
+def _parse_packet_json(text: str, ro: str) -> dict:
+    response_text = text.strip()
+    if response_text.startswith("```"):
+        lines = response_text.split("\n")
+        lines = [line for line in lines if not line.strip().startswith("```")]
+        response_text = "\n".join(lines).strip()
+    try:
+        return json.loads(response_text)
+    except json.JSONDecodeError as error:
+        _log_packet_parse_error(ro, error, response_text)
+        return {
+            "error": "Packet generation failed — Claude response parse error",
+            "detail": _packet_parse_error_html(),
+        }
 
 
 def _save_job_history_packet(ro: str, packet: dict, timestamp: str) -> None:
@@ -142,6 +182,20 @@ def _safe_int(value) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _sanitize_dvi_text(value):
+    if isinstance(value, str):
+        text = value.replace("\\", " ")
+        text = text.replace('"', "'")
+        text = text.replace("\n", " ")
+        text = text.replace("\r", " ")
+        return text.strip()
+    if isinstance(value, list):
+        return [_sanitize_dvi_text(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _sanitize_dvi_text(item) for key, item in value.items()}
+    return value
 
 
 def log_packet_cache_hit(ro: str, requested_by: str = "system") -> None:
@@ -273,6 +327,7 @@ def generate_packet(ro, force_refresh=False, requested_by="unknown"):
         local_review = _load_json(review_path)
         fresh_review = fetch_dvi_from_autoflow(ro) if force_refresh else None
         review = fresh_review if isinstance(fresh_review, dict) else local_review
+        review = _sanitize_dvi_text(review)
         dvi_pulled_at = datetime.utcnow().isoformat()
         shop_state = _load_json(SHOP_STATE_PATH) if SHOP_STATE_PATH.exists() else {}
         job = _find_job(shop_state, ro)
@@ -302,7 +357,9 @@ def generate_packet(ro, force_refresh=False, requested_by="unknown"):
         with urlopen(request, timeout=90) as response:
             response_payload = json.loads(response.read().decode("utf-8"))
 
-        packet = _parse_packet_json(_extract_response_text(response_payload))
+        packet = _parse_packet_json(_extract_response_text(response_payload), ro)
+        if packet.get("error"):
+            return packet
         generated_at = datetime.utcnow().isoformat()
         packet["generated_at"] = generated_at
         packet["dvi_pulled_at"] = dvi_pulled_at
