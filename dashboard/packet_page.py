@@ -261,10 +261,17 @@ def _download_photo_once(url: str) -> tuple[str, str]:
         "Referer": "https://app.autoflow.com/",
         "Accept": "image/jpeg,image/png,image/*,*/*",
     }
-    req = Request(url, headers=headers)
-    with urlopen(req, timeout=15) as response:
-        image_bytes = response.read()
-        media_type = response.headers.get_content_type() or _media_type_from_url(url)
+    print(f"Downloading photo: {url[:80]}")
+    print(f"Headers: {headers}")
+    try:
+        req = Request(url, headers=headers)
+        with urlopen(req, timeout=15) as response:
+            image_bytes = response.read()
+            media_type = response.headers.get_content_type() or _media_type_from_url(url)
+    except (HTTPError, URLError, OSError, socket.timeout) as error:
+        print(f"Download FAILED: {error}")
+        raise
+    print(f"Downloaded OK: {len(image_bytes)} bytes")
     return base64.b64encode(image_bytes).decode("ascii"), media_type
 
 
@@ -682,6 +689,7 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
     var analyzeBtn = document.getElementById("analyzePhotosBtn");
     var photoCounter = document.getElementById("photoCounter");
     var findingsPanel = document.getElementById("photoFindingsPanel");
+    var photoAnalysisRequester = "";
 
     function selectedPhotoUrls() {{
         return photoCards
@@ -762,7 +770,7 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
         fetch("/dvi/packet/" + encodeURIComponent(PHOTO_RO) + "/merge-findings", {{
             method: "POST",
             headers: {{"Content-Type": "application/json"}},
-            body: JSON.stringify({{findings: findings, requested_by: "Drew"}})
+            body: JSON.stringify({{findings: findings, requested_by: photoAnalysisRequester || "unknown"}})
         }})
         .then(function(resp) {{ return resp.json(); }})
         .then(function(data) {{
@@ -782,15 +790,21 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
     function analyzeSelectedPhotos() {{
         var urls = selectedPhotoUrls();
         if (!urls.length || !analyzeBtn) return;
+        var requester = prompt("Who is requesting this photo analysis?\\nType: Mitch, Drew, or Preston");
+        if (!requester) return;
+        requester = requester.trim();
+        if (!requester) return;
+        photoAnalysisRequester = requester;
         analyzeBtn.disabled = true;
         analyzeBtn.textContent = "Analyzing " + urls.length + " photos...";
         fetch("/dvi/packet/" + encodeURIComponent(PHOTO_RO) + "/analyze-photos", {{
             method: "POST",
             headers: {{"Content-Type": "application/json"}},
-            body: JSON.stringify({{photo_urls: urls, requested_by: "Drew"}})
+            body: JSON.stringify({{photo_urls: urls, requested_by: requester}})
         }})
         .then(function(resp) {{ return resp.json(); }})
         .then(function(data) {{
+            photoAnalysisRequester = data.requested_by || requester;
             renderFindings(data);
             analyzeBtn.textContent = "Analyze selected photos";
             updatePhotoCounter();
