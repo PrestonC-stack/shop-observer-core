@@ -23,6 +23,8 @@ from hermes.orchestration.hermes_webhook_bridge import HermesWebhookBridge
 
 # ====================== EXISTING CODE ======================
 EVENT_LOG_PATH = REPO_ROOT / "data" / "autoflow_events" / "autoflow_events.jsonl"
+TRANSITIONS_PATH = REPO_ROOT / "data" / "status_transitions" / "transitions.jsonl"
+RO_ACTIVITY_DIR = REPO_ROOT / "data" / "ro_activity"
 BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_advisor_game_plan.py"
 ACTIVE_ROS_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_active_ros_state.py"
 SHOP_STATE_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_shop_state.py"
@@ -84,12 +86,122 @@ def _safe_summary(payload: dict[str, Any], received_at: str) -> dict[str, str]:
         "timestamp": _safe_text(received_at),
     }
 
+def _vehicle_string(payload: dict[str, Any]) -> str:
+    vehicle_year = _first_value(payload, ("vehicle", "year"), ("vehicle_year",), ("work_order", "vehicle", "year"))
+    vehicle_make = _first_value(payload, ("vehicle", "make"), ("vehicle_make",), ("work_order", "vehicle", "make"))
+    vehicle_model = _first_value(payload, ("vehicle", "model"), ("vehicle_model",), ("work_order", "vehicle", "model"))
+    return " ".join([_safe_text(x) for x in [vehicle_year, vehicle_make, vehicle_model] if x not in (None, "", "unknown")]) or "unknown"
+
+def _parse_iso_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        text = value.strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except Exception:
+        return None
+
+def _last_ro_activity(ro: str) -> dict[str, Any] | None:
+    path = RO_ACTIVITY_DIR / f"{ro}.jsonl"
+    if not path.exists():
+        return None
+    try:
+        last_line = ""
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    last_line = line
+        return json.loads(last_line) if last_line else None
+    except Exception as exc:
+        print(f"RO activity read failed for {ro}: {exc}")
+        return None
+
+def _hours_between(start: Any, end: Any) -> float:
+    start_dt = _parse_iso_timestamp(start)
+    end_dt = _parse_iso_timestamp(end)
+    if not start_dt or not end_dt:
+        return 0.0
+    return round(max(0.0, (end_dt - start_dt).total_seconds() / 3600), 4)
+
+def _first_tech_name(techs: Any) -> str:
+    if isinstance(techs, list) and techs:
+        first = techs[0]
+        if isinstance(first, dict):
+            return _safe_text(first.get("name") or first.get("full_name") or first.get("tech_name"))
+        return _safe_text(first)
+    return "unassigned"
+
+def _safe_ro_filename(ro: str) -> str:
+    safe = "".join(ch for ch in str(ro or "unknown") if ch.isalnum() or ch in ("-", "_"))
+    return safe or "unknown"
+
 def _append_event(payload: dict[str, Any], received_at: str) -> None:
     EVENT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     event_record = {"received_at": received_at, "source": "autoflow_webhook", "payload": payload}
     with EVENT_LOG_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(event_record, separators=(",", ":"), sort_keys=True))
         handle.write("\n")
+
+def _append_transition_and_activity(payload: dict[str, Any], received_at: str) -> None:
+    event_type = _safe_text(_first_value(payload, ("event", "type"), ("event_type",), ("eventType",), ("type",), ("meta", "event_type")))
+    event_type_key = event_type.lower().strip()
+    invoice = _safe_text(_first_value(
+        payload, ("ticket", "invoice"), ("invoice",), ("invoice_number",), ("ro_number",), ("roNumber",),
+        ("repair_order",), ("work_order", "invoice"), ("work_order", "ro_number")
+    ))
+    ticket_id = _safe_text(_first_value(payload, ("ticket", "id"), ("ticket_id",), ("ticketId",), ("work_order", "ticket_id")))
+    status = _safe_text(_first_value(payload, ("ticket", "status"), ("ticket_status",), ("status",), ("current_status",)))
+    customer_name = _safe_text(_first_value(payload, ("customer", "name"), ("customer_name",), ("work_order", "customer", "name")))
+    vehicle_str = _vehicle_string(payload)
+    ticket = payload.get("ticket", {}) if isinstance(payload.get("ticket"), dict) else {}
+    event = payload.get("event", {}) if isinstance(payload.get("event"), dict) else {}
+    advisor = ticket.get("advisor", {}) if isinstance(ticket.get("advisor"), dict) else {}
+    techs = ticket.get("techs", []) if isinstance(ticket.get("techs"), list) else []
+
+    previous = _last_ro_activity(invoice)
+    transition = {
+        "received_at": received_at,
+        "event_type": event_type,
+        "event_timestamp": event.get("timestamp", ""),
+        "ro": invoice,
+        "ticket_id": ticket_id,
+        "status": status,
+        "customer": customer_name,
+        "vehicle": vehicle_str,
+        "advisor": {
+            "id": advisor.get("id", ""),
+            "name": advisor.get("name", "")
+        },
+        "techs": techs,
+        "event_id": event.get("id", ""),
+        "callback_endpoint": event.get("callback_endpoint", ""),
+        "payload": payload,
+    }
+    if event_type_key == "status_update":
+        transition["hours_since_last_event"] = _hours_between(previous.get("received_at") if previous else "", received_at)
+        transition["tech_on_job"] = _first_tech_name(techs)
+
+    TRANSITIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with TRANSITIONS_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(transition, ensure_ascii=True, separators=(",", ":"), sort_keys=True))
+        handle.write("\n")
+
+    RO_ACTIVITY_DIR.mkdir(parents=True, exist_ok=True)
+    ro_path = RO_ACTIVITY_DIR / f"{_safe_ro_filename(invoice)}.jsonl"
+    with ro_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(transition, ensure_ascii=True, separators=(",", ":"), sort_keys=True))
+        handle.write("\n")
+
+def _append_transition_and_activity_safely(payload: dict[str, Any], received_at: str) -> None:
+    try:
+        _append_transition_and_activity(payload, received_at)
+    except Exception as exc:
+        print(f"TRANSITION ACTIVITY WRITE FAILED: {exc}")
 
 def _rebuild_advisor_tasks() -> None:
     try:
@@ -166,6 +278,7 @@ def receive_autoflow_webhook():
 
     # Your original logic continues
     _append_event(payload, received_at)
+    _append_transition_and_activity_safely(payload, received_at)
     handle_webhook_event(payload, received_at)
     _rebuild_advisor_tasks()
     state_rebuild = _rebuild_local_state()
