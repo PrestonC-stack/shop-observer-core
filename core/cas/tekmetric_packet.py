@@ -398,7 +398,7 @@ def generate_packet(ro, force_refresh=False, requested_by="unknown"):
         )
 
         try:
-            with urlopen(request, timeout=90) as response:
+            with urlopen(request, timeout=150) as response:
                 response_payload = json.loads(response.read().decode("utf-8"))
         except socket.timeout:
             return {
