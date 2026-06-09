@@ -150,8 +150,24 @@ def _parse_packet_json(text: str, ro: str) -> dict:
         lines = response_text.split("\n")
         lines = [line for line in lines if not line.strip().startswith("```")]
         response_text = "\n".join(lines).strip()
+
+    # Normalize non-ASCII and problematic unicode characters before JSON parsing.
+    response_text = response_text.replace("\u00b0", " degrees")
+    response_text = response_text.replace("\u2014", "-")
+    response_text = response_text.replace("\u2013", "-")
+    response_text = response_text.replace("\u2018", "'")
+    response_text = response_text.replace("\u2019", "'")
+    response_text = response_text.replace("\u201c", '"')
+    response_text = response_text.replace("\u201d", '"')
+    response_text = response_text.replace("\u2026", "...")
+    response_text = response_text.replace("\u00ae", "")
+    response_text = response_text.replace("\u2122", "")
+    response_text = response_text.encode("ascii", "ignore").decode("ascii")
+
     try:
-        return json.loads(response_text)
+        parsed = json.loads(response_text)
+        parsed["generated_at"] = datetime.utcnow().isoformat()
+        return parsed
     except json.JSONDecodeError as error:
         _log_packet_parse_error(ro, error, response_text)
         return {
@@ -260,7 +276,6 @@ Generate a structured packet in valid JSON format with this exact structure:
   "customer": "{customer}",
   "vehicle": "{vehicle}",
   "mileage": "{mileage}",
-  "generated_at": "<ISO timestamp>",
   "advisor_gate": "<2-3 sentence advisor mental gate — what to ask customer before deferring maintenance. Consider: towing use if truck, Arizona heat season warnings, upcoming trip risk. Be specific to this vehicle and findings.>",
   "drag_order": [
     "CONCERN 1 - <job name>",
