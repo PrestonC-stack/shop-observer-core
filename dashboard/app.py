@@ -451,6 +451,18 @@ def dvi_packet_regenerate(ro):
     from dashboard.packet_page import render_packet_regenerate
     return render_packet_regenerate(ro)
 
+
+@app.route("/dvi/packet/<ro>/analyze-photos", methods=["POST"])
+def dvi_packet_analyze_photos(ro):
+    from dashboard.packet_page import render_packet_analyze_photos
+    return render_packet_analyze_photos(ro)
+
+
+@app.route("/dvi/packet/<ro>/merge-findings", methods=["POST"])
+def dvi_packet_merge_findings(ro):
+    from dashboard.packet_page import render_packet_merge_findings
+    return render_packet_merge_findings(ro)
+
 @app.route("/sanity-check")
 def sanity_check():
     from dashboard.sanity_check import render_sanity_check
