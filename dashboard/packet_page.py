@@ -125,6 +125,8 @@ def _extract_photo_entries(dvi_response) -> list[dict]:
     def add_photo(url, label, image_id):
         if not url:
             return
+        if "motovisuals.com" in str(url):
+            return
         key = image_id if image_id else url
         if key in seen_ids:
             return
@@ -147,6 +149,8 @@ def _extract_photo_entries(dvi_response) -> list[dict]:
                     label,
                     img.get("image_id", img.get("id", "")),
                 )
+            elif isinstance(img, str) and img:
+                add_photo(img, label, img)
 
     try:
         content = dvi_response.get("content", {}) if isinstance(dvi_response, dict) else {}
@@ -159,9 +163,11 @@ def _extract_photo_entries(dvi_response) -> list[dict]:
                 continue
             label = item.get("details", item.get("notes", "Customer Concern"))
             extract_images(item.get("images", []), label)
+            extract_images(item.get("item_images", []), label)
             for tagged in item.get("tagged_items", []):
                 if isinstance(tagged, dict):
                     extract_images(tagged.get("images", []), tagged.get("name", label))
+                    extract_images(tagged.get("item_images", []), tagged.get("name", label))
 
         # Location 2: dvis > dvi_category > dvi_items.
         for dvi in content.get("dvis", []):
@@ -176,11 +182,27 @@ def _extract_photo_entries(dvi_response) -> list[dict]:
                     if not isinstance(dvi_item, dict):
                         continue
                     item_name = dvi_item.get("item_name", "")
+                    item_status = dvi_item.get("item_status", "")
                     label = f"{cat_name} - {item_name}"
-                    extract_images(dvi_item.get("images", []), label)
+
+                    # Primary: item_images contains real shop photo objects.
+                    for img in dvi_item.get("item_images", []):
+                        if isinstance(img, dict):
+                            url = img.get("image_url", "")
+                            image_id = img.get("image_id", img.get("id", ""))
+                            add_photo(url, label, image_id)
+
+                    # Fallback: item_picture contains plain URL strings.
+                    for url in dvi_item.get("item_picture", []):
+                        if isinstance(url, str) and url:
+                            add_photo(url, label, url)
+
                     for rec in dvi_item.get("recommendations", []):
                         if isinstance(rec, dict):
-                            extract_images(rec.get("images", []), f"{label} (rec)")
+                            for img in rec.get("item_images", rec.get("images", [])):
+                                if isinstance(img, dict):
+                                    url = img.get("image_url", "")
+                                    add_photo(url, f"{label} (rec)", img.get("image_id", url))
 
         # Location 3: top-level images array.
         extract_images(content.get("images", []), "DVI Photo")
