@@ -135,6 +135,8 @@ def _log_packet_parse_error(ro: str, error: json.JSONDecodeError, response_text:
             "error": str(error),
             "timestamp": datetime.utcnow().isoformat(),
             "raw_response_preview": response_text[:500],
+            "raw_response_full": response_text,
+            "raw_response_length": len(response_text),
         }
         with PACKET_ERRORS_PATH.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(error_entry, ensure_ascii=True) + "\n")
