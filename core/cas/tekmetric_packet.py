@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import base64
+import socket
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -338,6 +339,7 @@ ORDERING RULES:
 
 Return ONLY valid JSON. No markdown. No explanation. No code blocks.
 IMPORTANT: You must complete the entire JSON response including all closing brackets and braces. Do not truncate any fields. If a response would be very long, shorten individual field text rather than cutting off the JSON structure.
+Keep each note_to_advisor and customer_note under 100 words. Keep each labor_item under 15 words. Keep each parts_item under 10 words. Be concise — prioritize complete JSON structure over verbose text.
 """.strip()
 
 
@@ -378,8 +380,22 @@ def generate_packet(ro, force_refresh=False, requested_by="unknown"):
             method="POST",
         )
 
-        with urlopen(request, timeout=90) as response:
-            response_payload = json.loads(response.read().decode("utf-8"))
+        try:
+            with urlopen(request, timeout=90) as response:
+                response_payload = json.loads(response.read().decode("utf-8"))
+        except socket.timeout:
+            return {
+                "error": "Packet generation timed out",
+                "detail": """
+        <div style='font-family:sans-serif;padding:2rem;color:#A32D2D;
+        background:#FCEBEB;border-radius:8px;margin:2rem'>
+        <h2>Packet generation timed out</h2>
+        <p>The AI took too long to respond. This usually means the
+        vehicle has many findings. Please try regenerating once —
+        it typically succeeds on the second attempt.</p>
+        </div>
+        """,
+            }
 
         packet = _parse_packet_json(_extract_response_text(response_payload), ro)
         if packet.get("error"):
