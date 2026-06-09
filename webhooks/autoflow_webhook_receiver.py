@@ -121,11 +121,11 @@ def _last_ro_activity(ro: str) -> dict[str, Any] | None:
         print(f"RO activity read failed for {ro}: {exc}")
         return None
 
-def _hours_between(start: Any, end: Any) -> float:
+def _hours_between(start: Any, end: Any) -> float | None:
     start_dt = _parse_iso_timestamp(start)
     end_dt = _parse_iso_timestamp(end)
     if not start_dt or not end_dt:
-        return 0.0
+        return None
     return round(max(0.0, (end_dt - start_dt).total_seconds() / 3600), 4)
 
 def _first_tech_name(techs: Any) -> str:
@@ -148,43 +148,50 @@ def _append_event(payload: dict[str, Any], received_at: str) -> None:
         handle.write("\n")
 
 def _append_transition_and_activity(payload: dict[str, Any], received_at: str) -> None:
-    event_type = _safe_text(_first_value(payload, ("event", "type"), ("event_type",), ("eventType",), ("type",), ("meta", "event_type")))
-    event_type_key = event_type.lower().strip()
-    invoice = _safe_text(_first_value(
-        payload, ("ticket", "invoice"), ("invoice",), ("invoice_number",), ("ro_number",), ("roNumber",),
-        ("repair_order",), ("work_order", "invoice"), ("work_order", "ro_number")
-    ))
-    ticket_id = _safe_text(_first_value(payload, ("ticket", "id"), ("ticket_id",), ("ticketId",), ("work_order", "ticket_id")))
-    status = _safe_text(_first_value(payload, ("ticket", "status"), ("ticket_status",), ("status",), ("current_status",)))
-    customer_name = _safe_text(_first_value(payload, ("customer", "name"), ("customer_name",), ("work_order", "customer", "name")))
-    vehicle_str = _vehicle_string(payload)
+    event_data = payload.get("event", {}) if isinstance(payload.get("event"), dict) else {}
     ticket = payload.get("ticket", {}) if isinstance(payload.get("ticket"), dict) else {}
-    event = payload.get("event", {}) if isinstance(payload.get("event"), dict) else {}
-    advisor = ticket.get("advisor", {}) if isinstance(ticket.get("advisor"), dict) else {}
-    techs = ticket.get("techs", []) if isinstance(ticket.get("techs"), list) else []
+    customer_data = payload.get("customer", {}) if isinstance(payload.get("customer"), dict) else {}
+    vehicle_data = payload.get("vehicle", {}) if isinstance(payload.get("vehicle"), dict) else {}
+
+    event_type = event_data.get("type", "unknown")
+    invoice = str(ticket.get("invoice", "")).strip()
+    ticket_id = str(ticket.get("id", "")).strip()
+    status = ticket.get("status", "")
+    customer = customer_data.get("firstname", "") + " " + customer_data.get("lastname", "")
+    customer = customer.strip()
+    vehicle_year = str(vehicle_data.get("year", ""))
+    vehicle_make = vehicle_data.get("make", "")
+    vehicle_model = vehicle_data.get("model", "")
+    vehicle_str = f"{vehicle_year} {vehicle_make} {vehicle_model}".strip()
+    advisor = ticket.get("advisor", {})
+    techs = ticket.get("techs", [])
+    event_timestamp = event_data.get("timestamp", "")
+    event_id = event_data.get("id", "")
+    callback_endpoint = event_data.get("callback_endpoint", "")
+    if not isinstance(advisor, dict):
+        advisor = {}
+    if not isinstance(techs, list):
+        techs = []
 
     previous = _last_ro_activity(invoice)
+    hours_since_last_event = _hours_between(previous.get("received_at") if previous else "", received_at)
+    tech_on_job = techs[0]["name"] if techs and isinstance(techs[0], dict) and "name" in techs[0] else "unassigned"
     transition = {
         "received_at": received_at,
         "event_type": event_type,
-        "event_timestamp": event.get("timestamp", ""),
+        "event_timestamp": event_timestamp,
         "ro": invoice,
         "ticket_id": ticket_id,
         "status": status,
-        "customer": customer_name,
+        "customer": customer,
         "vehicle": vehicle_str,
-        "advisor": {
-            "id": advisor.get("id", ""),
-            "name": advisor.get("name", "")
-        },
+        "advisor": advisor,
         "techs": techs,
-        "event_id": event.get("id", ""),
-        "callback_endpoint": event.get("callback_endpoint", ""),
-        "payload": payload,
+        "event_id": event_id,
+        "callback_endpoint": callback_endpoint,
+        "tech_on_job": tech_on_job,
+        "hours_since_last_event": hours_since_last_event
     }
-    if event_type_key == "status_update":
-        transition["hours_since_last_event"] = _hours_between(previous.get("received_at") if previous else "", received_at)
-        transition["tech_on_job"] = _first_tech_name(techs)
 
     TRANSITIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with TRANSITIONS_PATH.open("a", encoding="utf-8") as handle:
