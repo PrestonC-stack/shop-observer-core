@@ -118,35 +118,41 @@ def _photo_url_from_value(value) -> str:
 
 
 def _extract_photo_entries(dvi_response) -> list[dict]:
-    entries: list[dict] = []
+    photos = []
     seen: set[str] = set()
 
-    def walk(node, parent_label: str = "") -> None:
-        if isinstance(node, dict):
-            label = (
-                _first_text(node, "name", "title", "item_name", "label", "description", "concern", "category")
-                or parent_label
-                or "DVI photo"
+    def add_section_photos(section_items, section_name: str) -> None:
+        for item in section_items if isinstance(section_items, list) else []:
+            if not isinstance(item, dict):
+                continue
+            item_label = (
+                str(item.get("details") or item.get("title") or item.get("name") or item.get("description") or section_name)
+                or "DVI Item"
             )
-            photos = node.get("photos")
-            if isinstance(photos, list):
-                for photo in photos:
-                    url = _photo_url_from_value(photo)
-                    if url and url not in seen:
-                        seen.add(url)
-                        entries.append({
-                            "url": url,
-                            "thumbnail_url": url,
-                            "label": label,
-                        })
-            for value in node.values():
-                walk(value, label)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item, parent_label)
+            if len(item_label) > 40:
+                item_label = item_label[:40] + "..."
+            images = item.get("images", [])
+            for img in images if isinstance(images, list) else []:
+                if not isinstance(img, dict):
+                    continue
+                url = img.get("image_url", "")
+                if url and url not in seen:
+                    seen.add(url)
+                    photos.append({
+                        "url": url,
+                        "thumbnail_url": url,
+                        "label": item_label,
+                        "image_id": img.get("image_id", ""),
+                    })
 
-    walk(dvi_response)
-    return entries
+    try:
+        content = dvi_response.get("content", {}) if isinstance(dvi_response, dict) else {}
+        add_section_photos(content.get("reason_vehicle_is_here", []), "Reason vehicle is here")
+        for section_name in ("services", "items", "inspections"):
+            add_section_photos(content.get(section_name, []), section_name.replace("_", " ").title())
+    except Exception:
+        pass
+    return photos
 
 
 def _load_dvi_photo_entries(ro: str) -> list[dict]:
