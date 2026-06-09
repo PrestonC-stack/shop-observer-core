@@ -291,15 +291,17 @@ def _call_claude_vision(photo_b64: str, media_type: str) -> str:
     if not api_key:
         return "Photo analysis unavailable: ANTHROPIC_API_KEY is not set."
 
+    media_type = "image/jpeg"
+    prompt_text = (
+        "You are an automotive diagnostic assistant. Analyze this photo from a vehicle inspection and describe "
+        "what you see in detail. Focus on: scanner/scan tool data (PIDs, codes, live data values, freeze frame), "
+        "oscilloscope/scope waveforms, measurement readings, visible damage or wear, warning lights or dash displays. "
+        "If this is a progress or overview photo with no diagnostic value, say so clearly. Be concise and technical.\n\n"
+        "Describe what diagnostic information is visible in this photo and how it relates to vehicle repair."
+    )
     body = {
         "model": ANTHROPIC_MODEL,
         "max_tokens": 500,
-        "system": (
-            "You are an automotive diagnostic assistant. Analyze this photo from a vehicle inspection and describe "
-            "what you see in detail. Focus on: scanner/scan tool data (PIDs, codes, live data values, freeze frame), "
-            "oscilloscope/scope waveforms, measurement readings, visible damage or wear, warning lights or dash displays. "
-            "If this is a progress or overview photo with no diagnostic value, say so clearly. Be concise and technical."
-        ),
         "messages": [{
             "role": "user",
             "content": [
@@ -313,14 +315,15 @@ def _call_claude_vision(photo_b64: str, media_type: str) -> str:
                 },
                 {
                     "type": "text",
-                    "text": "Describe what diagnostic information is visible in this photo and how it relates to vehicle repair.",
+                    "text": prompt_text,
                 },
             ],
         }],
     }
+    print(f"Sending to Claude vision: {len(photo_b64)} chars base64, media_type: {media_type}")
     req = Request(
         ANTHROPIC_URL,
-        data=json.dumps(body).encode("utf-8"),
+        data=json.dumps(body, ensure_ascii=True).encode("utf-8"),
         headers={
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
@@ -328,8 +331,13 @@ def _call_claude_vision(photo_b64: str, media_type: str) -> str:
         },
         method="POST",
     )
-    with urlopen(req, timeout=30) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+    try:
+        with urlopen(req, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        error_body = error.read().decode("utf-8")
+        print(f"Claude API error {error.code}: {error_body[:500]}")
+        raise
     return clean_ai_response_text(_extract_response_text(payload))
 
 
