@@ -165,6 +165,12 @@ def _parse_packet_json(text: str, ro: str) -> dict:
     response_text = response_text.encode("ascii", "ignore").decode("ascii")
 
     try:
+        if not response_text.strip().endswith("}"):
+            raise json.JSONDecodeError(
+                "Response truncated before closing brace",
+                response_text,
+                len(response_text),
+            )
         parsed = json.loads(response_text)
         parsed["generated_at"] = datetime.utcnow().isoformat()
         return parsed
@@ -331,6 +337,7 @@ ORDERING RULES:
 - Within each category order by severity/urgency
 
 Return ONLY valid JSON. No markdown. No explanation. No code blocks.
+IMPORTANT: You must complete the entire JSON response including all closing brackets and braces. Do not truncate any fields. If a response would be very long, shorten individual field text rather than cutting off the JSON structure.
 """.strip()
 
 
@@ -357,7 +364,7 @@ def generate_packet(ro, force_refresh=False, requested_by="unknown"):
 
         request_body = {
             "model": ANTHROPIC_MODEL,
-            "max_tokens": 4000,
+            "max_tokens": 8000,
             "messages": [{"role": "user", "content": prompt}],
         }
         request = Request(
