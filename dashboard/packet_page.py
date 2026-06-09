@@ -120,73 +120,103 @@ def _photo_url_from_value(value) -> str:
 
 def _extract_photo_entries(dvi_response) -> list[dict]:
     photos = []
+    seen_ids = set()
+
+    def add_photo(url, label, image_id):
+        if not url:
+            return
+        key = image_id if image_id else url
+        if key in seen_ids:
+            return
+        seen_ids.add(key)
+        label = str(label or "DVI Photo")
+        if len(label) > 40:
+            label = label[:40] + "..."
+        photos.append({
+            "url": url,
+            "thumbnail_url": url,
+            "label": label,
+            "image_id": image_id,
+        })
+
+    def extract_images(images_list, label):
+        for img in (images_list or []):
+            if isinstance(img, dict):
+                add_photo(
+                    img.get("image_url", ""),
+                    label,
+                    img.get("image_id", img.get("id", "")),
+                )
+
     try:
         content = dvi_response.get("content", {}) if isinstance(dvi_response, dict) else {}
+        if not content and isinstance(dvi_response, dict):
+            content = dvi_response
 
-        # Structure A: simple reason_vehicle_is_here inspection.
-        reasons = content.get("reason_vehicle_is_here", [])
-        for item in reasons if isinstance(reasons, list) else []:
+        # Location 1: reason_vehicle_is_here.
+        for item in content.get("reason_vehicle_is_here", []):
             if not isinstance(item, dict):
                 continue
-            item_label = str(item.get("details") or "DVI Item")
-            if len(item_label) > 40:
-                item_label = item_label[:40] + "..."
-            images = item.get("images", [])
-            for img in images if isinstance(images, list) else []:
-                if not isinstance(img, dict):
-                    continue
-                url = img.get("image_url", "")
-                if url and url not in seen:
-                    seen.add(url)
-                    photos.append({
-                        "url": url,
-                        "thumbnail_url": url,
-                        "label": item_label,
-                        "image_id": img.get("image_id", ""),
-                    })
+            label = item.get("details", item.get("notes", "Customer Concern"))
+            extract_images(item.get("images", []), label)
+            for tagged in item.get("tagged_items", []):
+                if isinstance(tagged, dict):
+                    extract_images(tagged.get("images", []), tagged.get("name", label))
 
-        # Structure B: full multi-point inspection.
-        dvis = content.get("dvis", [])
-        for dvi in dvis if isinstance(dvis, list) else []:
+        # Location 2: dvis > dvi_category > dvi_items.
+        for dvi in content.get("dvis", []):
             if not isinstance(dvi, dict):
                 continue
-            categories = dvi.get("dvi_category", [])
-            for category in categories if isinstance(categories, list) else []:
-                if not isinstance(category, dict):
+            for cat in dvi.get("dvi_category", []):
+                if not isinstance(cat, dict):
                     continue
-                cat_name = str(category.get("category_name") or "")
-                items = category.get("dvi_items", [])
-                for dvi_item in items if isinstance(items, list) else []:
+                cat_name = cat.get("category_name", "")
+                extract_images(cat.get("images", []), cat_name)
+                for dvi_item in cat.get("dvi_items", []):
                     if not isinstance(dvi_item, dict):
                         continue
-                    item_name = str(dvi_item.get("item_name") or "")
-                    label = f"{cat_name} - {item_name}".strip(" -") or "DVI Item"
-                    if len(label) > 40:
-                        label = label[:40] + "..."
-                    images = dvi_item.get("images", [])
-                    for img in images if isinstance(images, list) else []:
-                        if not isinstance(img, dict):
-                            continue
-                        url = img.get("image_url", "")
-                        if url:
-                            photos.append({
-                                "url": url,
-                                "thumbnail_url": url,
-                                "label": label,
-                                "image_id": img.get("image_id", ""),
-                            })
+                    item_name = dvi_item.get("item_name", "")
+                    label = f"{cat_name} - {item_name}"
+                    extract_images(dvi_item.get("images", []), label)
+                    for rec in dvi_item.get("recommendations", []):
+                        if isinstance(rec, dict):
+                            extract_images(rec.get("images", []), f"{label} (rec)")
+
+        # Location 3: top-level images array.
+        extract_images(content.get("images", []), "DVI Photo")
+
+        # Location 4: hunter_results.
+        for result in content.get("hunter_results", []):
+            if isinstance(result, dict):
+                extract_images(result.get("images", []), result.get("name", "Hunter Result"))
+
+        # Location 5: note images.
+        for note in content.get("notes", []):
+            if isinstance(note, dict):
+                extract_images(note.get("images", []), str(note.get("text", "Note Photo"))[:40])
+
+        # Location 6: services array.
+        for svc in content.get("services", []):
+            if isinstance(svc, dict):
+                label = svc.get("name", svc.get("title", "Service"))
+                extract_images(svc.get("images", []), label)
+
+        # Location 7: flat items array.
+        for item in content.get("items", []):
+            if isinstance(item, dict):
+                label = item.get("name", item.get("title", "Inspection Item"))
+                extract_images(item.get("images", []), label)
+
+        # Location 8: inspections array.
+        for insp in content.get("inspections", []):
+            if isinstance(insp, dict):
+                label = insp.get("name", insp.get("title", "Inspection"))
+                extract_images(insp.get("images", []), label)
     except Exception as error:
         print(f"Photo extraction error: {error}")
 
-    seen = set()
-    unique = []
-    for photo in photos:
-        key = photo.get("image_id") or photo.get("url")
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(photo)
-    return unique
+    print(f"Photo extraction complete: {len(photos)} unique photos found")
+    return photos
 
 
 def _load_dvi_photo_entries(ro: str) -> list[dict]:
