@@ -247,12 +247,35 @@ def _media_type_from_url(url: str) -> str:
     return "image/jpeg"
 
 
-def _download_photo(url: str) -> tuple[str, str]:
-    req = Request(url, headers={"User-Agent": "CallahanAI/1.0"})
+def _get_full_res_url(url: str) -> str:
+    if url.endswith("_s.jpeg"):
+        return url[:-7] + ".jpeg"
+    if url.endswith("_s.jpg"):
+        return url[:-6] + ".jpg"
+    return url
+
+
+def _download_photo_once(url: str) -> tuple[str, str]:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://app.autoflow.com/",
+        "Accept": "image/jpeg,image/png,image/*,*/*",
+    }
+    req = Request(url, headers=headers)
     with urlopen(req, timeout=15) as response:
         image_bytes = response.read()
         media_type = response.headers.get_content_type() or _media_type_from_url(url)
     return base64.b64encode(image_bytes).decode("ascii"), media_type
+
+
+def _download_photo(url: str) -> tuple[str, str]:
+    try:
+        return _download_photo_once(url)
+    except (HTTPError, URLError, OSError, socket.timeout):
+        full_res_url = _get_full_res_url(url)
+        if full_res_url == url:
+            raise
+        return _download_photo_once(full_res_url)
 
 
 def _call_claude_vision(photo_b64: str, media_type: str) -> str:
