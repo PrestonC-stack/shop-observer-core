@@ -33,10 +33,19 @@ AUTOFLOW_BASE_URL = "https://callahanautomotive.autotext.me/api/v1"
 API_TIMEOUT_SECONDS = 15
 
 API_CALL_COUNT = 0
+FIRST_CONVERSATIONS_URL_LOGGED = False
 
 
 class EnrichmentError(RuntimeError):
     """Raised when an RO enrichment pull should be treated as failed."""
+
+
+class AutoFlowHTTPError(EnrichmentError):
+    def __init__(self, path: str, code: int, detail: str):
+        self.path = path
+        self.code = code
+        self.detail = detail
+        super().__init__(f"AutoFlow HTTP {code} for {path}: {detail}")
 
 
 def _utc_now_iso() -> str:
@@ -73,7 +82,9 @@ def _api_get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
             body = response.read().decode("utf-8")
     except HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")[:300]
-        raise EnrichmentError(f"AutoFlow HTTP {error.code} for {path}: {detail}") from error
+        if not detail:
+            detail = str(error.reason or "HTTP error")
+        raise AutoFlowHTTPError(path, error.code, detail) from error
     except (URLError, OSError) as error:
         raise EnrichmentError(f"AutoFlow request failed for {path}: {error}") from error
 
@@ -270,6 +281,9 @@ def _derive_summary(
     raw_work_order: dict[str, Any],
     raw_repair_order: dict[str, Any] | None,
     raw_conversations: dict[str, Any],
+    work_order_ok: bool = True,
+    repair_order_ok: bool = True,
+    conversations_ok: bool = True,
 ) -> dict[str, Any]:
     work_order = _work_order_payload(raw_work_order)
     repair_order = _repair_order_payload(raw_repair_order or {})
@@ -315,6 +329,9 @@ def _derive_summary(
             latest_contact_ts = ts
 
     return {
+        "work_order_ok": bool(work_order_ok),
+        "repair_order_ok": bool(repair_order_ok),
+        "conversations_ok": bool(conversations_ok),
         "parts_total": parts_total,
         "parts_arrived": parts_arrived,
         "parts_outstanding": max(parts_total - parts_arrived, 0),
@@ -345,26 +362,69 @@ def _invoice_from_work_order(raw_work_order: dict[str, Any]) -> str:
 
 
 def enrich_ro(ro: str) -> dict[str, Any]:
+    global FIRST_CONVERSATIONS_URL_LOGGED
     ro = str(ro).strip()
     if not ro:
         raise EnrichmentError("missing RO")
 
-    raw_work_order = _api_get(f"work_orders/{ro}")
-    invoice = _invoice_from_work_order(raw_work_order)
-    raw_repair_order = None
-    if invoice:
-        raw_repair_order = _api_get(f"repair_order/{invoice}")
+    raw_work_order = {}
+    raw_repair_order = {}
+    raw_conversations = {}
+    work_order_ok = False
+    repair_order_ok = False
+    conversations_ok = False
 
-    raw_conversations = _api_get("conversations", {"remote_ticket_id": ro})
-    summary = _derive_summary(raw_work_order, raw_repair_order, raw_conversations)
-    if summary["conversation_count"] == 0:
+    try:
+        raw_work_order = _api_get(f"work_orders/{ro}")
+        work_order_ok = True
+    except Exception as error:
+        print(f"Enrichment warning: work_orders failed for RO {ro}: {error}")
+
+    invoice = _invoice_from_work_order(raw_work_order)
+    if invoice:
+        try:
+            raw_repair_order = _api_get(f"repair_order/{invoice}")
+            repair_order_ok = True
+        except Exception as error:
+            print(f"Enrichment warning: repair_order failed for RO {ro}: {error}")
+    else:
+        print(f"Enrichment note: no invoice found for RO {ro}; skipping repair_order")
+
+    conversation_params = {"remote_ticket_id": ro}
+    if not FIRST_CONVERSATIONS_URL_LOGGED:
+        url = f"{AUTOFLOW_BASE_URL}/conversations?{urlencode(conversation_params)}"
+        print(f"First conversations request URL: {url}")
+        FIRST_CONVERSATIONS_URL_LOGGED = True
+    try:
+        raw_conversations = _api_get("conversations", conversation_params)
+        conversations_ok = True
+    except AutoFlowHTTPError as error:
+        detail = str(error.detail or "").lower()
+        if error.code == 404:
+            print(f"Enrichment note: no conversations exist for RO {ro}: {error.detail}")
+            raw_conversations = {}
+            conversations_ok = False
+        else:
+            print(f"Enrichment warning: conversations failed for RO {ro}: {error}")
+    except Exception as error:
+        print(f"Enrichment warning: conversations failed for RO {ro}: {error}")
+
+    summary = _derive_summary(
+        raw_work_order,
+        raw_repair_order,
+        raw_conversations,
+        work_order_ok=work_order_ok,
+        repair_order_ok=repair_order_ok,
+        conversations_ok=conversations_ok,
+    )
+    if conversations_ok and summary["conversation_count"] == 0:
         print(f"Enrichment note: no conversations returned for RO {ro}")
     payload = {
         "ro": ro,
         "fetched_at": _utc_now_iso(),
         "raw": {
             "work_order": raw_work_order,
-            "repair_order": raw_repair_order or {},
+            "repair_order": raw_repair_order,
             "conversations": raw_conversations,
         },
         "summary": summary,
@@ -410,7 +470,7 @@ def enrich_all_active(
             enrich_ro(ro)
         except Exception as error:
             counts["failed"] += 1
-            print(f"Enrichment failed for RO {ro}: {error}")
+            print(f"Enrichment failed to write cache for RO {ro}: {error}")
             if delay_s > 0 and index < len(ros) - 1:
                 time.sleep(delay_s)
             continue
@@ -454,8 +514,26 @@ def _print_sample_rows(limit: int = 5) -> None:
             f"auth(sent={summary.get('auth_sent_at')}, "
             f"viewed={summary.get('auth_viewed_at')}, "
             f"approved={summary.get('auth_approved')}) | "
-            f"last_contact {direction} {age}"
+            f"last_contact {direction} {age} | "
+            f"ok(wo={summary.get('work_order_ok')}, "
+            f"ro={summary.get('repair_order_ok')}, "
+            f"conv={summary.get('conversations_ok')})"
         )
+
+
+def _coverage_counts(ros: list[str]) -> dict[str, int]:
+    counts = {"work_order_ok": 0, "repair_order_ok": 0, "conversations_ok": 0}
+    for ro in ros:
+        path = _cache_path(ro)
+        try:
+            payload = _load_json(path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
+        for key in counts:
+            if summary.get(key) is True:
+                counts[key] += 1
+    return counts
 
 
 def main() -> int:
@@ -472,6 +550,7 @@ def main() -> int:
 
     counts = enrich_all_active(shop_state)
     ros = _active_ros(shop_state)
+    coverage = _coverage_counts(ros)
     total = counts["enriched"] + counts["skipped"] + counts["failed"]
     print(
         "AutoFlow enrichment complete: "
@@ -479,7 +558,10 @@ def main() -> int:
         f"skipped={counts['skipped']} "
         f"failed={counts['failed']} "
         f"active={total} "
-        f"api_calls={API_CALL_COUNT}"
+        f"api_calls={API_CALL_COUNT} "
+        f"coverage(work_order_ok={coverage['work_order_ok']}, "
+        f"repair_order_ok={coverage['repair_order_ok']}, "
+        f"conversations_ok={coverage['conversations_ok']})"
     )
     print("ROs used: " + (", ".join(ros) if ros else "none"))
     _print_sample_rows(limit=5)
