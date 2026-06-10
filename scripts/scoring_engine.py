@@ -42,7 +42,37 @@ STATUS_DISPLAY_MAP = {
 }
 TRANSITIONS_PATH = Path(__file__).resolve().parents[1] / "data" / "status_transitions" / "transitions.jsonl"
 RO_ACTIVITY_DIR = Path(__file__).resolve().parents[1] / "data" / "ro_activity"
+ENRICHMENT_DIR = Path(__file__).resolve().parents[1] / "state" / "enrichment"
 latest_transition_by_ro = {}
+
+STATUS_ALIASES = {
+    "waiting_approval": "waiting approval",
+    "waiting approval": "waiting approval",
+    "waiting customer approval": "waiting approval",
+    "estimate": "advisor estimate",
+    "est": "advisor estimate",
+    "advisor_estimate": "advisor estimate",
+    "advisor estimate": "advisor estimate",
+    "ready": "ready",
+    "finished": "finished",
+    "waiting_parts": "waiting parts",
+    "waiting parts": "waiting parts",
+    "ordering_parts": "ordering parts",
+    "ordering parts": "ordering parts",
+    "call shop": "call_shop",
+    "call_shop": "call_shop",
+    "in_progress": "servicing",
+    "in progress": "servicing",
+    "online_stage": "online /stage",
+    "online/stage": "online/stage",
+    "online /stage": "online /stage",
+    "drop off/tow-in": "drop off/tow-in",
+    "drop off/ tow-in": "drop off/ tow-in",
+    "dvi only-not here": "dvi only-not here",
+    "dvi only- not here": "dvi only- not here",
+    "scheduled_not_here": "scheduled-not here",
+    "scheduled-not here": "scheduled-not here",
+}
 
 READY_TO_CLOSE_STATUSES = {"finished", "ready", "advisor finalize ro"}
 WAITING_CUSTOMER_STATUSES = {"waiting approval", "call_shop", "advisor estimate"}
@@ -136,7 +166,10 @@ def _hours_since(dt_value):
 def _normalize_status(raw):
     if not raw:
         return "unknown"
-    return str(raw).strip().lower()
+    value = str(raw).strip().lower().replace("-", "-")
+    value = " ".join(value.replace("_", " ").split())
+    underscored = value.replace(" ", "_")
+    return STATUS_ALIASES.get(value) or STATUS_ALIASES.get(underscored) or value
 
 def _clean_status(status):
     return STATUS_DISPLAY_MAP.get(status, status)
@@ -205,6 +238,93 @@ def _read_ro_activity(ro):
     except OSError:
         return []
     return events
+
+def _load_enrichment(job):
+    ro = _ro_id(job)
+    if not ro:
+        return {}
+    path = ENRICHMENT_DIR / f"{ro}.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    summary = payload.get("summary")
+    summary = dict(summary) if isinstance(summary, dict) else {}
+    if not summary.get("wo_gen_date"):
+        raw = payload.get("raw") if isinstance(payload.get("raw"), dict) else {}
+        work_order_raw = raw.get("work_order") if isinstance(raw.get("work_order"), dict) else {}
+        work_order = (
+            work_order_raw.get("work_order")
+            if isinstance(work_order_raw.get("work_order"), dict)
+            else work_order_raw
+        )
+        if isinstance(work_order, dict):
+            summary["wo_gen_date"] = work_order.get("wo_gen_date")
+    return summary
+
+def _summary_int(summary, key):
+    try:
+        return int(summary.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+def _summary_float(summary, key):
+    try:
+        return float(summary.get(key) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+def _parts_snapshot(enrichment):
+    total = _summary_int(enrichment, "parts_total")
+    arrived = _summary_int(enrichment, "parts_arrived")
+    outstanding = _summary_int(enrichment, "parts_outstanding")
+    if total > 0 and outstanding == 0:
+        outstanding = max(total - arrived, 0)
+    return {
+        "parts_total": total,
+        "parts_arrived": arrived,
+        "parts_outstanding": outstanding,
+    }
+
+def _status_progress_base(status):
+    if status in {"checkin", "drop off/tow-in", "drop off/ tow-in", "online/stage", "online /stage", "aaa", "unknown"}:
+        return 10
+    if status in {"inspecting", "testing", "dvi updates", "ready for tech", "awaiting tech"}:
+        return 25
+    if status in {"advisor estimate", "waiting approval", "call_shop", "technical advisement", "technical overview"}:
+        return 38
+    if status in {"ordering parts", "waiting parts", "parts"}:
+        return 45
+    if status in {"servicing", "k_mech_complete"}:
+        return 60
+    if status in {"qc", "advisor qc review"}:
+        return 82
+    if status in {"advisor finalize ro", "ready", "finished"}:
+        return 92
+    return 35
+
+def _progress_proxy(status, enrichment):
+    base = _status_progress_base(status)
+    parts = _parts_snapshot(enrichment)
+    total = parts["parts_total"]
+    if total > 0:
+        parts_pct = max(0, min(100, int(round((parts["parts_arrived"] / total) * 100))))
+        progress = round((base * 0.7) + (parts_pct * 0.3))
+    else:
+        progress = base
+    return max(0, min(99, int(progress)))
+
+def _parts_reason(parts, stale, hours_in_status):
+    total = parts["parts_total"]
+    arrived = parts["parts_arrived"]
+    outstanding = parts["parts_outstanding"]
+    if total <= 0:
+        return ""
+    if outstanding > 0 and stale:
+        return f"parts outstanding + no movement {_format_hours(hours_in_status)}, check parts ETA"
+    if outstanding > 0:
+        return f"parts {arrived}/{total} in, {outstanding} outstanding"
+    return f"all parts in - ready to move"
 
 def _event_type(event):
     payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
@@ -334,10 +454,15 @@ def _p1_gate(status, job, flags, activity, hours_in_status):
 
     return False, "", ""
 
-def _status_based_column(status, job, priority):
+def _status_based_column(status, job, priority, enrichment=None):
     waiting_on = str(job.get("waiting_on") or "").strip().lower()
+    parts = _parts_snapshot(enrichment or _load_enrichment(job))
     if priority == "P1":
         return "Need Immediate Action"
+    if parts["parts_outstanding"] > 0:
+        return "Parts / Inventory"
+    if parts["parts_total"] > 0 and parts["parts_outstanding"] == 0 and status not in READY_TO_CLOSE_STATUSES and status not in {"qc", "advisor qc review"}:
+        return "In Progress"
     if status in READY_TO_CLOSE_STATUSES:
         return "Ready to Close"
     if status in {"waiting parts", "ordering parts", "parts"}:
@@ -357,6 +482,13 @@ def _status_based_column(status, job, priority):
 
 def _fallback_priority_reason(status, job):
     waiting_on = str(job.get("waiting_on") or "").strip().lower()
+    enrichment = _load_enrichment(job)
+    parts = _parts_snapshot(enrichment)
+    hours_in_status = _last_update_hours(job)
+    if parts["parts_outstanding"] > 0:
+        return "P4", _parts_reason(parts, hours_in_status > OVERDUE_HOURS, hours_in_status)
+    if parts["parts_total"] > 0 and parts["parts_outstanding"] == 0 and status not in READY_TO_CLOSE_STATUSES and status not in {"qc", "advisor qc review"}:
+        return "P2B", "all parts in - ready to move"
     if status in {"checkin", "drop off/tow-in", "drop off/ tow-in", "online/stage", "online /stage"}:
         if not _has_customer_concern(job):
             return "P2A", "Checked in - no customer concern captured"
@@ -401,6 +533,8 @@ def _detect_risk_flags(status, job):
     hours_since_customer = _last_customer_contact_hours(job)
     hours_since_update = _last_update_hours(job)
     etc_remaining = _etc_hours_remaining(job)
+    enrichment = _load_enrichment(job)
+    parts = _parts_snapshot(enrichment)
     if hours_since_customer > COMMS_RISK_HOURS and status in {"waiting approval","ordering parts","waiting parts","servicing"}:
         flags.append("customer_contact_overdue")
     if not _has_dvi(job) and status in {"technical advisement","advisor estimate","waiting approval","ordering parts","waiting parts","servicing"}:
@@ -411,6 +545,12 @@ def _detect_risk_flags(status, job):
         flags.append("no_tech_assigned")
     if _parts_on_order(job):
         flags.append("waiting_on_parts")
+    if parts["parts_outstanding"] > 0:
+        flags.append("parts_outstanding")
+        if hours_since_update > OVERDUE_HOURS:
+            flags.append("parts_outstanding_stale")
+    if parts["parts_total"] > 0 and parts["parts_outstanding"] == 0:
+        flags.append("all_parts_arrived")
     if etc_remaining < 0 and status not in NEAR_CLOSEOUT_STATUSES:
         flags.append("etc_overdue")
     if 0 < etc_remaining <= 2:
@@ -581,7 +721,11 @@ def score_job(job):
         bay_message = "Incomplete data - review in AutoFlow"
         signal = "blocked" if priority.startswith("P2") else "clear"
 
-    column = _status_based_column(status, job, priority)
+    enrichment = _load_enrichment(job)
+    parts = _parts_snapshot(enrichment)
+    progress_percent = _progress_proxy(status, enrichment)
+    parts_reason = _parts_reason(parts, hours_in_status > OVERDUE_HOURS, hours_in_status)
+    column = _status_based_column(status, job, priority, enrichment)
     if hours_in_status > OVERDUE_HOURS and "24H NO MOVEMENT" not in flags:
         flags.append("24H NO MOVEMENT")
     return {
@@ -596,6 +740,14 @@ def score_job(job):
         "score_reason": reason,
         "need_action_kind": need_action_kind,
         "column": column,
+        "progress_percent": progress_percent,
+        "progress_label": "estimated from workflow status + parts arrival",
+        "parts_total": parts["parts_total"],
+        "parts_arrived_count": parts["parts_arrived"],
+        "parts_outstanding": parts["parts_outstanding"],
+        "parts_reason": parts_reason,
+        "sold_labor_hours": _summary_float(enrichment, "sold_labor_hours"),
+        "wo_gen_date": enrichment.get("wo_gen_date"),
         "owner": owner,
         "board_signal": signal,
         "next_action": next_action,
@@ -608,7 +760,7 @@ def score_job(job):
         "etc_hours_remaining": _etc_hours_remaining(job),
         "has_dvi": _has_dvi(job),
         "parts_on_order": _parts_on_order(job),
-        "parts_arrived": _parts_arrived(job),
+        "parts_arrived": _parts_arrived(job) or (parts["parts_total"] > 0 and parts["parts_outstanding"] == 0),
         "is_approved": _is_approved(job),
     }
 
