@@ -10,12 +10,14 @@ from __future__ import annotations
 import base64
 import json
 import os
-from datetime import datetime, timezone
+import time
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from scripts.scoring_engine import _hours_since, _now_utc, _ro_id
 
 try:
     from dotenv import load_dotenv
@@ -37,12 +39,8 @@ class EnrichmentError(RuntimeError):
     """Raised when an RO enrichment pull should be treated as failed."""
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
 def _utc_now_iso() -> str:
-    return _utc_now().isoformat()
+    return _now_utc().isoformat()
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -98,13 +96,12 @@ def _cache_is_fresh(ro: str, max_age_minutes: int) -> bool:
         return False
     try:
         payload = _load_json(path)
-        fetched_at = _parse_ts(payload.get("fetched_at"))
     except (OSError, json.JSONDecodeError):
         return False
-    if fetched_at is None:
+    hours_old = _hours_since(payload.get("fetched_at"))
+    if hours_old >= 999:
         return False
-    age_seconds = (_utc_now() - fetched_at).total_seconds()
-    return age_seconds <= max_age_minutes * 60
+    return hours_old <= (max_age_minutes / 60)
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -158,6 +155,8 @@ def _parse_float(value: Any) -> float:
 def _parse_ts(value: Any) -> datetime | None:
     if not value:
         return None
+    from datetime import datetime, timezone
+
     try:
         ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (TypeError, ValueError):
@@ -358,6 +357,8 @@ def enrich_ro(ro: str) -> dict[str, Any]:
 
     raw_conversations = _api_get("conversations", {"remote_ticket_id": ro})
     summary = _derive_summary(raw_work_order, raw_repair_order, raw_conversations)
+    if summary["conversation_count"] == 0:
+        print(f"Enrichment note: no conversations returned for RO {ro}")
     payload = {
         "ro": ro,
         "fetched_at": _utc_now_iso(),
@@ -379,29 +380,43 @@ def _active_ros(shop_state: dict[str, Any]) -> list[str]:
     for job in jobs:
         if not isinstance(job, dict):
             continue
-        status = str(job.get("workflow_status") or "").strip().lower()
-        if status in {"close", "closed", "apache job"}:
+        status = str(job.get("workflow_status") or "").strip()
+        if not status:
             continue
-        ro = str(job.get("ro") or "").strip()
+        status_key = status.lower()
+        if status_key in {"close", "closed", "apache job"}:
+            continue
+        ro = _ro_id(job)
         if ro and ro not in seen:
             seen.add(ro)
             ros.append(ro)
     return ros
 
 
-def enrich_all_active(shop_state: dict[str, Any], max_age_minutes: int = 15) -> dict[str, int]:
+def enrich_all_active(
+    shop_state: dict[str, Any],
+    max_age_minutes: int = 15,
+    delay_s: float = 0.15,
+) -> dict[str, int]:
     counts = {"enriched": 0, "skipped": 0, "failed": 0}
-    for ro in _active_ros(shop_state):
+    ros = _active_ros(shop_state)
+    for index, ro in enumerate(ros):
         if _cache_is_fresh(ro, max_age_minutes):
             counts["skipped"] += 1
+            if delay_s > 0 and index < len(ros) - 1:
+                time.sleep(delay_s)
             continue
         try:
             enrich_ro(ro)
         except Exception as error:
             counts["failed"] += 1
             print(f"Enrichment failed for RO {ro}: {error}")
+            if delay_s > 0 and index < len(ros) - 1:
+                time.sleep(delay_s)
             continue
         counts["enriched"] += 1
+        if delay_s > 0 and index < len(ros) - 1:
+            time.sleep(delay_s)
     return counts
 
 
@@ -409,7 +424,7 @@ def _age_text(iso_value: Any) -> str:
     ts = _parse_ts(iso_value)
     if ts is None:
         return "unknown"
-    minutes = int((_utc_now() - ts).total_seconds() // 60)
+    minutes = int((_now_utc() - ts).total_seconds() // 60)
     if minutes < 60:
         return f"{minutes}m"
     hours = minutes // 60
@@ -456,6 +471,7 @@ def main() -> int:
         return 1
 
     counts = enrich_all_active(shop_state)
+    ros = _active_ros(shop_state)
     total = counts["enriched"] + counts["skipped"] + counts["failed"]
     print(
         "AutoFlow enrichment complete: "
@@ -465,6 +481,7 @@ def main() -> int:
         f"active={total} "
         f"api_calls={API_CALL_COUNT}"
     )
+    print("ROs used: " + (", ".join(ros) if ros else "none"))
     _print_sample_rows(limit=5)
     return 0 if counts["failed"] == 0 else 2
 
