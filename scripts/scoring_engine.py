@@ -41,7 +41,30 @@ STATUS_DISPLAY_MAP = {
     "aaa": "Status Unknown — Fix in AutoFlow",
 }
 TRANSITIONS_PATH = Path(__file__).resolve().parents[1] / "data" / "status_transitions" / "transitions.jsonl"
+RO_ACTIVITY_DIR = Path(__file__).resolve().parents[1] / "data" / "ro_activity"
 latest_transition_by_ro = {}
+
+READY_TO_CLOSE_STATUSES = {"finished", "ready", "advisor finalize ro"}
+WAITING_CUSTOMER_STATUSES = {"waiting approval", "call_shop", "advisor estimate"}
+WAITING_OTHER_STATUSES = {
+    "waiting parts", "ordering parts", "parts", "external hold", "aaa",
+    "unknown", "scheduled-not here", "dvi only-not here",
+    "dvi only- not here",
+}
+IN_PROGRESS_STATUSES = {
+    "servicing", "inspecting", "testing", "dvi updates", "ready for tech",
+    "awaiting tech", "technical advisement", "technical overview",
+    "k_mech_complete", "checkin", "qc", "advisor qc review",
+    "drop off/tow-in", "drop off/ tow-in", "online/stage",
+    "online /stage",
+}
+INBOUND_EVENT_TYPES = {"inbound_message", "ro_approval"}
+OUTBOUND_EVENT_TYPES = {"dvi_sent"}
+NEED_ACTION_SORT = {
+    "ready_to_collect": 0,
+    "customer_waiting": 1,
+    "dvi_rework": 2,
+}
 
 def _now_utc():
     return datetime.now(timezone.utc)
@@ -56,6 +79,14 @@ def _parse_transition_received_at(value):
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
     return ts.astimezone(timezone.utc)
+
+def _ro_id(job):
+    return str(
+        job.get("ro")
+        or job.get("ticket_reference")
+        or job.get("invoice")
+        or ""
+    ).strip()
 
 def _load_latest_transition_by_ro():
     latest = {}
@@ -149,11 +180,209 @@ def _etc_hours_remaining(job):
         return 999.0
 
 def _last_update_hours(job):
-    ro = str(job.get("ro") or "").strip()
+    ro = _ro_id(job)
     transition_ts = latest_transition_by_ro.get(ro)
     if transition_ts is not None:
         return round((_now_utc() - transition_ts).total_seconds() / 3600, 1)
     return _hours_since(job.get("last_updated_at") or job.get("last_activity_at") or job.get("generated_at"))
+
+def _read_ro_activity(ro):
+    if not ro:
+        return []
+    path = RO_ACTIVITY_DIR / f"{ro}.jsonl"
+    events = []
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                events.append(event)
+    except OSError:
+        return []
+    return events
+
+def _event_type(event):
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    payload_event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+    return str(
+        event.get("event_type")
+        or payload_event.get("type")
+        or ""
+    ).strip().lower()
+
+def _event_received_at(event):
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    return _parse_transition_received_at(
+        event.get("received_at")
+        or event.get("event_timestamp")
+        or payload.get("timestamp")
+    )
+
+def _event_status(event):
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    ticket = payload.get("ticket") if isinstance(payload.get("ticket"), dict) else {}
+    return _normalize_status(event.get("status") or ticket.get("status") or "")
+
+def _direction_text(event):
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+    candidates = [
+        event.get("direction"),
+        event.get("message_direction"),
+        event.get("source"),
+        message.get("direction"),
+        message.get("status"),
+    ]
+    return " ".join(str(value).lower() for value in candidates if value)
+
+def _is_inbound_event(event):
+    return _event_type(event) in INBOUND_EVENT_TYPES
+
+def _is_outbound_event(event):
+    event_type = _event_type(event)
+    if event_type in OUTBOUND_EVENT_TYPES:
+        return True
+    if event_type != "message_status":
+        return False
+    direction = _direction_text(event)
+    if any(token in direction for token in ("inbound", "customer_reply", "from_customer")):
+        return False
+    return True
+
+def _latest_activity_event(activity):
+    latest = None
+    latest_ts = None
+    for event in activity:
+        ts = _event_received_at(event)
+        if ts is None:
+            continue
+        if latest_ts is None or ts > latest_ts:
+            latest = event
+            latest_ts = ts
+    return latest
+
+def _status_started_at(status, activity):
+    latest_ts = None
+    for event in activity:
+        event_status = _event_status(event)
+        if event_status != status:
+            continue
+        ts = _event_received_at(event)
+        if ts is None:
+            continue
+        if latest_ts is None or ts > latest_ts:
+            latest_ts = ts
+    return latest_ts
+
+def _has_outbound_since(activity, since_ts):
+    if since_ts is None:
+        return False
+    for event in activity:
+        ts = _event_received_at(event)
+        if ts is None or ts < since_ts:
+            continue
+        if _is_outbound_event(event):
+            return True
+    return False
+
+def _format_hours(hours):
+    if hours >= 24:
+        days = int(hours // 24)
+        rem = int(hours % 24)
+        return f"{days}d {rem}h" if rem else f"{days}d"
+    if hours >= 1:
+        return f"{int(hours)}h"
+    minutes = max(0, int(hours * 60))
+    return f"{minutes}m"
+
+def _is_dvi_rework_unacknowledged(job):
+    dvi_status = str(job.get("dvi_review_status") or "").strip().upper()
+    dvi_acknowledged = bool(
+        job.get("dvi_acknowledged")
+        or job.get("dvi_review_acknowledged")
+        or job.get("acknowledged")
+        or job.get("dvi_rework_override")
+    )
+    return "REWORK" in dvi_status and not dvi_acknowledged
+
+def _p1_gate(status, job, flags, activity, hours_in_status):
+    if status in {"finished", "ready"} and activity:
+        status_start = _status_started_at(status, activity)
+        if status_start is not None and not _has_outbound_since(activity, status_start):
+            return (
+                True,
+                "ready_to_collect",
+                f"Ready to collect - no outbound contact since {status} {_format_hours(hours_in_status)} ago",
+            )
+
+    latest_event = _latest_activity_event(activity)
+    if latest_event and _is_inbound_event(latest_event):
+        event_type = _event_type(latest_event) or "inbound event"
+        return (
+            True,
+            "customer_waiting",
+            f"Customer waiting - last event {event_type.replace('_', ' ')}",
+        )
+
+    if _is_dvi_rework_unacknowledged(job):
+        return True, "dvi_rework", "DVI rework unacknowledged"
+
+    return False, "", ""
+
+def _status_based_column(status, job, priority):
+    waiting_on = str(job.get("waiting_on") or "").strip().lower()
+    if priority == "P1":
+        return "Need Immediate Action"
+    if status in READY_TO_CLOSE_STATUSES:
+        return "Ready to Close"
+    if status in {"waiting parts", "ordering parts", "parts"}:
+        return "Parts / Inventory"
+    if status in WAITING_CUSTOMER_STATUSES:
+        return "Waiting / Customer"
+    if (
+        status in WAITING_OTHER_STATUSES
+        or "external" in waiting_on
+        or "needs review" in waiting_on
+        or "needs review" in status
+    ):
+        return "Waiting / Other"
+    if status in IN_PROGRESS_STATUSES:
+        return "In Progress"
+    return "In Progress"
+
+def _fallback_priority_reason(status, job):
+    waiting_on = str(job.get("waiting_on") or "").strip().lower()
+    if status in {"checkin", "drop off/tow-in", "drop off/ tow-in", "online/stage", "online /stage"}:
+        if not _has_customer_concern(job):
+            return "P2A", "Checked in - no customer concern captured"
+        return "P3", "Checked in - intake captured"
+    if status in {"awaiting tech", "ready for tech", "testing", "dvi updates", "inspecting"}:
+        return "P2B", "Awaiting tech or DVI progress"
+    if status in {"advisor estimate", "waiting approval", "call_shop"}:
+        if status == "waiting approval":
+            return "P2C", "Waiting on customer approval"
+        if status == "call_shop":
+            return "P2C", "Advisor follow-up needed"
+        return "P2C", "Advisor estimate needs action"
+    if status in {"technical advisement", "technical overview", "qc", "advisor qc review", "k_mech_complete"}:
+        return "P2C", "Advisor or technical review needed"
+    if (
+        status in WAITING_OTHER_STATUSES
+        or "external" in waiting_on
+        or "needs review" in waiting_on
+        or "needs review" in status
+    ):
+        return "P4", "Legitimate external hold or status cleanup"
+    if status in READY_TO_CLOSE_STATUSES:
+        return "P3", "Ready to close - outbound contact handled or not yet proven missing"
+    if _has_tech_assigned(job):
+        return "P3", "In progress - tech assigned"
+    return "P3", "Active and controlled"
 
 def _last_customer_contact_hours(job):
     return _hours_since(job.get("last_customer_contact_at"))
@@ -198,53 +427,30 @@ def _detect_risk_flags(status, job):
 
 def _assign_priority(status, job, flags):
     hours_in_status = _last_update_hours(job)
-    waiting_on = str(job.get("waiting_on") or "").strip()
-    dvi_status = str(job.get("dvi_review_status") or "").strip().upper()
-    dvi_acknowledged = bool(job.get("dvi_acknowledged") or job.get("dvi_review_acknowledged") or job.get("acknowledged"))
-    override = str(job.get("priority_override") or job.get("human_priority_override") or job.get("manual_priority") or "").strip().upper()
+    try:
+        activity = _read_ro_activity(_ro_id(job))
+        gate_passed, gate_kind, gate_reason = _p1_gate(
+            status, job, flags, activity, hours_in_status
+        )
+        if gate_passed:
+            return "P1", gate_reason, gate_kind
 
-    if override == "P1":
-        return "P1", "Human override set priority to P1"
-    if status == "ready" and waiting_on == "Mitch":
-        return "P1", "Ready vehicle is waiting on Mitch to notify customer"
-    if status == "finished" and waiting_on == "Mitch" and hours_in_status > 4:
-        return "P1", "Finished vehicle has waited over 4 hours for Mitch closeout"
-    if status == "waiting approval" and hours_in_status > 4:
-        return "P1", "Customer approval has been waiting over 4 hours"
-    if dvi_status == "REWORK_REQUIRED" and not dvi_acknowledged:
-        return "P1", "DVI rework required and not acknowledged"
-
-    if status == "finished" and hours_in_status <= 4:
-        return "P2", "Finished today - closeout action needed"
-    if status in {"k_mech_complete", "call_shop"}:
-        return "P2", "Advisor action needed today"
-    if status in {"qc", "advisor qc review"}:
-        return "P2", "QC review needs advisor attention today"
-    if status in {"ordering parts", "waiting parts"} and hours_in_status > 8:
-        return "P2", "Parts status has waited over 8 hours"
-    if status == "waiting approval" and hours_in_status <= 4:
-        return "P2", "Waiting customer decision - follow up today"
-
-    if status in {"servicing", "awaiting tech", "testing", "dvi updates", "ready for tech", "inspecting", "checkin"}:
-        return "P3", "Active job - monitor progress"
-    if status in {"ordering parts", "waiting parts"} and hours_in_status <= 8:
-        return "P3", "Parts process active - monitor ETA"
-
-    if status in {"parts", "scheduled-not here", "dvi only- not here", "drop off/ tow-in", "online /stage"}:
-        return "P4", "Low priority watch status"
-    if status in {"unknown", "aaa"}:
-        return "P4", "Junk or unknown status - watch and clean up"
-    if waiting_on == "External Hold":
-        return "P4", "External hold - watch only"
-
-    return "P4", f"Unmapped status - watch only: {status}"
+        priority, reason = _fallback_priority_reason(status, job)
+        return priority, reason, ""
+    except Exception:
+        priority, _reason = _fallback_priority_reason(status, job)
+        return priority, "default (incomplete data)", ""
 
 def _build_next_action(priority, status, owner, flags, job):
     ro = job.get("ro") or "this RO"
     customer = job.get("customer_name") or "customer"
     if priority == "P1":
+        if _is_dvi_rework_unacknowledged(job):
+            return "Review DVI rework - acknowledge, correct, or send back to tech"
         if status == "ready":
             return f"Call {customer} - vehicle is ready, collect payment and close out"
+        if status == "finished":
+            return f"Call {customer} - repairs are complete, collect payment and close out"
         if status in {"advisor finalize ro","advisor qc review"}:
             return "Finalize RO - clean notes, confirm charges, prepare invoice"
         if status == "qc":
@@ -334,13 +540,20 @@ def _board_signal(priority, flags):
     return "clear"
 
 def score_job(job):
-    raw_status = job.get("workflow_status") or job.get("current_status") or "unknown"
-    status = _normalize_status(raw_status)
-    if _is_inactive(status):
+    try:
+        raw_status = job.get("workflow_status") or job.get("current_status") or "unknown"
+        status = _normalize_status(raw_status)
         hours_in_status = _last_update_hours(job)
+    except Exception:
+        raw_status = "unknown"
+        status = "unknown"
+        hours_in_status = 999.0
+    if _is_inactive(status):
         return {
-            "ticket_reference": job.get("ro"),
+            "ticket_reference": _ro_id(job),
             "priority": "INACTIVE",
+            "priority_lane": "INACTIVE",
+            "priority_reason": f"Status '{raw_status}' is inactive - excluded from board",
             "owner": "None",
             "board_signal": "clear",
             "next_action": "Job is not active - no action needed",
@@ -351,21 +564,38 @@ def score_job(job):
             "stale": hours_in_status > OVERDUE_HOURS,
             "clean_status": _clean_status(status),
         }
-    flags = _detect_risk_flags(status, job)
-    priority, reason = _assign_priority(status, job, flags)
-    owner = _determine_owner(status, job)
-    next_action = _build_next_action(priority, status, owner, flags, job)
-    bay_message = _build_bay_message(priority, status, flags, job)
-    signal = _board_signal(priority, flags)
-    hours_in_status = _last_update_hours(job)
+    try:
+        flags = _detect_risk_flags(status, job)
+        priority, reason, need_action_kind = _assign_priority(status, job, flags)
+        owner = _determine_owner(status, job)
+        next_action = _build_next_action(priority, status, owner, flags, job)
+        bay_message = _build_bay_message(priority, status, flags, job)
+        signal = _board_signal(priority, flags)
+    except Exception:
+        flags = []
+        priority, reason = _fallback_priority_reason(status, job)
+        reason = "default (incomplete data)"
+        need_action_kind = ""
+        owner = _determine_owner(status, job)
+        next_action = f"Review {_ro_id(job) or 'this RO'} - incomplete data"
+        bay_message = "Incomplete data - review in AutoFlow"
+        signal = "blocked" if priority.startswith("P2") else "clear"
+
+    column = _status_based_column(status, job, priority)
+    if hours_in_status > OVERDUE_HOURS and "24H NO MOVEMENT" not in flags:
+        flags.append("24H NO MOVEMENT")
     return {
-        "ticket_reference": job.get("ro"),
+        "ticket_reference": _ro_id(job),
         "customer_name": job.get("customer_name", ""),
         "vehicle": job.get("vehicle", ""),
         "advisor_name": job.get("advisor_name") or job.get("service_writer", ""),
         "technician": job.get("technician") or job.get("tech_name", ""),
         "priority": priority,
+        "priority_lane": priority,
+        "priority_reason": reason,
         "score_reason": reason,
+        "need_action_kind": need_action_kind,
+        "column": column,
         "owner": owner,
         "board_signal": signal,
         "next_action": next_action,
@@ -390,5 +620,24 @@ def score_all_jobs(shop_state):
         result = score_job(job)
         if result["priority"] != "INACTIVE":
             scored.append(result)
-    scored.sort(key=lambda r: (priority_order.get(r["priority"], 9), -r["hours_in_status"]))
+    scored.sort(key=lambda r: (
+        priority_order.get(r["priority"], 9),
+        NEED_ACTION_SORT.get(r.get("need_action_kind", ""), 9),
+        0 if r.get("stale") else 1,
+        -r["hours_in_status"],
+    ))
+    column_counts = {}
+    for result in scored:
+        column = result.get("column", "Unknown")
+        column_counts[column] = column_counts.get(column, 0) + 1
+    counts = ", ".join(
+        f"{column}={count}" for column, count in sorted(column_counts.items())
+    )
+    p1_lines = [
+        f"{result.get('ticket_reference')} - {result.get('priority_reason')}"
+        for result in scored
+        if result.get("priority") == "P1"
+    ]
+    print(f"Scoring lane summary: {counts}")
+    print("Need Immediate Action: " + ("; ".join(p1_lines) if p1_lines else "none"))
     return scored
