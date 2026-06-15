@@ -18,9 +18,9 @@ This is the repo truth map. It reflects what exists now, not a roadmap. It shoul
 
 Superseded or non-production entrypoints:
 
-- `dashboard/advisor_task_viewer.py` is a legacy monolithic Flask board. It currently contains unresolved conflict markers and is not the live production entry.
-- `dashboard/autoflow_live_dashboard.py` is an older simple standalone dashboard on port 5000 using mock/live connector experiments; it is not referenced by the current launcher or `dashboard/app.py`.
-- `dashboard/autoflow_live_dashboard.backup.py` is a backup/older standalone dashboard that wrote `state/active_shop_state.json`.
+- `_archive/dashboard/advisor_task_viewer.py` is a legacy monolithic Flask board. It currently contains unresolved conflict markers and is not the live production entry.
+- `_archive/dashboard/autoflow_live_dashboard.py` is an older simple standalone dashboard on port 5000 using mock/live connector experiments; it is not referenced by the current launcher or `dashboard/app.py`.
+- `_archive/dashboard/autoflow_live_dashboard.backup.py` is a backup/older standalone dashboard that wrote `state/active_shop_state.json`.
 - `observer.py` is a separate observer/Callie endpoint experiment and is not launched by the current production scripts.
 - `start_advisor_system.bat` and `dashboard/1-Start-Dashboard.ps1` still point at `advisor_task_viewer.py`; treat them as older launchers unless deliberately revived.
 
@@ -68,8 +68,8 @@ Webhook routes in `webhooks/autoflow_webhook_receiver.py`:
 
 Other route-bearing files:
 
-- `dashboard/advisor_task_viewer.py` defines many duplicate routes but is legacy and currently contains conflict markers.
-- `dashboard/autoflow_live_dashboard.py` defines `/` only for its standalone app.
+- `_archive/dashboard/advisor_task_viewer.py` defines many duplicate routes but is legacy and currently contains conflict markers.
+- `_archive/dashboard/autoflow_live_dashboard.py` defines `/` only for its standalone app.
 - `observer.py` defines `/api/callie/ask` and `/api/callie/insights` for a separate observer app, not the live board app.
 
 ## Dashboard Modules
@@ -322,12 +322,12 @@ Config:
 
 Do not delete these automatically. Preston should review them deliberately.
 
-- `dashboard/advisor_task_viewer.py`: legacy monolithic board duplicate; contains unresolved conflict markers and is superseded by `dashboard/app.py` plus modular files.
-- `dashboard/advisor_task_viewer.py.bak.20260525_160432`: backup of legacy monolith.
-- `dashboard/advisor_task_viewer_backup_2026-05-12.py`: older HTTP-server style backup.
-- `dashboard/autoflow_live_dashboard.py`: older standalone port-5000 dashboard experiment; not referenced by current launcher/app.
-- `dashboard/autoflow_live_dashboard.backup.py`: backup of older active-shop-state dashboard.
-- `patch_add_advisor_routes.py`: one-time route patch script for the old monolith; no longer needed for live app route wiring.
+- `_archive/dashboard/advisor_task_viewer.py`: legacy monolithic board duplicate; contains unresolved conflict markers and is superseded by `dashboard/app.py` plus modular files.
+- `_archive/dashboard/advisor_task_viewer.py.bak.20260525_160432`: backup of legacy monolith.
+- `_archive/dashboard/advisor_task_viewer_backup_2026-05-12.py`: older HTTP-server style backup.
+- `_archive/dashboard/autoflow_live_dashboard.py`: older standalone port-5000 dashboard experiment; not referenced by current launcher/app.
+- `_archive/dashboard/autoflow_live_dashboard.backup.py`: backup of older active-shop-state dashboard.
+- `_archive/patch_add_advisor_routes.py`: one-time route patch script for the old monolith; no longer needed for live app route wiring.
 - `callie_engine.ai-machine-backup.py`: backup copy of `callie_engine.py`.
 - `drafts/draft_nudges.py`: draft/experimental nudge builder, not imported by live app.
 - `start_advisor_system.bat`: old launcher still starts `dashboard\advisor_task_viewer.py`.
@@ -341,9 +341,18 @@ Do not delete these automatically. Preston should review them deliberately.
 
 Files that appear imported/referenced nowhere in current live code scan:
 
-- `dashboard/autoflow_live_dashboard.py`
-- `dashboard/autoflow_live_dashboard.backup.py`
-- `dashboard/advisor_task_viewer_backup_2026-05-12.py`
+- `_archive/dashboard/autoflow_live_dashboard.py`
+- `_archive/dashboard/autoflow_live_dashboard.backup.py`
+- `_archive/dashboard/advisor_task_viewer_backup_2026-05-12.py`
+
+## LAUNCHER CLEANUP - PENDING PRESTON CONFIRMATION
+
+Do not remove or repoint these until Preston confirms which shortcut is still in use:
+
+- `dashboard/1-Start-Dashboard.ps1` still starts `advisor_task_viewer.py`, which is now archived under `_archive/dashboard/advisor_task_viewer.py`.
+- `start_advisor_system.bat` still starts `dashboard\advisor_task_viewer.py`, which is now archived under `_archive/dashboard/advisor_task_viewer.py`.
+
+Current production launchers continue to be `Start-Callahan-AI.ps1`, `Start-Callahan-AI.bat`, and `install_autostart.ps1`, which target `dashboard\app.py`.
 - `drafts/draft_nudges.py`
 - `connectors/tekmetric.py`
 - `normalizers/shop_state_normalizer.py` outside `observer.py`
@@ -352,7 +361,7 @@ Files that appear imported/referenced nowhere in current live code scan:
 
 ## Discrepancies Found
 
-- `dashboard/advisor_task_viewer.py` has unresolved merge conflict markers, so any script pointing at it is unsafe for production.
+- `_archive/dashboard/advisor_task_viewer.py` has unresolved merge conflict markers, so any script pointing at the old `dashboard/advisor_task_viewer.py` location is unsafe for production.
 - `start_advisor_system.bat` and `dashboard/1-Start-Dashboard.ps1` still launch the legacy monolith, while current production launchers use `dashboard/app.py`.
 - `scripts/build_board_state.py` contains older lane/progress helper logic alongside delegation to `scripts.scoring_engine.score_job`, which can confuse future readers.
 - `core/cas/dvi_trigger.py` has an older `track_status_transition()` that only records `status_update`, while `webhooks/autoflow_webhook_receiver.py` now writes richer transition/activity records for every event before calling the trigger.
