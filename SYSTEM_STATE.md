@@ -1,194 +1,204 @@
 # Callahan AI - System State
 
-Last Updated: June 15, 2026
-Branch: ai-build-stabilization
-Codex workspace: C:\CALLAHAN\AI Workspace\shop-observer-core
-Runtime workspace: C:\AI-RUNTIME\shop-observer-core
-Public board URL: https://tasks.callahanautoaz.net
+Last Updated: June 15, 2026  
+Branch: ai-build-stabilization  
+Codex workspace: `C:\CALLAHAN\AI Workspace\shop-observer-core`  
+Runtime workspace: `C:\AI-RUNTIME\shop-observer-core`  
+Public board URL: `https://tasks.callahanautoaz.net`
 
-This file is the repo truth map. It describes what exists in the codebase now. It is not a roadmap and it should not preserve stale sprint assumptions.
+This is the repo truth map. It reflects what exists now, not a roadmap. It should be updated whenever routes, runtime ownership, packet/DVI flow, or scoring behavior changes.
 
-## What Is Working
+## Production Entry Points
 
-- Flask board app runs from `dashboard/app.py` on `127.0.0.1:8080`.
-- AutoFlow webhook receiver runs from `webhooks/autoflow_webhook_receiver.py` on `127.0.0.1:5055`.
-- Cloudflare tunnel exposes the board at `https://tasks.callahanautoaz.net`.
-- Active board state is loaded from `state/board_state.json` through `dashboard/board_loader.py`.
-- The original board at `/` renders from `dashboard/board_renderer.py`.
-- The command-center board at `/v2` renders from `dashboard/board_v2.py`.
-- Drew and Mitch personal boards are standalone HTML files served at `/drew` and `/mitch`.
-- DVI gate results are rendered at `/dvi`.
-- Packet builder pages are served at `/dvi/packet/<ro>`.
-- Packet regeneration, photo analysis, and finding merge POST routes are wired in `dashboard/app.py`.
-- Webhook events are accepted at `POST /webhooks/autoflow`, logged, sent through Hermes, passed to the DVI trigger, and then rebuild local state.
-- Webhook activity is stored globally in `data/status_transitions/transitions.jsonl` and per RO in `data/ro_activity/{ro}.jsonl`.
-- Enrichment cache module exists at `scripts/autoflow_enrichment.py` and writes `state/enrichment/{ro}.json`.
-- Scoring model in `scripts/scoring_engine.py` uses gated P1 logic, parts enrichment, status normalization, and a progress proxy.
+- Live board app: `dashboard/app.py`, started as `python dashboard\app.py` on `127.0.0.1:8080`.
+- Live webhook receiver: `webhooks/autoflow_webhook_receiver.py`, started as `python webhooks\autoflow_webhook_receiver.py` on `127.0.0.1:5055`.
+- Live public access: Cloudflare tunnel `shop-tasks`, started by runtime launcher/autostart scripts.
+- Manual launcher: `Start-Callahan-AI.ps1` and `Start-Callahan-AI.bat` from repo root; both target `C:\AI-RUNTIME\shop-observer-core`.
+- Autostart installer: `install_autostart.ps1`; registers hidden Windows Task Scheduler tasks for board, webhook, and tunnel.
 
-## Active Pages And Routes
+Superseded or non-production entrypoints:
 
-### Board App Routes
+- `dashboard/advisor_task_viewer.py` is a legacy monolithic Flask board. It currently contains unresolved conflict markers and is not the live production entry.
+- `dashboard/autoflow_live_dashboard.py` is an older simple standalone dashboard on port 5000 using mock/live connector experiments; it is not referenced by the current launcher or `dashboard/app.py`.
+- `dashboard/autoflow_live_dashboard.backup.py` is a backup/older standalone dashboard that wrote `state/active_shop_state.json`.
+- `observer.py` is a separate observer/Callie endpoint experiment and is not launched by the current production scripts.
+- `start_advisor_system.bat` and `dashboard/1-Start-Dashboard.ps1` still point at `advisor_task_viewer.py`; treat them as older launchers unless deliberately revived.
 
-All routes below are defined in `dashboard/app.py`.
+## Live Routes
+
+All board routes below are defined in `dashboard/app.py`.
 
 | Route | Method | Responsibility |
 | --- | --- | --- |
-| `/` | GET | Main legacy board HTML from `dashboard/board_renderer.py`. |
+| `/` | GET | Legacy/main command board HTML from `dashboard/board_renderer.py`. |
 | `/v2` | GET | AdviseMe Command Board v3 from `dashboard/board_v2.py`. |
 | `/v2/hitlist` | GET | Print-ready daily hit list from current board state. |
-| `/api/search` | GET | Search active board jobs and `state/job_history` folders. |
+| `/api/search` | GET | Searches active board jobs and `state/job_history` folder names. |
 | `/healthz` | GET | Board app health check. |
-| `/drew` | GET | Serves `dashboard/drew_board.html`. |
-| `/mitch` | GET | Serves `dashboard/mitch_board.html`. |
-| `/api/jobs` | GET | Returns raw shop jobs through `_load_jobs_from_autoflow()`. |
-| `/api/board-state` | GET | Returns `_load_board_state()` JSON for all board UIs. |
-| `/api/confirmations` | GET | Returns server-side advisor confirmations. |
-| `/api/confirm-step` | POST | Appends advisor confirmation to `state/confirmations.jsonl`. |
-| `/api/override-job` | POST | Appends manual reassignment override to `state/board_overrides.jsonl`. |
-| `/api/board-action` | POST | Appends board action to `state/board_actions.jsonl`; can also append an override. |
-| `/api/hermes-feedback` | POST | Saves a Callie/Hermes style interaction to `state/hermes_feedback.jsonl`; uses Ollama if available. |
-| `/api/callie/insights` | GET | Loads `data/callie_insights.json` if present. |
+| `/drew` | GET | Serves standalone `dashboard/drew_board.html`. |
+| `/mitch` | GET | Serves standalone `dashboard/mitch_board.html`. |
+| `/api/jobs` | GET | Returns raw `state/shop_state.json` payload through `board_loader`. |
+| `/api/board-state` | GET | Returns `_load_board_state()` JSON for board UIs. |
+| `/api/confirmations` | GET | Reads server-side advisor confirmations. |
+| `/api/confirm-step` | POST | Writes advisor confirmations to `state/confirmations.jsonl`. |
+| `/api/override-job` | POST | Writes manual job override records to `state/board_overrides.jsonl`. |
+| `/api/board-action` | POST | Writes board actions and optional overrides. |
+| `/api/hermes-feedback` | POST | Saves Callie/Hermes feedback and optional Ollama answer. |
+| `/api/callie/insights` | GET | Reads optional `data/callie_insights.json`. |
 | `/api/callie/ask` | POST | Deterministic board answer with optional Ollama fallback. |
-| `/api/hermes-summary` | GET | Returns summary payload from `dashboard/scoring.py`. |
-| `/api/morning-briefing` | GET | Returns JSON morning briefing from current board state. |
-| `/api/afternoon-briefing` | GET | Returns JSON afternoon briefing from current board state. |
-| `/bay-performance` | GET | Inline bay performance dashboard. |
-| `/dvi` | GET | DVI review board from `dashboard/dvi_page.py`. |
-| `/dvi/packet/<ro>` | GET | Packet builder page from `dashboard/packet_page.py`. |
-| `/dvi/packet/<ro>/regenerate` | POST | Forces packet regeneration with requester tracking. |
+| `/api/hermes-summary` | GET | Summary payload from `dashboard/scoring.py`. |
+| `/api/morning-briefing` | GET | JSON morning briefing from current board state. |
+| `/api/afternoon-briefing` | GET | JSON afternoon briefing from current board state. |
+| `/bay-performance` | GET | Inline bay performance/support score page. |
+| `/dvi` | GET | DVI workflow board from `dashboard/dvi_page.py`. |
+| `/dvi/packet/<ro>` | GET | TekMetric packet page from `dashboard/packet_page.py`. |
+| `/dvi/packet/<ro>/regenerate` | POST | Regenerates packet from latest DVI; does not auto-run on stale detection. |
 | `/dvi/packet/<ro>/analyze-photos` | POST | Runs selected DVI photos through Claude vision analysis. |
-| `/dvi/packet/<ro>/merge-findings` | POST | Merges photo findings into packet cache. |
-| `/sanity-check` | GET | Printable morning sanity check report. |
-| `/dvi/slip/<ro>` | GET | Serves generated rework slip HTML if present. |
-| `/dvi/acknowledge/<ro>` | GET | Marks a DVI review advisor-acknowledged and appends timeline event. |
+| `/dvi/packet/<ro>/merge-findings` | POST | Merges confirmed photo findings into packet cache. |
+| `/sanity-check` | GET | Printable Morning Sanity Check report. |
+| `/dvi/slip/<ro>` | GET | Serves generated DVI rework slip HTML if present. |
+| `/dvi/acknowledge/<ro>` | GET | Marks DVI review advisor-acknowledged and logs timeline event. |
 
-### Webhook Receiver Routes
-
-Defined in `webhooks/autoflow_webhook_receiver.py`.
+Webhook routes in `webhooks/autoflow_webhook_receiver.py`:
 
 | Route | Method | Responsibility |
 | --- | --- | --- |
-| `/webhooks/autoflow` | POST | Accepts AutoFlow JSON webhook payloads, logs full payload, updates transitions/activity, triggers DVI handler, and rebuilds local board state. |
-| `/health` | GET | Receiver health check. |
+| `/webhooks/autoflow` | POST | Accepts AutoFlow JSON, logs full payload, writes transition/activity records, runs Hermes bridge, triggers DVI handler, rebuilds local state. |
+| `/health` | GET | Webhook receiver health check. |
 
-## Module Responsibilities
+Other route-bearing files:
 
-### Dashboard Modules
+- `dashboard/advisor_task_viewer.py` defines many duplicate routes but is legacy and currently contains conflict markers.
+- `dashboard/autoflow_live_dashboard.py` defines `/` only for its standalone app.
+- `observer.py` defines `/api/callie/ask` and `/api/callie/insights` for a separate observer app, not the live board app.
 
-- `dashboard/app.py`: Flask app entrypoint and route registry. No template ownership except small inline API/debug pages.
-- `dashboard/board_loader.py`: Loads `state/board_state.json`, applies local action state, overrides, timestamp fallbacks, DVI review status injection, and recent activity feeds.
-- `dashboard/board_renderer.py`: Original board HTML template and briefing button area for `/`.
-- `dashboard/board_v2.py`: AdviseMe Command Board v3 renderer, v2 hit list renderer, search helper, unread inbox count helper, packet metadata injection, demo mode JS, vehicle silhouettes, drawer UI, columns, analytics, alert bar.
-- `dashboard/dvi_page.py`: DVI review board with Needs Attention, In Progress, and Completed Today sections.
-- `dashboard/packet_page.py`: Packet page renderer plus regenerate, photo extraction, photo analysis, synthesis, and merge endpoints.
-- `dashboard/sanity_check.py`: Printable Morning Sanity Check report from current board state.
-- `dashboard/confirmations.py`: Server-side confirmation JSONL storage.
-- `dashboard/overrides.py`: Manual advisor reassignment JSONL storage.
-- `dashboard/scoring.py`: Display-time summary helpers and transition-based elapsed-time display for Hermes/bay metrics.
+## Dashboard Modules
+
+- `dashboard/app.py`: Live Flask app entrypoint and route registry.
+- `dashboard/board_loader.py`: Loads `state/board_state.json`, applies action/override state, timestamp fallbacks, DVI review injection, activity feeds, and safe fallback payloads.
+- `dashboard/board_renderer.py`: Legacy/main `/` board HTML template, deterministic Callie helpers, and original board UI behavior.
+- `dashboard/board_v2.py`: AdviseMe Command Board v3 renderer, hit list renderer, search helper, unread inbox count, packet metadata decoration, packet-stale board tagging, vehicle silhouettes, drawer UI, analytics, alert bar, and demo-mode JS.
+- `dashboard/dvi_page.py`: DVI workflow board with Needs Attention, In Progress, and Completed Today sections. Applies red/amber CSS pulse to unacknowledged `REWORK_REQUIRED` and `REVIEW`.
+- `dashboard/packet_page.py`: Packet page renderer, packet cache wrapper, regenerate handler, photo extraction, photo download, photo analysis, synthesis, merge-findings, stale packet comparison display.
+- `dashboard/sanity_check.py`: Printable Morning Sanity Check report from `_load_board_state()`.
+- `dashboard/confirmations.py`: Server-side advisor confirmation JSONL storage.
+- `dashboard/overrides.py`: Manual job reassignment/override JSONL storage.
+- `dashboard/scoring.py`: Display-time Hermes/bay summary helpers and `transitions.jsonl` elapsed-time formatter.
 - `dashboard/drew_board.html`: Standalone Drew queue board.
 - `dashboard/mitch_board.html`: Standalone Mitch queue board.
 
-### Core CAS Modules
+## Core/CAS Modules
 
-- `core/cas/dvi_schema.py`: Dataclasses and enums for DVI reviews, flags, severities, and final status calculation.
-- `core/cas/dvi_gate.py`: Deterministic DVI rule engine. No AI and no API call inside the evaluator.
-- `core/cas/dvi_trigger.py`: Webhook-triggered DVI evaluation flow, transition tracking, unknown event logging, and delayed DVI gate execution.
-- `core/cas/rework_slip.py`: Printable rework slip generation for DVI rework.
-- `core/cas/tekmetric_packet.py`: DVI packet generation with Claude, packet cache, packet history, cost logging, parse hardening, and Arizona display timestamp formatting.
+- `core/cas/dvi_schema.py`: Dataclasses/enums for DVI reviews, flags, statuses, trigger events, and timeline entries.
+- `core/cas/dvi_gate.py`: Deterministic DVI rule engine. It has no AI call and no write-side API call.
+- `core/cas/dvi_trigger.py`: Webhook-triggered DVI runner. Delays 15 seconds, retries AutoFlow DVI pulls, runs the gate, saves reviews/slips/timeline, and logs unknown event types.
+- `core/cas/rework_slip.py`: Printable text/HTML DVI rework slip generator.
+- `core/cas/tekmetric_packet.py`: Claude-backed TekMetric packet generator, packet cache compatibility writer, permanent job-history packet writer, API cost logging, response parse hardening, Arizona timestamp display, DVI snapshot hashing, and stale DVI comparison helpers.
+- `core/state/state_manager.py`: Saves/loads DVIReview JSON files under `state/dvi_reviews`.
+- `core/timeline/job_timeline.py`: Per-RO JSONL timeline logger under `state/job_timeline`.
 
-### Connector And Pipeline Modules
+## Connectors, Scripts, And Pipelines
 
-- `connectors/autoflow.py`: AutoFlow JSON connector using `.env`, Basic auth by default, live work order/DVI fetches, and mock fallback.
-- `connectors/tekmetric.py`: TekMetric connector placeholder/skeleton.
-- `scripts/build_active_ros_state.py`: Builds `state/active_ros.json` from webhook/event evidence.
-- `scripts/build_shop_state.py`: Builds `state/shop_state.json` by fetching AutoFlow work order and DVI data for active ROs.
-- `scripts/build_board_state.py`: Builds `state/board_state.json`; it currently wraps `scripts/scoring_engine.py` but still contains older helper logic.
-- `scripts/scoring_engine.py`: Current main scoring model used to score each job.
-- `scripts/autoflow_enrichment.py`: Pull/cache enrichment layer for work orders, repair orders, and conversations.
-- `scripts/build_advisor_game_plan.py`: Rebuilt by webhook receiver; produces advisor task/game-plan artifacts.
+- `connectors/autoflow.py`: Read-only AutoFlow connector using `.env` credentials and mock fallback; merges work order + DVI into raw records.
+- `connectors/tekmetric.py`: Local mock TekMetric connector placeholder; no live TechMetric write integration.
+- `normalizers/shop_state_normalizer.py`: Normalizes source payloads into shop-state style records for older observer flow.
+- `observer-rules/shop_rules.py`: Rule catalog for older observer/nudge flow.
+- `callie_engine.py`: Deterministic insight generator that reads `state/board_state.json` and writes optional `data/callie_insights.json`; referenced by UI text but not imported by live app.
+- `scripts/build_active_ros_state.py`: Builds `state/active_ros.json` from AutoFlow webhook/event evidence.
+- `scripts/build_shop_state.py`: Builds `state/shop_state.json` from active ROs using `connectors/autoflow.py`.
+- `scripts/build_board_state.py`: Builds `state/board_state.json` from shop state and `scripts/scoring_engine.py`. It still contains older helper functions, but current scoring is delegated through `score_job`.
+- `scripts/scoring_engine.py`: Current scoring model used by `build_board_state`.
+- `scripts/autoflow_enrichment.py`: Pull/cache enrichment for work orders, repair orders, and conversations into `state/enrichment/{ro}.json`.
+- `scripts/build_advisor_game_plan.py`: Rebuilt by webhook receiver; advisor task/game-plan artifact builder.
 - `scripts/sync_active_appointments.py`: Appointment sync utility.
-- `scripts/check_system_health.py`, `scripts/watchdog_check.py`, `scripts/watchdog_repair.py`, `scripts/restart_tunnel.py`: Runtime support/watchdog scripts.
+- `scripts/check_system_health.py`, `scripts/watchdog_check.py`, `scripts/watchdog_repair.py`, `scripts/restart_tunnel.py`: Runtime support/watchdog utilities.
 
-### State And Timeline Modules
+## DVI Gate Flow
 
-- `core/state/state_manager.py`: Shared state manager utility.
-- `core/timeline/job_timeline.py`: Job timeline utility.
-- `normalizers/shop_state_normalizer.py`: Normalization helper for shop state style payloads.
-
-## DVI Gate Logic
-
-The DVI gate is deterministic and local.
+The DVI gate is deterministic and config-driven.
 
 Inputs:
 
-- AutoFlow DVI data fetched by `fetch_dvi_from_autoflow()` in `core/cas/tekmetric_packet.py` or passed from webhook-triggered flow.
-- Rule thresholds in `config/cas_rules/dvi_gate_rules.yaml`.
-
-Outputs:
-
-- `state/dvi_reviews/{ro}.json`
-- Optional rework slip HTML in `state/dvi_reviews/rework_slip_{ro}.html`
-- Timeline entries under `state/job_timeline`
-
-Statuses:
-
-- `PASS`: No flags. `cleared_for_estimate` is true.
-- `REVIEW`: Important or informational flags exist, but no critical flag. Advisor review required before estimate/customer presentation.
-- `REWORK_REQUIRED`: At least one critical flag exists. Tech correction is required and the job is not cleared for estimate.
-- `PENDING`: Schema-supported status for work not completed yet.
-- `ERROR`: Schema-supported status for gate failure/error conditions.
-
-Primary rule classes:
-
-- Missing photo on a concern item can create critical rework.
-- Blank or too-short note can create critical rework on customer concern evidence.
-- Vague notes can create review flags.
-- Brakes, tires, and battery categories can require measurements.
-- Leak items require location/severity detail.
-- Safety categories and safety items are always evaluated.
-- Customer concern coverage is checked against the DVI evidence.
-
-The `/dvi` page groups unacknowledged `REWORK_REQUIRED` and `REVIEW` items into Needs Attention. `REWORK_REQUIRED` cards pulse red and `REVIEW` cards pulse amber until acknowledged.
-
-## Packet Builder Flow
-
-Active files:
-
-- Page and API handlers: `dashboard/packet_page.py`
-- Packet generation engine: `core/cas/tekmetric_packet.py`
+- AutoFlow DVI payload from `GET /api/v1/dvi/{ro}`.
+- DVI thresholds/rules in `config/cas_rules/dvi_gate_rules.yaml`.
+- Concern completeness/contradiction config in `config/concern_checklists.json`.
 
 Flow:
 
-1. `/dvi/packet/<ro>` loads packet cache if present.
-2. Cache path is primarily `state/dvi_reviews/{ro}_packet.json`.
-3. Generation also writes compatibility cache `state/dvi_reviews/packet_{ro}.json`.
-4. If no cache exists, packet generation requires a DVI review at `state/dvi_reviews/{ro}.json`.
-5. Regenerate route can force a fresh AutoFlow DVI pull and rebuild the packet.
-6. Claude packet call uses Anthropic messages API with `claude-opus-4-6`, `max_tokens=8000`, and a 150 second timeout.
-7. Packet JSON gets Python-owned `generated_at` set at generation time.
-8. Permanent packet history is saved to `state/job_history/{ro}/packet_{timestamp}.json`.
-9. API cost events append to `data/api_costs/api_costs.jsonl`.
-10. Parse failures append to `data/api_costs/packet_errors.jsonl`.
+1. `webhooks/autoflow_webhook_receiver.py` receives an AutoFlow event and calls `core.cas.dvi_trigger.handle_webhook_event()`.
+2. `dvi_trigger` always logs unknown event types and runs its older status transition tracker for `status_update`.
+3. For `dvi_signoff` or `dvi_signoff_update`, `dvi_trigger` starts a background thread.
+4. The thread waits 15 seconds, retries DVI pull up to 3 times, optionally pulls work order data, then calls `run_dvi_gate()`.
+5. `run_dvi_gate()` flattens DVI items, applies deterministic checks, adds concern-completeness/contradiction flags, finalizes status, and returns a `DVIReview`.
+6. Reviews are saved to `state/dvi_reviews/{ro}.json`; rework slips are saved if needed; timeline events are appended.
 
-Packet tiers/categories:
+Statuses:
 
-- `CONCERN`: Customer concern or diagnosis-driven work.
-- `SAFETY`: Safety-critical work.
-- `MAINTENANCE`: Maintenance and condition-based recommendations.
-- `POSSIBLE ADD-ON`: Lower-certainty or optional opportunities.
+- `PASS`: no flags; cleared for estimate.
+- `REVIEW`: important/informational flags only; advisor review required.
+- `REWORK_REQUIRED`: at least one critical flag; not cleared for estimate.
+- `PENDING`: schema-supported pending status.
+- `ERROR`: schema-supported error status.
+
+Deterministic checks:
+
+- Concern item missing photo.
+- Concern item blank/too-short note.
+- Vague concern note.
+- Missing measurement on configured brake/tire/measurement categories.
+- Leak concern without location/severity/photo.
+- Safety item not inspected.
+- Primary complaint not clearly addressed.
+- Concern completeness checklists for `ac_blowing_warm`, `brake_noise`, and `no_start`.
+- Narrow contradiction detection when a component is marked OK/green but the concern describes failure on that same configured component.
+
+## Packet Builder And Stale DVI Logic
+
+Active files:
+
+- `core/cas/tekmetric_packet.py`
+- `dashboard/packet_page.py`
+- `dashboard/board_v2.py`
+
+Packet generation flow:
+
+1. `/dvi/packet/<ro>` loads primary cache `state/dvi_reviews/{ro}_packet.json` if present.
+2. If no cache exists, packet generation requires `state/dvi_reviews/{ro}.json`.
+3. Regenerate POST forces a fresh AutoFlow DVI pull and rebuilds the packet.
+4. Claude packet generation uses Anthropic messages API with model `claude-opus-4-6`, `max_tokens=8000`, and 150-second timeout.
+5. Python owns the final `generated_at`, `dvi_pulled_at`, `dvi_item_count`, DVI snapshot hash, normalized DVI snapshot, and snapshot captured timestamp.
+6. Compatibility packet JSON is written to `state/dvi_reviews/packet_{ro}.json`.
+7. Page cache wrapper is written to `state/dvi_reviews/{ro}_packet.json`.
+8. Permanent packet history is written to `state/job_history/{ro}/packet_{timestamp}.json`.
+9. API cost logs append to `data/api_costs/api_costs.jsonl`; parse/debug failures append to `data/api_costs/packet_errors.jsonl`.
+
+Packet categories:
+
+- `CONCERN`
+- `SAFETY`
+- `MAINTENANCE`
+- `POSSIBLE ADD-ON`
 
 Photo analysis:
 
-- `/dvi/packet/<ro>/analyze-photos` accepts selected photo URLs and requester.
-- Photos are extracted from multiple AutoFlow DVI structures, including `reason_vehicle_is_here`, `dvis.dvi_category.dvi_items.item_images`, `item_picture`, recommendations, notes, services, items, inspections, and hunter results.
+- Photo extraction checks multiple AutoFlow DVI locations, including `reason_vehicle_is_here`, `dvis.dvi_category.dvi_items.item_images`, `item_picture`, recommendations, notes, services, flat items, inspections, and hunter results.
 - `motovisuals.com` stock illustrations are filtered out.
-- Server-side S3 downloads use browser-like headers and full-resolution fallback.
-- Claude vision analyzes individual photos, then a synthesis call produces `technical_summary` and `customer_explanation`.
-- `/dvi/packet/<ro>/merge-findings` merges confirmed summaries into the packet cache.
+- S3 photo downloads use browser-like headers and full-resolution fallback.
+- Claude vision analyzes individual photos.
+- A synthesis call creates structured RO notes/job findings for merge.
+- Merge updates the packet cache; it does not write to AutoFlow or TechMetric.
+
+Stale packet detection:
+
+- Packet generation stores a SHA-256 hash of normalized DVI content plus the normalized snapshot used to build the packet.
+- `compare_packet_to_current_dvi()` re-reads the current AutoFlow DVI, recomputes the normalized hash, and returns `changed`, hashes, and a simple human-readable diff for added/removed/edited concerns/items/notes/photos/statuses.
+- `dashboard/packet_page.py` refreshes stale state when the packet page is loaded and stores `packet_stale` in `{ro}_packet.json`.
+- If stale, the packet page shows a red banner and diff. It does not auto-regenerate.
+- `dashboard/board_v2.py` reads cached stale state and decorates that RO as `rework returned / re-review`, assigns `waiting_on` to `Needs Review`, sets `priority_lane` to `P2C`, and surfaces the diff through packet summary data.
 
 ## Scoring Model
 
-Current scoring owner: `scripts/scoring_engine.py`.
+Current scorer: `scripts/scoring_engine.py`.
 
 Inputs:
 
@@ -196,24 +206,15 @@ Inputs:
 - `data/status_transitions/transitions.jsonl`
 - `data/ro_activity/{ro}.jsonl`
 - `state/enrichment/{ro}.json`
-- `state/dvi_reviews/{ro}.json`
-
-Important field names:
-
-- RO id: `ro`
-- Status: `workflow_status`
-- Advisor/owner routing: `waiting_on`
-- Tech display: `technician`
-- DVI status: `dvi_review_status`
-- Parts enrichment: `summary.parts_total`, `summary.parts_arrived`, `summary.parts_outstanding`, `summary.sold_labor_hours`
+- DVI status fields injected through board state/loaders.
 
 P1 gate:
 
 - DVI rework unacknowledged.
-- Ready to collect: `workflow_status` in `finished` or `ready` and there is no outbound contact in `ro_activity` since the RO entered that status. If no activity exists, it does not become P1 from this trigger.
-- Customer waiting on us: latest `ro_activity` event is inbound (`inbound_message` or `ro_approval`).
+- Ready to collect: status `finished` or `ready` and no outbound contact in RO activity since entering that status. If no RO activity exists, this trigger does not mark P1.
+- Customer waiting on us: latest RO activity event is inbound (`inbound_message` or `ro_approval`).
 
-Removed as standalone P1 triggers:
+Not standalone P1 triggers:
 
 - Finished age alone.
 - Waiting approval age alone.
@@ -221,125 +222,166 @@ Removed as standalone P1 triggers:
 
 Lane mapping:
 
-- Need Immediate Action: only P1 gate-passers.
-- Ready to Close: `finished`, `ready`, `advisor finalize ro` when not caught by the P1 gate.
+- Need Immediate Action: only P1 gate passers.
+- Ready to Close: `finished`, `ready`, `advisor finalize ro` when not caught by P1 gate.
 - Waiting / Customer: `waiting approval`, `call_shop`, `advisor estimate`.
-- Waiting / Other: `external hold`, `aaa`, `unknown`, `scheduled-not here`, `dvi only-not here`, `Needs Review`, and external holds.
-- In Progress: `servicing`, `inspecting`, `testing`, `dvi updates`, `ready for tech`, `awaiting tech`, `technical advisement`, `technical overview`, `k_mech_complete`, `checkin`, `qc`, `advisor qc review`, `drop off/tow-in`, `online/stage`.
-- Parts / Inventory: `waiting parts`, `ordering parts`, and parts enrichment where outstanding parts exist.
+- Waiting / Other: external hold/status cleanup states such as `aaa`, `unknown`, scheduled-not-here, DVI-only-not-here, Needs Review.
+- In Progress: servicing, inspecting, testing, DVI updates, ready/awaiting tech, technical advisement/overview, QC, checkin, drop-off/stage.
+- Parts / Inventory: waiting/ordering parts and enrichment records with outstanding parts.
 
 Priority lanes:
 
 - `P1`: P1 gate pass.
-- `P2A`: checked in/no info captured style state.
+- `P2A`: checked in/no information captured.
 - `P2B`: awaiting tech, DVI, or dispatch movement.
-- `P2C`: advisor/customer state is stuck.
+- `P2C`: advisor/customer/review state is stuck.
 - `P3`: active and controlled.
 - `P4`: legitimate external hold.
 
 Staleness:
 
-- `hours_in_status > 24` sets stale flags/badges and sorts up within the existing lane.
+- `hours_in_status > 24` adds a stale flag/badge and sorts up within the existing lane.
 - Staleness does not create P1 by itself.
 
 Parts enrichment:
 
 - Outstanding parts route to Parts/Inventory with reason like `parts X/Y in, N outstanding`.
-- Outstanding parts plus stale status adds attention reason, but does not blanket-promote to P1.
+- Outstanding parts plus stale status adds attention reason but does not blanket-promote to P1.
 - All parts arrived and not already in closeout/QC creates a positive movement prompt and routes toward dispatch/tech movement.
 
 Progress:
 
-- `progress_percent` is now a proxy, not true labor completion.
-- It blends workflow stage and parts arrival when parts data exists.
-- It is clamped, rounded, and labeled as estimated.
+- `progress_percent` is an estimated proxy, not true labor completion.
+- It blends workflow status stage with parts-arrival ratio when parts data exists.
 
-## Data Stored On Disk
+## Data And State On Disk
 
-### Runtime State
+Tracked `data/` layout currently in this workspace:
 
-- `state/active_ros.json`: active RO list created by `scripts/build_active_ros_state.py`.
-- `state/shop_state.json`: normalized active shop jobs created by `scripts/build_shop_state.py`.
-- `state/board_state.json`: scored board payload created by `scripts/build_board_state.py`.
+- `data/.gitkeep`
+- `data/board_state.json` - tracked sample/older artifact, not the production board state path.
+
+Tracked `state/` layout currently in this workspace:
+
+- `state/active_shop_state.json` - tracked old/legacy artifact.
+
+Runtime/gitignored state expected during operation:
+
+- `state/active_ros.json`: active RO list from `scripts/build_active_ros_state.py`.
+- `state/shop_state.json`: normalized active shop jobs from `scripts/build_shop_state.py`.
+- `state/board_state.json`: scored board payload from `scripts/build_board_state.py`.
 - `state/confirmations.jsonl`: advisor confirmation log.
 - `state/board_overrides.jsonl`: manual override/reassignment log.
 - `state/board_actions.jsonl`: board action log.
 - `state/hermes_feedback.jsonl`: Callie/Hermes interaction log.
 - `state/dvi_reviews/{ro}.json`: DVI gate result.
-- `state/dvi_reviews/{ro}_packet.json`: primary packet cache.
-- `state/dvi_reviews/packet_{ro}.json`: compatibility packet cache used by parts of `/v2`.
-- `state/dvi_reviews/rework_slip_{ro}.html`: generated DVI rework slips.
+- `state/dvi_reviews/{ro}_packet.json`: primary packet page cache.
+- `state/dvi_reviews/packet_{ro}.json`: compatibility packet JSON.
+- `state/dvi_reviews/rework_slip_{ro}.html`: generated DVI rework slip.
 - `state/job_history/{ro}/packet_{timestamp}.json`: permanent packet history.
-- `state/enrichment/{ro}.json`: cached enrichment raw responses and summaries.
-- `state/job_timeline`: timeline storage used by DVI trigger/gate flow.
-
-### Data Logs
-
+- `state/enrichment/{ro}.json`: AutoFlow enrichment cache.
+- `state/job_timeline/{ro}.jsonl`: per-RO DVI/timeline events.
 - `data/autoflow_events/autoflow_events.jsonl`: full webhook payload event log.
-- `data/status_transitions/transitions.jsonl`: status/activity transition records.
+- `data/status_transitions/transitions.jsonl`: transition/activity records.
 - `data/ro_activity/{ro}.jsonl`: per-RO activity stream.
-- `data/api_costs/api_costs.jsonl`: packet and cache cost log.
-- `data/api_costs/packet_errors.jsonl`: Claude response parse/debug errors.
-- `data/unknown_events`: unknown webhook/event captures.
-- `data/callie_insights.json`: optional insights file loaded by `/api/callie/insights`.
+- `data/api_costs/api_costs.jsonl`: packet/photo API cost log.
+- `data/api_costs/packet_errors.jsonl`: packet parse/debug errors.
+- `data/unknown_events/unknown_events.jsonl`: unknown webhook event discovery.
+- `data/callie_insights.json`: optional Callie insights output.
 
-### Config
+Config:
 
 - `.env`: local credentials; gitignored and must not be committed.
-- `config/cas_rules/dvi_gate_rules.yaml`: DVI gate thresholds and rule terms.
-- `config/employee_roster.json`: active/inactive advisor, tech, owner, accounting, and routing bucket roster.
+- `config/cas_rules/dvi_gate_rules.yaml`: deterministic DVI gate thresholds and terms.
+- `config/concern_checklists.json`: concern completeness and narrow contradiction config.
+- `config/employee_roster.json`: active/inactive people and routing buckets.
 - `config/source_precedence.json`: source trust/precedence settings.
 
 ## External APIs And Credentials
 
 - AutoFlow work order/DVI APIs use Basic auth from `AUTOFLOW_API_KEY` and `AUTOFLOW_API_PASSWORD`.
-- Default connector base comes from `AUTOFLOW_API_BASE_URL`; enrichment currently uses `https://callahanautomotive.autotext.me/api/v1`.
+- `connectors/autoflow.py` reads base URL from `AUTOFLOW_API_BASE_URL`.
+- `scripts/autoflow_enrichment.py` currently uses fixed base `https://callahanautomotive.autotext.me/api/v1`.
 - `/v2` unread inbox helper uses Bearer `AUTOFLOW_API_KEY` against `https://api.autoflow.com/api/v1/conversations`.
-- Anthropic packet and photo analysis calls use `ANTHROPIC_API_KEY`.
-- Ollama is optional for local Callie/Hermes responses; failure falls back to deterministic text.
-- Cloudflare tunnel uses local cert/config on the runtime machine.
+- Anthropic packet/photo analysis uses `ANTHROPIC_API_KEY`.
+- Ollama is optional; board routes fall back to deterministic text if it is unavailable.
+- Cloudflare tunnel details live in local runtime scripts/config, not application route logic.
 
 ## Parked Or Disabled Features
 
-- `dashboard/advisor_task_viewer.py`: old monolithic board app. It is still present but has a syntax issue at line 1 in the current scan and should be treated as legacy/parked, not production.
-- `dashboard/advisor_task_viewer.py.bak.*` and `dashboard/advisor_task_viewer_backup_2026-05-12.py`: backups.
-- `dashboard/autoflow_live_dashboard.py` and `.backup.py`: older standalone dashboard experiments.
-- `callie_engine.ai-machine-backup.py`: backup copy.
-- `patch_add_advisor_routes.py`: one-time historical patch helper.
-- `drafts/draft_nudges.py`: draft/experimental.
-- `inputs/mock_autoflow_techflow_jobs.json`, `inputs/mock_tekmetric_parts_activity.json`, `inputs/sample_input.json`: mock/sample input.
-- `data/board_state.json` and `state/active_shop_state.json`: tracked sample/old state artifacts; production uses `state/board_state.json` and `state/shop_state.json`.
 - `/preston` is linked from some UI code but no route exists in `dashboard/app.py`.
-- Several `/v2` sidebar tabs are placeholder overlays: Customers, Parts, Alerts, Schedule, KPI Targets, Accounting, Callie, Settings. Some related data exists, but those tabs are not full modules.
-- Tech Sheet button currently routes to `/sanity-check`; it is not a separate tech sheet module.
-- `connectors/tekmetric.py` is not a live write integration.
+- `/analytics` is linked from `/v2` sidebar as a possible route, but no route exists in `dashboard/app.py`.
+- `/v2` sidebar modules Customers, Parts, Alerts, Schedule, KPI Targets, Accounting, Callie, and Settings are placeholder overlays.
+- Tech Sheet button in `/v2` points to `/sanity-check`; there is no dedicated tech-sheet route.
+- `connectors/tekmetric.py` is mock-only and does not write to TechMetric.
+- There are no customer-message send routes.
+- There are no AutoFlow write routes.
+- There are no TechMetric write routes.
 
-## Discrepancies Found In Current Files
+## Candidate Dead / Duplicate Files
 
-- The previous `SYSTEM_STATE.md` said stale age, finished age, and waiting-approval age created P1 by themselves. Current `scripts/scoring_engine.py` no longer does that.
-- `scripts/build_board_state.py` still contains older lane/progress helper logic even though it imports and uses `scripts.scoring_engine.score_job`; this is a potential source of confusion.
-- `dashboard/advisor_task_viewer.py` appears legacy and syntactically broken in the current scan.
-- `dashboard/board_v2.py` and `scripts/build_board_state.py` were flagged by AST scanning for a BOM/non-printable first character. They are still present in repo; no logic was changed here.
-- `.gitignore` contains a malformed-looking line: `state/active_shop_state.jsoncloudflared.exe`.
-- The roster file marks Johnathan Leithoff active, while older docs/sprint notes described a similarly spelled Johnathan Leithtoff as inactive. Treat roster as the current config until corrected deliberately.
-- Packet cache naming is mixed: primary packet code uses `{ro}_packet.json`, while `/v2` packet-built checks also look for `packet_{ro}.json`. Packet generation currently writes both forms.
+Do not delete these automatically. Preston should review them deliberately.
+
+- `dashboard/advisor_task_viewer.py`: legacy monolithic board duplicate; contains unresolved conflict markers and is superseded by `dashboard/app.py` plus modular files.
+- `dashboard/advisor_task_viewer.py.bak.20260525_160432`: backup of legacy monolith.
+- `dashboard/advisor_task_viewer_backup_2026-05-12.py`: older HTTP-server style backup.
+- `dashboard/autoflow_live_dashboard.py`: older standalone port-5000 dashboard experiment; not referenced by current launcher/app.
+- `dashboard/autoflow_live_dashboard.backup.py`: backup of older active-shop-state dashboard.
+- `patch_add_advisor_routes.py`: one-time route patch script for the old monolith; no longer needed for live app route wiring.
+- `callie_engine.ai-machine-backup.py`: backup copy of `callie_engine.py`.
+- `drafts/draft_nudges.py`: draft/experimental nudge builder, not imported by live app.
+- `start_advisor_system.bat`: old launcher still starts `dashboard\advisor_task_viewer.py`.
+- `dashboard/1-Start-Dashboard.ps1`: old launcher still starts `advisor_task_viewer.py`.
+- `dashboard/3-Start-Ollama.ps1`: optional/old helper; current board does not require Ollama to start.
+- `dashboard/4-Start-All.ps1`: older dashboard/webhook/tunnel launcher in dashboard folder; root `Start-Callahan-AI.ps1` is the current launcher.
+- `docs/AUTOFLOW-LIVE-DASHBOARD.backup.md`: backup documentation.
+- `data/board_state.json`: tracked sample/old artifact; production board state is `state/board_state.json`.
+- `state/active_shop_state.json`: tracked legacy state artifact from older live-dashboard path.
+- `inputs/mock_autoflow_techflow_jobs.json`, `inputs/mock_tekmetric_parts_activity.json`, `inputs/sample_input.json`: mock/sample data, useful for tests but not production runtime state.
+
+Files that appear imported/referenced nowhere in current live code scan:
+
+- `dashboard/autoflow_live_dashboard.py`
+- `dashboard/autoflow_live_dashboard.backup.py`
+- `dashboard/advisor_task_viewer_backup_2026-05-12.py`
+- `drafts/draft_nudges.py`
+- `connectors/tekmetric.py`
+- `normalizers/shop_state_normalizer.py` outside `observer.py`
+- `observer-rules/shop_rules.py` outside older observer flow
+- `callie_engine.py` is not imported by live app but is referenced in UI/help text as a manual insight generator.
+
+## Discrepancies Found
+
+- `dashboard/advisor_task_viewer.py` has unresolved merge conflict markers, so any script pointing at it is unsafe for production.
+- `start_advisor_system.bat` and `dashboard/1-Start-Dashboard.ps1` still launch the legacy monolith, while current production launchers use `dashboard/app.py`.
+- `scripts/build_board_state.py` contains older lane/progress helper logic alongside delegation to `scripts.scoring_engine.score_job`, which can confuse future readers.
+- `core/cas/dvi_trigger.py` has an older `track_status_transition()` that only records `status_update`, while `webhooks/autoflow_webhook_receiver.py` now writes richer transition/activity records for every event before calling the trigger.
+- Packet cache naming is intentionally mixed: `{ro}_packet.json` is the primary page cache, while `packet_{ro}.json` is the compatibility packet JSON used by some board checks.
+- `.gitignore` contains malformed-looking entry `state/active_shop_state.jsoncloudflared.exe`.
+- `API_COVERAGE.md` mostly matches current routes, but some handler names in the table are descriptive/old labels rather than exact function names from `dashboard/app.py`.
+- `README.md` still describes the older local-first observer architecture and does not reflect the current dashboard/DVI/packet production runtime.
 
 ## How To Start The System
 
-Manual start:
+Manual runtime start:
 
 1. Double-click `Start-Callahan-AI.bat`, or run `Start-Callahan-AI.ps1`.
-2. Board window starts `python dashboard\app.py`.
-3. Webhook window starts `python webhooks\autoflow_webhook_receiver.py`.
-4. Tunnel window starts Cloudflare tunnel `shop-tasks`.
+2. Blue board window starts `python dashboard\app.py`.
+3. Green webhook window starts `python webhooks\autoflow_webhook_receiver.py`.
+4. Purple tunnel window starts Cloudflare tunnel `shop-tasks`.
 
-Runtime pull flow:
+Autostart:
+
+1. Run `install_autostart.ps1` once as Administrator from `C:\AI-RUNTIME\shop-observer-core`.
+2. It registers `CallahanAI-Board`, `CallahanAI-Webhook`, and `CallahanAI-Tunnel`.
+
+Git/runtime flow:
 
 1. Commit and push from `C:\CALLAHAN\AI Workspace\shop-observer-core`.
 2. Pull on runtime machine from `C:\AI-RUNTIME\shop-observer-core`.
-3. Restart services if Python files or launch scripts changed.
+3. Restart local windows/tasks if Python route/render/runtime files changed.
 
 ## GitHub
 
-- Repo: https://github.com/PrestonC-stack/shop-observer-core
+- Repo: `https://github.com/PrestonC-stack/shop-observer-core`
 - Branch: `ai-build-stabilization`
