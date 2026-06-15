@@ -446,6 +446,16 @@ def dvi_packet(ro):
     from dashboard.packet_page import render_packet_page
     return render_packet_page(ro)
 
+@app.route("/dvi/history")
+def dvi_packet_history():
+    from dashboard.packet_page import render_packet_history
+    return render_packet_history()
+
+@app.route("/dvi/packet/<ro>/stored")
+def dvi_packet_stored(ro):
+    from dashboard.packet_page import render_packet_stored
+    return render_packet_stored(ro)
+
 @app.route("/dvi/packet/<ro>/regenerate", methods=["POST"])
 def dvi_packet_regenerate(ro):
     from dashboard.packet_page import render_packet_regenerate

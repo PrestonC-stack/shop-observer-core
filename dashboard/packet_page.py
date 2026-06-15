@@ -40,9 +40,22 @@ except ImportError:  # pragma: no cover - runtime convenience if dotenv is unava
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DVI_REVIEWS_DIR = REPO_ROOT / "state" / "dvi_reviews"
+JOB_HISTORY_DIR = REPO_ROOT / "state" / "job_history"
+BOARD_STATE_PATH = REPO_ROOT / "state" / "board_state.json"
+SHOP_STATE_PATH = REPO_ROOT / "state" / "shop_state.json"
 API_COSTS_PATH = REPO_ROOT / "data" / "api_costs" / "api_costs.jsonl"
 PACKET_MAX_AGE = timedelta(hours=4)
 PHOTO_ANALYSIS_COST = 0.03
+COMPLETED_HISTORY_STATUSES = {
+    "advisor finalize ro",
+    "close",
+    "closed",
+    "complete",
+    "completed",
+    "done",
+    "finished",
+    "ready",
+}
 
 
 def _escape(value) -> str:
@@ -68,6 +81,14 @@ def _load_packet(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _safe_load_json(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _load_cache(ro: str) -> dict:
     path = _packet_path(ro)
     if not path.exists():
@@ -83,6 +104,204 @@ def _save_cache(ro: str, cache: dict) -> None:
     path = _packet_path(ro)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _packet_timestamp_from_filename(path: Path) -> str:
+    match = re.search(r"packet_(\d{8}_\d{6})\.json$", path.name)
+    if not match:
+        return ""
+    try:
+        return datetime.strptime(match.group(1), "%Y%m%d_%H%M%S").isoformat()
+    except ValueError:
+        return ""
+
+
+def _packet_generated_at(packet: dict, fallback_path: Path | None = None) -> str:
+    if isinstance(packet, dict):
+        for key in ("generated_at", "regenerated_at", "dvi_pulled_at"):
+            value = str(packet.get(key) or "").strip()
+            if value:
+                return value
+    if fallback_path:
+        from_name = _packet_timestamp_from_filename(fallback_path)
+        if from_name:
+            return from_name
+        try:
+            return datetime.fromtimestamp(fallback_path.stat().st_mtime, tz=timezone.utc).isoformat()
+        except OSError:
+            return ""
+    return ""
+
+
+def _latest_generation_event(cache: dict) -> dict:
+    events = cache.get("generation_log") if isinstance(cache.get("generation_log"), list) else []
+    latest = {}
+    for item in events:
+        if not isinstance(item, dict):
+            continue
+        timestamp = str(item.get("timestamp") or "").strip()
+        if timestamp and timestamp >= str(latest.get("timestamp") or ""):
+            latest = item
+    return latest
+
+
+def _history_packet_candidates(ro: str) -> list[dict]:
+    ro_text = str(ro or "").strip()
+    if not ro_text:
+        return []
+    candidates = []
+
+    history_dir = JOB_HISTORY_DIR / ro_text
+    if history_dir.exists():
+        for path in history_dir.glob("packet_*.json"):
+            packet = _safe_load_json(path)
+            if packet:
+                generated_at = _packet_generated_at(packet, path)
+                candidates.append({
+                    "ro": ro_text,
+                    "packet": packet,
+                    "cache": {},
+                    "packet_html": "",
+                    "generated_at": generated_at,
+                    "source": "job_history",
+                    "path": path,
+                    "label": f"Permanent history file: {path.name}",
+                })
+
+    cache_path = _packet_path(ro_text)
+    cache = _load_cache(ro_text)
+    if cache:
+        packet = cache.get("packet") if isinstance(cache.get("packet"), dict) else {}
+        latest_event = _latest_generation_event(cache)
+        generated_at = str(latest_event.get("timestamp") or cache.get("generated_at") or _packet_generated_at(packet, cache_path))
+        candidates.append({
+            "ro": ro_text,
+            "packet": packet,
+            "cache": cache,
+            "packet_html": str(cache.get("packet_html") or ""),
+            "generated_at": generated_at,
+            "source": "packet_cache",
+            "path": cache_path,
+            "label": "Current packet cache",
+        })
+
+    legacy_path = _legacy_packet_path(ro_text)
+    legacy = _safe_load_json(legacy_path)
+    if legacy:
+        generated_at = _packet_generated_at(legacy, legacy_path)
+        candidates.append({
+            "ro": ro_text,
+            "packet": legacy,
+            "cache": {},
+            "packet_html": "",
+            "generated_at": generated_at,
+            "source": "legacy_packet",
+            "path": legacy_path,
+            "label": "Legacy packet JSON",
+        })
+
+    return candidates
+
+
+def _latest_stored_packet(ro: str) -> dict:
+    candidates = _history_packet_candidates(ro)
+    if not candidates:
+        return {}
+    return sorted(candidates, key=lambda item: str(item.get("generated_at") or ""), reverse=True)[0]
+
+
+def _iter_state_jobs() -> list[dict]:
+    jobs = []
+    for path in (BOARD_STATE_PATH, SHOP_STATE_PATH):
+        state = _safe_load_json(path)
+        for job in state.get("jobs", []) if isinstance(state.get("jobs"), list) else []:
+            if isinstance(job, dict):
+                jobs.append(job)
+    return jobs
+
+
+def _completed_state_jobs_by_ro() -> dict[str, dict]:
+    rows = {}
+    for job in _iter_state_jobs():
+        ro = str(job.get("ro") or "").strip()
+        if not ro:
+            continue
+        status = str(job.get("workflow_status") or job.get("status") or "").strip().lower().replace("_", " ")
+        if status in COMPLETED_HISTORY_STATUSES:
+            rows[ro] = job
+    return rows
+
+
+def _packet_history_rows() -> list[dict]:
+    rows: dict[str, dict] = {}
+
+    if JOB_HISTORY_DIR.exists():
+        for ro_dir in JOB_HISTORY_DIR.iterdir():
+            if ro_dir.is_dir():
+                ro = ro_dir.name.strip()
+                latest = _latest_stored_packet(ro)
+                if latest:
+                    packet = latest.get("packet") if isinstance(latest.get("packet"), dict) else {}
+                    rows[ro] = {
+                        "ro": ro,
+                        "customer": packet.get("customer", ""),
+                        "vehicle": packet.get("vehicle", ""),
+                        "status": "closed",
+                        "has_packet": True,
+                        "generated_at": latest.get("generated_at", ""),
+                        "source": latest.get("label", latest.get("source", "")),
+                    }
+
+    for path in DVI_REVIEWS_DIR.glob("*_packet.json"):
+        ro = path.name[:-12].strip()
+        if ro and ro not in rows:
+            latest = _latest_stored_packet(ro)
+            if latest:
+                packet = latest.get("packet") if isinstance(latest.get("packet"), dict) else {}
+                rows[ro] = {
+                    "ro": ro,
+                    "customer": packet.get("customer", ""),
+                    "vehicle": packet.get("vehicle", ""),
+                    "status": "packet cached",
+                    "has_packet": True,
+                    "generated_at": latest.get("generated_at", ""),
+                    "source": latest.get("label", latest.get("source", "")),
+                }
+
+    for path in DVI_REVIEWS_DIR.glob("packet_*.json"):
+        ro = path.stem.replace("packet_", "", 1).strip()
+        if ro and ro not in rows:
+            latest = _latest_stored_packet(ro)
+            if latest:
+                packet = latest.get("packet") if isinstance(latest.get("packet"), dict) else {}
+                rows[ro] = {
+                    "ro": ro,
+                    "customer": packet.get("customer", ""),
+                    "vehicle": packet.get("vehicle", ""),
+                    "status": "legacy packet",
+                    "has_packet": True,
+                    "generated_at": latest.get("generated_at", ""),
+                    "source": latest.get("label", latest.get("source", "")),
+                }
+
+    for ro, job in _completed_state_jobs_by_ro().items():
+        latest = _latest_stored_packet(ro)
+        if ro not in rows:
+            rows[ro] = {
+                "ro": ro,
+                "customer": job.get("customer", ""),
+                "vehicle": job.get("vehicle", ""),
+                "status": job.get("workflow_status") or job.get("status") or "completed",
+                "has_packet": bool(latest),
+                "generated_at": latest.get("generated_at", "") if latest else "",
+                "source": latest.get("label", "") if latest else "No stored packet",
+            }
+        else:
+            rows[ro]["customer"] = rows[ro].get("customer") or job.get("customer", "")
+            rows[ro]["vehicle"] = rows[ro].get("vehicle") or job.get("vehicle", "")
+            rows[ro]["status"] = job.get("workflow_status") or job.get("status") or rows[ro].get("status", "")
+
+    return sorted(rows.values(), key=lambda row: str(row.get("generated_at") or ""), reverse=True)
 
 
 def _append_api_cost_log(entry: dict) -> None:
@@ -336,6 +555,15 @@ def _render_photo_panel(ro: str, cache: dict) -> str:
             <div id="photoFindingsPanel"></div>
         </section>
         <script type="application/json" id="photoData">{photo_data}</script>
+    """
+
+
+def _render_cached_photo_panel_notice() -> str:
+    return """
+        <section class="photo-panel">
+            <h2>Photo evidence review</h2>
+            <p class="photo-subtext">Stored packet opened from cache. Live DVI photo lookup is intentionally skipped so this page does not regenerate, call AutoFlow, or use AI credits.</p>
+        </section>
     """
 
 
@@ -890,14 +1118,14 @@ def _render_error(ro: str, packet: dict) -> Response:
     return Response(html_text, mimetype="text/html")
 
 
-def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_regenerated: bool = False, requested_by: str = "") -> str:
+def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_regenerated: bool = False, requested_by: str = "", include_photo_panel: bool = True) -> str:
     drag_items = "\n".join(f"<li>{_escape(item)}</li>" for item in packet.get("drag_order", []))
     jobs_html = "\n".join(_render_job(job) for job in packet.get("jobs", []))
     generated_at = _escape(format_ts(packet.get("generated_at", datetime.now(timezone.utc).isoformat())))
     cache = cache or {}
     banner_html = _render_banner(cache, just_regenerated=just_regenerated, requested_by=requested_by) if cache else ""
     generation_log_html = _render_generation_log(ro, cache) if cache else ""
-    photo_panel_html = _render_photo_panel(ro, cache)
+    photo_panel_html = _render_photo_panel(ro, cache) if include_photo_panel else _render_cached_photo_panel_notice()
     merged_findings_html = _render_merged_findings(cache)
 
     return f"""<!DOCTYPE html>
@@ -1235,6 +1463,158 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
     </script>
 </body>
 </html>"""
+
+
+def _render_no_stored_packet(ro: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>No Stored Packet - RO {_escape(ro)}</title>
+    <style>
+        body {{font-family:Arial,Helvetica,sans-serif;background:#0f172a;color:#e5e7eb;margin:0;padding:40px;}}
+        .card {{max-width:720px;margin:0 auto;background:#111827;border:1px solid #334155;border-radius:16px;padding:28px;box-shadow:0 18px 42px rgba(0,0,0,.28);}}
+        h1 {{margin:0 0 10px;font-size:28px;color:#fff;}}
+        p {{color:#cbd5e1;line-height:1.6;}}
+        .actions {{display:flex;gap:12px;margin-top:22px;flex-wrap:wrap;}}
+        a {{display:inline-block;border-radius:10px;padding:11px 15px;text-decoration:none;font-weight:900;}}
+        .build {{background:#185FA5;color:#fff;}}
+        .history {{border:1px solid #475569;color:#cbd5e1;}}
+    </style>
+</head>
+<body>
+    <main class="card">
+        <h1>No stored packet yet</h1>
+        <p>RO {_escape(ro)} does not have a saved packet in the cache or permanent job history store. Opening this history route did not regenerate anything and did not call AutoFlow or AI.</p>
+        <p>Build Packet is available only because no stored packet exists yet.</p>
+        <div class="actions">
+            <a class="build" href="/dvi/packet/{_escape(ro)}">Build Packet</a>
+            <a class="history" href="/dvi/history">Back to History</a>
+        </div>
+    </main>
+</body>
+</html>"""
+
+
+def render_packet_stored(ro):
+    ro = str(ro).strip()
+    latest = _latest_stored_packet(ro)
+    if not latest:
+        return Response(_render_no_stored_packet(ro), mimetype="text/html")
+
+    packet = latest.get("packet") if isinstance(latest.get("packet"), dict) else {}
+    cache = latest.get("cache") if isinstance(latest.get("cache"), dict) else {}
+    if not cache:
+        generated_at = _packet_generated_at(packet) or str(latest.get("generated_at") or datetime.utcnow().isoformat())
+        cache = {
+            "ro": ro,
+            "generated_at": generated_at,
+            "dvi_pulled_at": packet.get("dvi_pulled_at") or generated_at,
+            "packet": packet,
+            "packet_stale": packet.get("packet_stale") if isinstance(packet.get("packet_stale"), dict) else {},
+            "generation_log": [{
+                "timestamp": generated_at,
+                "trigger": packet.get("trigger") or "stored_packet_open",
+                "requested_by": packet.get("requested_by") or "cache",
+                "dvi_item_count": packet.get("dvi_item_count") or 0,
+                "api_cost_usd": 0,
+            }],
+            "total_cost_usd": 0,
+            "analyzed_photos": [],
+        }
+
+    if packet:
+        log_packet_cache_hit(ro, requested_by="history_view")
+        return Response(_render_packet_html(ro, packet, cache=cache, include_photo_panel=False), mimetype="text/html")
+
+    packet_html = str(latest.get("packet_html") or "")
+    if packet_html:
+        log_packet_cache_hit(ro, requested_by="history_view")
+        return Response(packet_html, mimetype="text/html")
+
+    return Response(_render_no_stored_packet(ro), mimetype="text/html")
+
+
+def render_packet_history():
+    rows = _packet_history_rows()
+    row_html = []
+    for row in rows:
+        ro = str(row.get("ro") or "")
+        generated = str(row.get("generated_at") or "")
+        generated_display = format_ts(generated) if generated else "No stored packet"
+        if row.get("has_packet"):
+            action = f'<a class="open" href="/dvi/packet/{_escape(ro)}/stored">Open stored packet</a>'
+            status_class = "ready"
+            packet_state = "Stored packet ready"
+        else:
+            action = f'<a class="build" href="/dvi/packet/{_escape(ro)}">Build Packet</a>'
+            status_class = "missing"
+            packet_state = "No stored packet"
+        row_html.append(
+            "<tr>"
+            f'<td class="ro">RO {_escape(ro)}</td>'
+            f"<td>{_escape(row.get('customer') or 'Unknown')}</td>"
+            f"<td>{_escape(row.get('vehicle') or '')}</td>"
+            f"<td>{_escape(row.get('status') or '')}</td>"
+            f"<td>{_escape(generated_display)}</td>"
+            f'<td><span class="pill {status_class}">{packet_state}</span><br><small>{_escape(row.get("source") or "")}</small></td>'
+            f"<td>{action}</td>"
+            "</tr>"
+        )
+    if not row_html:
+        row_html.append(
+            '<tr><td colspan="7" class="empty">No completed, closed, or packet-history ROs found yet. Stored packets will appear here after packet generation.</td></tr>'
+        )
+
+    html_text = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Completed RO Packet History</title>
+    <style>
+        body {{font-family:Arial,Helvetica,sans-serif;background:#07111f;color:#e5e7eb;margin:0;padding:24px;}}
+        .page {{max-width:1180px;margin:0 auto;}}
+        .top {{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin-bottom:22px;}}
+        h1 {{margin:0;color:#fff;font-size:30px;letter-spacing:.04em;}}
+        .sub {{color:#94a3b8;margin-top:6px;font-size:14px;}}
+        .back {{border:1px solid #334155;border-radius:10px;color:#cbd5e1;text-decoration:none;padding:10px 14px;font-weight:900;}}
+        table {{width:100%;border-collapse:separate;border-spacing:0 10px;}}
+        th {{text-align:left;color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:0 12px;}}
+        td {{background:#111827;border-top:1px solid #1e293b;border-bottom:1px solid #1e293b;padding:14px 12px;vertical-align:middle;}}
+        td:first-child {{border-left:1px solid #1e293b;border-radius:12px 0 0 12px;}}
+        td:last-child {{border-right:1px solid #1e293b;border-radius:0 12px 12px 0;}}
+        .ro {{font-weight:900;color:#fff;}}
+        .pill {{display:inline-block;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:900;margin-bottom:4px;}}
+        .pill.ready {{background:#064e3b;color:#86efac;border:1px solid #10b981;}}
+        .pill.missing {{background:#451a03;color:#fdba74;border:1px solid #f97316;}}
+        small {{color:#64748b;}}
+        a.open,a.build {{display:inline-block;border-radius:9px;padding:9px 12px;text-decoration:none;font-weight:900;white-space:nowrap;}}
+        a.open {{background:#185FA5;color:#fff;}}
+        a.build {{background:#f59e0b;color:#111827;}}
+        .empty {{text-align:center;color:#94a3b8;padding:28px;}}
+    </style>
+</head>
+<body>
+    <main class="page">
+        <div class="top">
+            <div>
+                <h1>Completed RO Packet History</h1>
+                <div class="sub">Cache-first view of completed and closed ROs. Opening a packet here does not regenerate, call AutoFlow, or use AI credits.</div>
+            </div>
+            <a class="back" href="/v2">Back to Board</a>
+        </div>
+        <table>
+            <thead>
+                <tr><th>RO</th><th>Customer</th><th>Vehicle</th><th>Status</th><th>Latest Packet Date</th><th>Packet State</th><th>Action</th></tr>
+            </thead>
+            <tbody>{''.join(row_html)}</tbody>
+        </table>
+    </main>
+</body>
+</html>"""
+    return Response(html_text, mimetype="text/html")
 
 
 def render_packet_page(ro):
