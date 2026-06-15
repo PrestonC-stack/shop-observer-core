@@ -1,0 +1,220 @@
+{
+  "concern_checklists": {
+    "ac_blowing_warm": [
+      "vent_temperature",
+      "visible_leak_check",
+      "compressor_cycling"
+    ],
+    "brake_noise": [
+      "which_corner",
+      "noise_type",
+      "pad_or_rotor_measurement"
+    ],
+    "no_start": [
+      "crank_or_no_crank",
+      "battery_voltage",
+      "fault_codes"
+    ]
+  },
+  "concern_patterns": {
+    "ac_blowing_warm": [
+      "ac blowing warm",
+      "ac is blowing warm",
+      "a/c blowing warm",
+      "a/c is blowing warm",
+      "air conditioning blowing warm",
+      "air conditioning is blowing warm",
+      "ac not cold",
+      "a/c not cold",
+      "warm air"
+    ],
+    "brake_noise": [
+      "brake noise",
+      "brakes noise",
+      "squeak when braking",
+      "squealing brakes",
+      "grinding brakes",
+      "noise when braking"
+    ],
+    "no_start": [
+      "no start",
+      "will not start",
+      "won't start",
+      "does not start",
+      "crank no start",
+      "no crank"
+    ]
+  },
+  "evidence_labels": {
+    "vent_temperature": "vent temperature",
+    "visible_leak_check": "visible leak check",
+    "compressor_cycling": "compressor cycling status",
+    "which_corner": "which corner",
+    "noise_type": "noise type",
+    "pad_or_rotor_measurement": "pad or rotor measurement",
+    "crank_or_no_crank": "crank/no-crank result",
+    "battery_voltage": "battery voltage",
+    "fault_codes": "fault codes"
+  },
+  "evidence_patterns": {
+    "vent_temperature": [
+      "vent temp",
+      "vent temperature",
+      "degrees",
+      "deg",
+      "f at vent",
+      "temperature at vent"
+    ],
+    "visible_leak_check": [
+      "leak check",
+      "leak checked",
+      "no leak",
+      "leaking",
+      "uv dye",
+      "dye",
+      "refrigerant leak",
+      "visible leak"
+    ],
+    "compressor_cycling": [
+      "compressor cycling",
+      "compressor cycles",
+      "compressor engaged",
+      "compressor clutch",
+      "clutch engages",
+      "not cycling"
+    ],
+    "which_corner": [
+      "left front",
+      "right front",
+      "left rear",
+      "right rear",
+      "front left",
+      "front right",
+      "rear left",
+      "rear right",
+      "lf",
+      "rf",
+      "lr",
+      "rr",
+      "corner"
+    ],
+    "noise_type": [
+      "squeak",
+      "squeal",
+      "grind",
+      "grinding",
+      "clunk",
+      "rattle",
+      "scrape",
+      "pulsation"
+    ],
+    "pad_or_rotor_measurement": [
+      "pad",
+      "rotor",
+      "mm",
+      "32nd",
+      "thickness",
+      "measurement"
+    ],
+    "crank_or_no_crank": [
+      "cranks",
+      "no crank",
+      "crank no start",
+      "clicks",
+      "does not crank",
+      "starter engages"
+    ],
+    "battery_voltage": [
+      "battery voltage",
+      "volts",
+      "volt",
+      "v",
+      "12.",
+      "cca"
+    ],
+    "fault_codes": [
+      "dtc",
+      "code",
+      "codes",
+      "fault code",
+      "fault codes",
+      "p0",
+      "u0",
+      "b0",
+      "c0"
+    ]
+  },
+  "concern_completeness": {
+    "severity": "critical",
+    "section": "Customer Concern"
+  },
+  "contradiction_detection": {
+    "severity": "critical",
+    "ok_status_values": [
+      "2",
+      "ok",
+      "green",
+      "pass",
+      "passed"
+    ],
+    "components": {
+      "ac": {
+        "item_keywords": [
+          "a/c",
+          "ac",
+          "air conditioning",
+          "hvac"
+        ],
+        "concern_keywords": [
+          "ac",
+          "a/c",
+          "air conditioning",
+          "warm air"
+        ],
+        "failure_keywords": [
+          "warm",
+          "not cold",
+          "does not cool",
+          "not cooling"
+        ]
+      },
+      "brakes": {
+        "item_keywords": [
+          "brake",
+          "pads",
+          "rotor"
+        ],
+        "concern_keywords": [
+          "brake",
+          "brakes"
+        ],
+        "failure_keywords": [
+          "noise",
+          "squeak",
+          "squeal",
+          "grind",
+          "grinding"
+        ]
+      },
+      "starting": {
+        "item_keywords": [
+          "battery",
+          "starter",
+          "charging",
+          "alternator"
+        ],
+        "concern_keywords": [
+          "start",
+          "crank"
+        ],
+        "failure_keywords": [
+          "no start",
+          "will not start",
+          "won't start",
+          "no crank",
+          "crank no start"
+        ]
+      }
+    }
+  }
+}

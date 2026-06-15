@@ -32,12 +32,25 @@ logger = logging.getLogger(__name__)
 RULES_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..", "config", "cas_rules", "dvi_gate_rules.yaml"
 )
+CONCERN_RULES_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "config", "concern_checklists.json"
+)
 
 def _load_rules() -> dict:
     with open(RULES_PATH, "r") as f:
         return yaml.safe_load(f)
 
 RULES = _load_rules()
+
+
+def _load_concern_rules() -> dict:
+    if not os.path.exists(CONCERN_RULES_PATH):
+        return {}
+    with open(CONCERN_RULES_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+CONCERN_RULES = _load_concern_rules()
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -147,6 +160,170 @@ def _collect_all_dvi_items(dvi_data: dict) -> list:
                 item["_section"] = section
                 items.append(item)
     return items
+
+
+def _normalize_for_match(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").lower()).strip()
+
+
+def _severity_from_config(value: str, default: str = FlagSeverity.CRITICAL) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == FlagSeverity.IMPORTANT:
+        return FlagSeverity.IMPORTANT
+    if normalized == FlagSeverity.INFO:
+        return FlagSeverity.INFO
+    return default
+
+
+def _concern_texts(dvi_data: dict) -> list:
+    reasons = dvi_data.get("content", {}).get("reason_vehicle_is_here", [])
+    concerns = []
+    for reason in reasons:
+        text = (reason.get("details") or "").strip()
+        if text:
+            concerns.append(text)
+    return concerns
+
+
+def _detect_concern_type(concern_text: str) -> Optional[str]:
+    text = _normalize_for_match(concern_text)
+    patterns = CONCERN_RULES.get("concern_patterns", {})
+    for concern_type, keywords in patterns.items():
+        for keyword in keywords:
+            if _normalize_for_match(keyword) in text:
+                return concern_type
+    return None
+
+
+def _item_corpus(all_items: list) -> str:
+    parts = []
+    for item in all_items:
+        parts.extend([
+            item.get("_section", ""),
+            item.get("item_name", ""),
+            _note_text(item),
+        ])
+    return _normalize_for_match(" ".join(parts))
+
+
+def _evidence_present(evidence_key: str, all_items: list) -> bool:
+    corpus = _item_corpus(all_items)
+    patterns = CONCERN_RULES.get("evidence_patterns", {}).get(evidence_key, [])
+    if evidence_key == "pad_or_rotor_measurement" and _has_measurement(corpus):
+        return True
+    for pattern in patterns:
+        if _normalize_for_match(pattern) in corpus:
+            return True
+    return False
+
+
+def _evidence_label(evidence_key: str) -> str:
+    return CONCERN_RULES.get("evidence_labels", {}).get(
+        evidence_key,
+        str(evidence_key).replace("_", " "),
+    )
+
+
+def _check_concern_completeness(dvi_data: dict, all_items: list) -> list:
+    flags = []
+    checklists = CONCERN_RULES.get("concern_checklists", {})
+    settings = CONCERN_RULES.get("concern_completeness", {})
+    section = settings.get("section", "Customer Concern")
+    severity = _severity_from_config(settings.get("severity"), FlagSeverity.CRITICAL)
+
+    for concern in _concern_texts(dvi_data):
+        concern_type = _detect_concern_type(concern)
+        if not concern_type or concern_type not in checklists:
+            continue
+        missing = [
+            evidence for evidence in checklists[concern_type]
+            if not _evidence_present(evidence, all_items)
+        ]
+        if not missing:
+            continue
+        missing_labels = [_evidence_label(evidence) for evidence in missing]
+        flags.append(DVIFlag(
+            severity=severity,
+            category=FlagCategory.COMPLAINT_GAP,
+            item_name=concern_type,
+            section=section,
+            tech_note=concern,
+            photo_count=0,
+            measurement_present=any(
+                evidence in {"pad_or_rotor_measurement", "battery_voltage"}
+                for evidence in missing
+            ) and _has_measurement(_item_corpus(all_items)),
+            message=(
+                f"Concern '{concern[:100]}' is missing required evidence: "
+                f"{', '.join(missing_labels)}."
+            ),
+            recommended_action=(
+                f"Document {', '.join(missing_labels)} for the "
+                f"{concern_type.replace('_', ' ')} concern."
+            )
+        ))
+    return flags
+
+
+def _check_contradictions(dvi_data: dict, all_items: list) -> list:
+    flags = []
+    settings = CONCERN_RULES.get("contradiction_detection", {})
+    components = settings.get("components", {})
+    configured_ok_values = settings.get("ok_status_values", [RULES["status_codes"]["pass"]])
+    ok_values = {
+        _normalize_for_match(value)
+        for value in configured_ok_values
+    }
+    severity = _severity_from_config(settings.get("severity"), FlagSeverity.CRITICAL)
+    concern_text = _normalize_for_match(" ".join(_concern_texts(dvi_data)))
+    seen = set()
+
+    for component_name, component_rules in components.items():
+        concern_match = any(
+            _normalize_for_match(keyword) in concern_text
+            for keyword in component_rules.get("concern_keywords", [])
+        )
+        failure_match = any(
+            _normalize_for_match(keyword) in concern_text
+            for keyword in component_rules.get("failure_keywords", [])
+        )
+        if not (concern_match and failure_match):
+            continue
+
+        for item in all_items:
+            status = _normalize_for_match(_item_status(item))
+            if status not in ok_values:
+                continue
+            item_name = item.get("item_name", "Unknown")
+            item_text = _normalize_for_match(item_name)
+            item_match = any(
+                _normalize_for_match(keyword) in item_text
+                for keyword in component_rules.get("item_keywords", [])
+            )
+            if not item_match:
+                continue
+            key = (component_name, item_name)
+            if key in seen:
+                continue
+            seen.add(key)
+            flags.append(DVIFlag(
+                severity=severity,
+                category=FlagCategory.CONTRADICTION,
+                item_name=item_name,
+                section=item.get("_section", "Unknown"),
+                tech_note=_note_text(item),
+                photo_count=_photo_count(item),
+                measurement_present=_has_measurement(_note_text(item)),
+                message=(
+                    f"Concern describes a {component_name.replace('_', ' ')} failure, "
+                    f"but '{item_name}' is marked OK/green."
+                ),
+                recommended_action=(
+                    f"Recheck '{item_name}' and document whether it confirms or "
+                    f"rules out the customer concern."
+                )
+            ))
+    return flags
 
 
 # ─── Rule Checks ─────────────────────────────────────────────────────────────
@@ -388,6 +565,10 @@ def run_dvi_gate(
             message=f"Primary complaint not clearly addressed in DVI findings: '{primary_complaint[:100]}'",
             recommended_action="Verify tech addressed the primary customer complaint and documented findings."
         ))
+
+    # Concern-aware advisory checks feed normal flags into the existing gate.
+    flags.extend(_check_concern_completeness(dvi_data, all_items))
+    flags.extend(_check_contradictions(dvi_data, all_items))
 
     review.flags = flags
     review.finalize_status()
