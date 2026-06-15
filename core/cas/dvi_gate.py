@@ -191,8 +191,13 @@ def _detect_concern_type(concern_text: str) -> Optional[str]:
     for concern_type, keywords in patterns.items():
         for keyword in keywords:
             if _normalize_for_match(keyword) in text:
-                return concern_type
+                return _canonical_concern_type(concern_type)
     return None
+
+
+def _canonical_concern_type(concern_type: str) -> str:
+    aliases = CONCERN_RULES.get("concern_aliases", {})
+    return aliases.get(str(concern_type or ""), str(concern_type or ""))
 
 
 def _item_corpus(all_items: list) -> str:
@@ -209,8 +214,15 @@ def _item_corpus(all_items: list) -> str:
 def _evidence_present(evidence_key: str, all_items: list) -> bool:
     corpus = _item_corpus(all_items)
     patterns = CONCERN_RULES.get("evidence_patterns", {}).get(evidence_key, [])
+    regex_patterns = CONCERN_RULES.get("evidence_regex_patterns", {}).get(evidence_key, [])
     if evidence_key == "pad_or_rotor_measurement" and _has_measurement(corpus):
         return True
+    for pattern in regex_patterns:
+        try:
+            if re.search(pattern, corpus, re.IGNORECASE):
+                return True
+        except re.error:
+            logger.warning("Invalid evidence regex for %s: %s", evidence_key, pattern)
     for pattern in patterns:
         if _normalize_for_match(pattern) in corpus:
             return True
@@ -224,44 +236,144 @@ def _evidence_label(evidence_key: str) -> str:
     )
 
 
+def _concern_context_text(concern: str, all_items: list) -> str:
+    return _normalize_for_match(f"{concern} {_item_corpus(all_items)}")
+
+
+def _matches_any(text: str, patterns: list) -> bool:
+    normalized = _normalize_for_match(text)
+    for pattern in patterns or []:
+        if _normalize_for_match(pattern) in normalized:
+            return True
+    return False
+
+
+def _has_real_diagnostic_data(text: str) -> bool:
+    data_patterns = CONCERN_RULES.get("concern_context", {}).get("diagnostic_data_regex", [])
+    for pattern in data_patterns:
+        try:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+        except re.error:
+            logger.warning("Invalid diagnostic data regex: %s", pattern)
+    return False
+
+
+def _concern_context(concern: str, all_items: list) -> str:
+    text = _concern_context_text(concern, all_items)
+    settings = CONCERN_RULES.get("concern_context", {})
+    if _matches_any(text, settings.get("suppress_patterns", [])):
+        return "suppressed"
+    sold_or_performed = _matches_any(text, settings.get("diagnosed_patterns", []))
+    has_data = _has_real_diagnostic_data(text)
+    if sold_or_performed or has_data:
+        return "diagnosed"
+    if _matches_any(text, settings.get("courtesy_patterns", [])):
+        return "courtesy"
+    return "ambiguous"
+
+
+def _checklist_tiers(raw_checklist) -> tuple[list, list]:
+    if isinstance(raw_checklist, dict):
+        required = raw_checklist.get("required", [])
+        expected = raw_checklist.get("expected", [])
+        return (
+            required if isinstance(required, list) else [],
+            expected if isinstance(expected, list) else [],
+        )
+    if isinstance(raw_checklist, list):
+        return raw_checklist, []
+    return [], []
+
+
+def _missing_labels(missing: list) -> list:
+    return [_evidence_label(evidence) for evidence in missing]
+
+
 def _check_concern_completeness(dvi_data: dict, all_items: list) -> list:
     flags = []
     checklists = CONCERN_RULES.get("concern_checklists", {})
     settings = CONCERN_RULES.get("concern_completeness", {})
     section = settings.get("section", "Customer Concern")
-    severity = _severity_from_config(settings.get("severity"), FlagSeverity.CRITICAL)
+    required_severity = _severity_from_config(settings.get("required_missing_severity"), FlagSeverity.CRITICAL)
+    expected_severity = _severity_from_config(settings.get("expected_missing_severity"), FlagSeverity.IMPORTANT)
+    ambiguous_severity = _severity_from_config(settings.get("ambiguous_severity"), FlagSeverity.IMPORTANT)
 
     for concern in _concern_texts(dvi_data):
         concern_type = _detect_concern_type(concern)
         if not concern_type or concern_type not in checklists:
             continue
-        missing = [
-            evidence for evidence in checklists[concern_type]
+        required, expected = _checklist_tiers(checklists[concern_type])
+        required_missing = [
+            evidence for evidence in required
             if not _evidence_present(evidence, all_items)
         ]
-        if not missing:
+        expected_missing = [
+            evidence for evidence in expected
+            if not _evidence_present(evidence, all_items)
+        ]
+        if not required_missing and not expected_missing:
             continue
-        missing_labels = [_evidence_label(evidence) for evidence in missing]
-        flags.append(DVIFlag(
-            severity=severity,
-            category=FlagCategory.COMPLAINT_GAP,
-            item_name=concern_type,
-            section=section,
-            tech_note=concern,
-            photo_count=0,
-            measurement_present=any(
-                evidence in {"pad_or_rotor_measurement", "battery_voltage"}
-                for evidence in missing
-            ) and _has_measurement(_item_corpus(all_items)),
-            message=(
-                f"Concern '{concern[:100]}' is missing required evidence: "
-                f"{', '.join(missing_labels)}."
-            ),
-            recommended_action=(
-                f"Document {', '.join(missing_labels)} for the "
-                f"{concern_type.replace('_', ' ')} concern."
-            )
-        ))
+        context = _concern_context(concern, all_items)
+        if context == "suppressed":
+            continue
+
+        if required_missing and context == "diagnosed":
+            missing_labels = _missing_labels(required_missing)
+            flags.append(DVIFlag(
+                severity=required_severity,
+                category=FlagCategory.COMPLAINT_GAP,
+                item_name=concern_type,
+                section=section,
+                tech_note=concern,
+                photo_count=0,
+                measurement_present=_has_real_diagnostic_data(_concern_context_text(concern, all_items)),
+                message=(
+                    f"Diagnosed concern '{concern[:100]}' is missing required evidence: "
+                    f"{', '.join(missing_labels)}."
+                ),
+                recommended_action=(
+                    f"Document {', '.join(missing_labels)} for the "
+                    f"{concern_type.replace('_', ' ')} concern before customer presentation."
+                )
+            ))
+        elif required_missing and context == "ambiguous":
+            missing_labels = _missing_labels(required_missing)
+            flags.append(DVIFlag(
+                severity=ambiguous_severity,
+                category=FlagCategory.COMPLAINT_GAP,
+                item_name=concern_type,
+                section=section,
+                tech_note=concern,
+                photo_count=0,
+                measurement_present=False,
+                message=(
+                    f"Concern '{concern[:100]}' is not clearly diagnosed or performed; "
+                    f"required evidence would be {', '.join(missing_labels)} if diagnosis was completed."
+                ),
+                recommended_action=(
+                    "Verify whether this was only a courtesy recommendation or a completed diagnosis."
+                )
+            ))
+
+        if expected_missing and context == "diagnosed":
+            missing_labels = _missing_labels(expected_missing)
+            flags.append(DVIFlag(
+                severity=expected_severity,
+                category=FlagCategory.COMPLAINT_GAP,
+                item_name=concern_type,
+                section=section,
+                tech_note=concern,
+                photo_count=0,
+                measurement_present=_has_real_diagnostic_data(_concern_context_text(concern, all_items)),
+                message=(
+                    f"Concern '{concern[:100]}' is missing expected advisory context: "
+                    f"{', '.join(missing_labels)}."
+                ),
+                recommended_action=(
+                    f"Add advisory context if available: {', '.join(missing_labels)}."
+                )
+            ))
     return flags
 
 

@@ -1,23 +1,302 @@
 {
   "concern_checklists": {
-    "ac_blowing_warm": [
-      "vent_temperature",
-      "visible_leak_check",
-      "compressor_cycling"
-    ],
-    "brake_noise": [
-      "which_corner",
-      "noise_type",
-      "pad_or_rotor_measurement"
-    ],
-    "no_start": [
-      "crank_or_no_crank",
-      "battery_voltage",
-      "fault_codes"
-    ]
+    "brake_pulsation": {
+      "required": [
+        "road_test_verification",
+        "front_rotor_condition",
+        "rear_rotor_or_drum_condition"
+      ],
+      "expected": [
+        "speed_range_when_felt",
+        "rotor_runout_or_thickness_measurement_if_performed",
+        "signs_of_heat_damage",
+        "warped_rotor_or_drum_indicators",
+        "pad_transfer_material_observation"
+      ]
+    },
+    "flashing_check_engine_light": {
+      "required": [
+        "misfire_codes",
+        "misfire_counter_data",
+        "cylinder_identification",
+        "catalyst_damage_risk_note",
+        "immediate_driveability_risk"
+      ],
+      "expected": [
+        "long_term_fuel_trim",
+        "short_term_fuel_trim"
+      ]
+    },
+    "rough_idle": {
+      "required": [
+        "symptom_verification",
+        "scan_data",
+        "misfire_data",
+        "long_term_fuel_trim",
+        "short_term_fuel_trim"
+      ],
+      "expected": [
+        "hot_or_cold_condition",
+        "vacuum_leak_check_if_applicable",
+        "fuel_pressure_data_if_available"
+      ]
+    },
+    "engine_misfire": {
+      "required": [
+        "cylinder_identification",
+        "codes_and_freeze_frame",
+        "misfire_counter_data",
+        "long_term_fuel_trim",
+        "short_term_fuel_trim",
+        "root_cause_support"
+      ],
+      "expected": [
+        "fuel_pressure_actual_vs_desired",
+        "vacuum_leak_check_if_applicable",
+        "ignition_fuel_mechanical_test_path"
+      ]
+    },
+    "engine_stalls": {
+      "required": [
+        "condition_when_stalling",
+        "scan_data",
+        "long_term_fuel_trim",
+        "short_term_fuel_trim"
+      ],
+      "expected": [
+        "hot_or_cold_condition",
+        "fuel_pressure_actual_vs_desired",
+        "vacuum_leak_check_if_applicable",
+        "intermittent_failure_notes"
+      ]
+    },
+    "no_start": {
+      "required": [
+        "crank_or_no_crank_verification",
+        "battery_condition",
+        "starting_system_test_results",
+        "fuel_delivery_verification",
+        "spark_verification",
+        "root_cause_identified"
+      ],
+      "expected": [
+        "air_intake_verification",
+        "sensor_connection_visual_inspection",
+        "visual_inspection_for_disconnected_or_obvious_failures"
+      ]
+    },
+    "crank_no_start": {
+      "required": [
+        "battery_voltage_during_crank",
+        "fuel_pressure_actual_vs_desired",
+        "spark_verification",
+        "scan_data"
+      ],
+      "expected": [
+        "cranking_rpm_if_available",
+        "air_intake_verification",
+        "sensor_connection_visual_inspection",
+        "visual_inspection_for_disconnected_or_obvious_failures"
+      ]
+    },
+    "no_crank": {
+      "required": [
+        "battery_test_results",
+        "starter_command_verification",
+        "voltage_drop_test"
+      ],
+      "expected": [
+        "battery_terminal_condition",
+        "battery_terminal_tightness",
+        "battery_terminal_cleanliness",
+        "fuse_check",
+        "starter_relay_or_control_circuit_check",
+        "security_or_module_inhibit_check_if_applicable"
+      ]
+    },
+    "hard_start": {
+      "required": [
+        "hot_or_cold_condition",
+        "battery_test",
+        "fuel_system_evaluation",
+        "scan_data_review",
+        "diagnostic_findings"
+      ],
+      "expected": [
+        "fuel_pressure_actual_vs_desired",
+        "vacuum_leak_check"
+      ]
+    },
+    "extended_crank": {
+      "required": [
+        "cranking_time_observed",
+        "fuel_pressure_actual_vs_desired",
+        "battery_voltage_during_crank"
+      ],
+      "expected": [
+        "fuel_pressure_decay_or_prime_check",
+        "vacuum_leak_check",
+        "cam_crank_sync_data_if_applicable",
+        "codes_or_pending_codes"
+      ]
+    },
+    "engine_overheating": {
+      "required": [
+        "temperature_verification",
+        "coolant_level",
+        "cooling_system_pressure_test",
+        "fan_operation_check"
+      ],
+      "expected": [
+        "leak_source_if_present",
+        "electronic_or_viscous_fan_verification",
+        "coolant_reservoir_condition",
+        "signs_of_previous_repairs",
+        "radiator_airflow_restriction_check",
+        "cooler_stack_restriction_check",
+        "transmission_temperature_if_applicable",
+        "transmission_overheating_contribution_if_present",
+        "thermostat_or_flow_observation"
+      ]
+    },
+    "ac_not_cold": {
+      "required": [
+        "vent_temperature",
+        "high_side_pressure",
+        "low_side_pressure",
+        "compressor_operation"
+      ],
+      "expected": [
+        "ambient_temperature",
+        "cooling_fan_operation",
+        "fan_command_vs_actual_operation",
+        "condenser_airflow_verification",
+        "condenser_obstruction_check",
+        "condenser_cleanliness_check"
+      ]
+    },
+    "blower_motor_inoperative": {
+      "required": [
+        "blower_speed_affected",
+        "power_and_ground_test",
+        "blower_motor_test"
+      ],
+      "expected": [
+        "noise_present",
+        "loss_of_specific_speeds",
+        "fuse_check",
+        "relay_check",
+        "control_head_or_resistor_check_if_applicable"
+      ]
+    },
+    "diesel_no_power": {
+      "required": [
+        "loaded_or_unloaded_condition",
+        "scan_data",
+        "desired_boost",
+        "actual_boost",
+        "desired_fuel_pressure",
+        "actual_fuel_pressure"
+      ],
+      "expected": [
+        "fuel_pressure_under_load",
+        "air_intake_and_charge_air_check",
+        "restriction_check_if_applicable"
+      ]
+    },
+    "brake_noise": {
+      "required": [
+        "which_corner",
+        "noise_type",
+        "pad_or_rotor_measurement"
+      ],
+      "expected": []
+    }
+  },
+  "concern_aliases": {
+    "ac_blowing_warm": "ac_not_cold"
   },
   "concern_patterns": {
-    "ac_blowing_warm": [
+    "brake_pulsation": [
+      "brake pulsation",
+      "brakes pulsate",
+      "pulsation when braking",
+      "steering wheel shakes when braking",
+      "pedal pulsation",
+      "brake vibration",
+      "warped rotor"
+    ],
+    "flashing_check_engine_light": [
+      "flashing check engine light",
+      "check engine light flashing",
+      "cel flashing",
+      "mil flashing",
+      "flashing cel"
+    ],
+    "rough_idle": [
+      "rough idle",
+      "idles rough",
+      "rough at idle",
+      "shakes at idle",
+      "idle is rough"
+    ],
+    "engine_misfire": [
+      "engine misfire",
+      "misfire",
+      "misfires",
+      "running on fewer cylinders",
+      "cylinder misfire"
+    ],
+    "engine_stalls": [
+      "engine stalls",
+      "stalling",
+      "stalls at idle",
+      "stalls while driving",
+      "dies at idle",
+      "engine dies"
+    ],
+    "no_start": [
+      "no start",
+      "will not start",
+      "won't start",
+      "does not start",
+      "vehicle not starting"
+    ],
+    "crank_no_start": [
+      "crank no start",
+      "cranks no start",
+      "cranks but will not start",
+      "cranks but won't start"
+    ],
+    "no_crank": [
+      "no crank",
+      "does not crank",
+      "will not crank",
+      "won't crank",
+      "clicks but no crank"
+    ],
+    "hard_start": [
+      "hard start",
+      "hard to start",
+      "difficult to start",
+      "starts hard"
+    ],
+    "extended_crank": [
+      "extended crank",
+      "long crank",
+      "cranks a long time",
+      "long crank time",
+      "extended cranking"
+    ],
+    "engine_overheating": [
+      "engine overheating",
+      "overheating",
+      "runs hot",
+      "temperature gauge hot",
+      "coolant boiling",
+      "overheats"
+    ],
+    "ac_not_cold": [
       "ac blowing warm",
       "ac is blowing warm",
       "a/c blowing warm",
@@ -26,7 +305,31 @@
       "air conditioning is blowing warm",
       "ac not cold",
       "a/c not cold",
-      "warm air"
+      "weak ac",
+      "weak a/c",
+      "ac blows hot",
+      "a/c blows hot",
+      "warm air from ac",
+      "not cooling"
+    ],
+    "blower_motor_inoperative": [
+      "blower motor inoperative",
+      "blower not working",
+      "no blower",
+      "fan does not blow",
+      "hvac fan inoperative",
+      "blower only works on",
+      "blower speed not working"
+    ],
+    "diesel_no_power": [
+      "diesel no power",
+      "no power diesel",
+      "low power diesel",
+      "lack of power diesel",
+      "duramax no power",
+      "powerstroke no power",
+      "cummins no power",
+      "turbo no power"
     ],
     "brake_noise": [
       "brake noise",
@@ -35,117 +338,291 @@
       "squealing brakes",
       "grinding brakes",
       "noise when braking"
-    ],
-    "no_start": [
-      "no start",
-      "will not start",
-      "won't start",
-      "does not start",
-      "crank no start",
-      "no crank"
     ]
   },
   "evidence_labels": {
+    "road_test_verification": "road test verification",
+    "front_rotor_condition": "front rotor condition",
+    "rear_rotor_or_drum_condition": "rear rotor or drum condition",
+    "speed_range_when_felt": "speed range when felt",
+    "rotor_runout_or_thickness_measurement_if_performed": "rotor runout or thickness measurement if performed",
+    "signs_of_heat_damage": "signs of heat damage",
+    "warped_rotor_or_drum_indicators": "warped rotor or drum indicators",
+    "pad_transfer_material_observation": "pad transfer material observation",
+    "misfire_codes": "misfire codes",
+    "misfire_counter_data": "misfire counter data",
+    "cylinder_identification": "cylinder identification",
+    "catalyst_damage_risk_note": "catalyst damage risk note",
+    "immediate_driveability_risk": "immediate driveability risk",
+    "long_term_fuel_trim": "long term fuel trim",
+    "short_term_fuel_trim": "short term fuel trim",
+    "symptom_verification": "symptom verification",
+    "scan_data": "scan data",
+    "misfire_data": "misfire data",
+    "hot_or_cold_condition": "hot or cold condition",
+    "vacuum_leak_check_if_applicable": "vacuum leak check if applicable",
+    "fuel_pressure_data_if_available": "fuel pressure data if available",
+    "codes_and_freeze_frame": "codes and freeze frame",
+    "root_cause_support": "root cause support",
+    "fuel_pressure_actual_vs_desired": "fuel pressure actual vs desired",
+    "ignition_fuel_mechanical_test_path": "ignition/fuel/mechanical test path",
+    "condition_when_stalling": "condition when stalling",
+    "intermittent_failure_notes": "intermittent failure notes",
+    "crank_or_no_crank_verification": "crank or no-crank verification",
+    "battery_condition": "battery condition",
+    "starting_system_test_results": "starting system test results",
+    "fuel_delivery_verification": "fuel delivery verification",
+    "spark_verification": "spark verification",
+    "root_cause_identified": "root cause identified",
+    "air_intake_verification": "air intake verification",
+    "sensor_connection_visual_inspection": "sensor connection visual inspection",
+    "visual_inspection_for_disconnected_or_obvious_failures": "visual inspection for disconnected or obvious failures",
+    "battery_voltage_during_crank": "battery voltage during crank",
+    "cranking_rpm_if_available": "cranking RPM if available",
+    "battery_test_results": "battery test results",
+    "starter_command_verification": "starter command verification",
+    "voltage_drop_test": "voltage drop test",
+    "battery_terminal_condition": "battery terminal condition",
+    "battery_terminal_tightness": "battery terminal tightness",
+    "battery_terminal_cleanliness": "battery terminal cleanliness",
+    "fuse_check": "fuse check",
+    "starter_relay_or_control_circuit_check": "starter relay or control circuit check",
+    "security_or_module_inhibit_check_if_applicable": "security or module inhibit check if applicable",
+    "battery_test": "battery test",
+    "fuel_system_evaluation": "fuel system evaluation",
+    "scan_data_review": "scan data review",
+    "diagnostic_findings": "diagnostic findings",
+    "vacuum_leak_check": "vacuum leak check",
+    "cranking_time_observed": "cranking time observed",
+    "fuel_pressure_decay_or_prime_check": "fuel pressure decay or prime check",
+    "cam_crank_sync_data_if_applicable": "cam/crank sync data if applicable",
+    "codes_or_pending_codes": "codes or pending codes",
+    "temperature_verification": "temperature verification",
+    "coolant_level": "coolant level",
+    "cooling_system_pressure_test": "cooling system pressure test",
+    "fan_operation_check": "fan operation check",
+    "leak_source_if_present": "leak source if present",
+    "electronic_or_viscous_fan_verification": "electronic or viscous fan verification",
+    "coolant_reservoir_condition": "coolant reservoir condition",
+    "signs_of_previous_repairs": "signs of previous repairs",
+    "radiator_airflow_restriction_check": "radiator airflow restriction check",
+    "cooler_stack_restriction_check": "cooler stack restriction check",
+    "transmission_temperature_if_applicable": "transmission temperature if applicable",
+    "transmission_overheating_contribution_if_present": "transmission overheating contribution if present",
+    "thermostat_or_flow_observation": "thermostat or flow observation",
     "vent_temperature": "vent temperature",
-    "visible_leak_check": "visible leak check",
-    "compressor_cycling": "compressor cycling status",
+    "high_side_pressure": "high side pressure",
+    "low_side_pressure": "low side pressure",
+    "compressor_operation": "compressor operation",
+    "ambient_temperature": "ambient temperature",
+    "cooling_fan_operation": "cooling fan operation",
+    "fan_command_vs_actual_operation": "fan command vs actual operation",
+    "condenser_airflow_verification": "condenser airflow verification",
+    "condenser_obstruction_check": "condenser obstruction check",
+    "condenser_cleanliness_check": "condenser cleanliness check",
+    "blower_speed_affected": "blower speed affected",
+    "power_and_ground_test": "power and ground test",
+    "blower_motor_test": "blower motor test",
+    "noise_present": "noise present",
+    "loss_of_specific_speeds": "loss of specific speeds",
+    "relay_check": "relay check",
+    "control_head_or_resistor_check_if_applicable": "control head or resistor check if applicable",
+    "loaded_or_unloaded_condition": "loaded or unloaded condition",
+    "desired_boost": "desired boost",
+    "actual_boost": "actual boost",
+    "desired_fuel_pressure": "desired fuel pressure",
+    "actual_fuel_pressure": "actual fuel pressure",
+    "fuel_pressure_under_load": "fuel pressure under load",
+    "air_intake_and_charge_air_check": "air intake and charge air check",
+    "restriction_check_if_applicable": "restriction check if applicable",
     "which_corner": "which corner",
     "noise_type": "noise type",
-    "pad_or_rotor_measurement": "pad or rotor measurement",
-    "crank_or_no_crank": "crank/no-crank result",
-    "battery_voltage": "battery voltage",
-    "fault_codes": "fault codes"
+    "pad_or_rotor_measurement": "pad or rotor measurement"
   },
   "evidence_patterns": {
-    "vent_temperature": [
-      "vent temp",
-      "vent temperature",
-      "degrees",
-      "deg",
-      "f at vent",
-      "temperature at vent"
+    "road_test_verification": ["road tested", "road test verified", "verified on road test", "duplicated on road test"],
+    "front_rotor_condition": ["front rotor", "front rotors", "lf rotor", "rf rotor"],
+    "rear_rotor_or_drum_condition": ["rear rotor", "rear rotors", "rear drum", "rear drums", "lr rotor", "rr rotor"],
+    "speed_range_when_felt": ["mph", "at speed", "speed range", "between"],
+    "rotor_runout_or_thickness_measurement_if_performed": ["rotor runout", "rotor thickness", "measured rotor"],
+    "signs_of_heat_damage": ["heat spots", "blueing", "hot spots", "overheated rotor"],
+    "warped_rotor_or_drum_indicators": ["warped rotor", "warped drum", "lateral runout"],
+    "pad_transfer_material_observation": ["pad transfer", "transfer material", "pad imprint"],
+    "misfire_codes": ["misfire code", "misfire codes", "p0300", "p0301", "p0302", "p0303", "p0304", "p0305", "p0306", "p0307", "p0308"],
+    "misfire_counter_data": ["misfire counter", "misfire counters", "misfire count", "misfire counts"],
+    "cylinder_identification": ["cylinder 1", "cylinder 2", "cylinder 3", "cylinder 4", "cylinder 5", "cylinder 6", "cylinder 7", "cylinder 8", "cyl 1", "cyl 2", "cyl 3", "cyl 4", "cyl 5", "cyl 6", "cyl 7", "cyl 8"],
+    "catalyst_damage_risk_note": ["catalyst damage", "catalytic converter damage", "cat damage", "do not drive", "converter damage risk"],
+    "immediate_driveability_risk": ["driveability risk", "immediate risk", "tow recommended", "do not drive", "unsafe to drive"],
+    "long_term_fuel_trim": ["long term fuel trim", "ltft"],
+    "short_term_fuel_trim": ["short term fuel trim", "stft"],
+    "symptom_verification": ["verified concern", "confirmed concern", "duplicated concern", "symptom verified"],
+    "scan_data": ["scan data", "scan tool data", "live data", "pid data", "data stream"],
+    "misfire_data": ["misfire data", "misfire counter", "misfire count"],
+    "hot_or_cold_condition": ["cold start", "hot start", "cold condition", "hot condition", "when hot", "when cold"],
+    "vacuum_leak_check_if_applicable": ["vacuum leak check", "smoke tested", "smoke test", "no vacuum leak"],
+    "fuel_pressure_data_if_available": ["fuel pressure", "fuel psi", "desired fuel pressure", "actual fuel pressure"],
+    "codes_and_freeze_frame": ["freeze frame", "stored code", "pending code", "history code", "dtc"],
+    "root_cause_support": ["root cause", "confirmed cause", "cause verified", "found cause"],
+    "fuel_pressure_actual_vs_desired": ["desired fuel pressure", "actual fuel pressure", "commanded fuel pressure"],
+    "ignition_fuel_mechanical_test_path": ["ignition test", "spark test", "fuel test", "compression test", "mechanical test"],
+    "condition_when_stalling": ["stalls when", "stall occurs", "at idle", "while driving", "on decel", "coming to stop"],
+    "intermittent_failure_notes": ["intermittent", "unable to duplicate", "happens intermittently"],
+    "crank_or_no_crank_verification": ["cranks", "no crank verified", "crank no start verified", "does not crank"],
+    "battery_condition": ["battery tested", "battery condition", "battery state of charge", "battery load test"],
+    "starting_system_test_results": ["starting system test", "starter draw", "starter test", "cranking amps"],
+    "fuel_delivery_verification": ["fuel delivery", "fuel pressure", "injector pulse", "fuel pump command"],
+    "spark_verification": ["spark verified", "has spark", "no spark", "spark test"],
+    "root_cause_identified": ["root cause", "confirmed cause", "cause identified", "found cause"],
+    "air_intake_verification": ["air intake", "intake restriction", "throttle body inspected", "air filter checked"],
+    "sensor_connection_visual_inspection": ["sensor connector", "sensor connection", "connector inspected", "harness inspected"],
+    "visual_inspection_for_disconnected_or_obvious_failures": ["visual inspection", "obvious failure", "disconnected", "unplugged"],
+    "battery_voltage_during_crank": ["battery voltage during crank", "cranking voltage", "voltage while cranking"],
+    "cranking_rpm_if_available": ["cranking rpm", "rpm while cranking"],
+    "battery_test_results": ["battery test", "battery tested", "load test", "cca test"],
+    "starter_command_verification": ["starter command", "command to starter", "start signal", "starter signal"],
+    "voltage_drop_test": ["voltage drop", "voltage drop test"],
+    "battery_terminal_condition": ["battery terminal condition", "terminal corrosion", "battery terminals"],
+    "battery_terminal_tightness": ["terminal tight", "terminal loose", "battery terminal tightness"],
+    "battery_terminal_cleanliness": ["terminal clean", "terminal corrosion", "battery terminal cleanliness"],
+    "fuse_check": ["fuse checked", "fuses checked", "fuse test", "fuse ok"],
+    "starter_relay_or_control_circuit_check": ["starter relay", "control circuit", "relay command"],
+    "security_or_module_inhibit_check_if_applicable": ["security inhibit", "module inhibit", "immobilizer", "anti theft"],
+    "battery_test": ["battery test", "battery tested", "load test"],
+    "fuel_system_evaluation": ["fuel system evaluation", "fuel pressure", "fuel delivery"],
+    "scan_data_review": ["scan data", "scan data review", "live data reviewed"],
+    "diagnostic_findings": ["diagnostic findings", "diag found", "found during diagnosis", "diagnosis found"],
+    "vacuum_leak_check": ["vacuum leak check", "smoke test", "smoke tested"],
+    "cranking_time_observed": ["cranking time", "cranks for", "extended crank observed"],
+    "fuel_pressure_decay_or_prime_check": ["fuel pressure decay", "prime check", "fuel prime"],
+    "cam_crank_sync_data_if_applicable": ["cam crank sync", "crank cam sync", "sync data"],
+    "codes_or_pending_codes": ["pending code", "pending codes", "stored code", "dtc"],
+    "temperature_verification": ["temperature verified", "coolant temp", "engine temp", "overheat verified"],
+    "coolant_level": ["coolant level", "low coolant", "coolant full"],
+    "cooling_system_pressure_test": ["cooling system pressure test", "pressure tested cooling system", "pressure test"],
+    "fan_operation_check": ["fan operation", "cooling fan", "fan turns on", "fan command"],
+    "leak_source_if_present": ["leak source", "coolant leak at", "leaking from"],
+    "electronic_or_viscous_fan_verification": ["electronic fan", "viscous fan", "fan clutch"],
+    "coolant_reservoir_condition": ["coolant reservoir", "overflow bottle", "deg bottle"],
+    "signs_of_previous_repairs": ["previous repair", "prior repair", "recent repair"],
+    "radiator_airflow_restriction_check": ["radiator airflow", "radiator restricted", "debris in radiator"],
+    "cooler_stack_restriction_check": ["cooler stack", "condenser blocked", "cooler restricted"],
+    "transmission_temperature_if_applicable": ["transmission temp", "trans temp"],
+    "transmission_overheating_contribution_if_present": ["transmission overheating", "trans overheat"],
+    "thermostat_or_flow_observation": ["thermostat", "coolant flow", "flow observed"],
+    "vent_temperature": [],
+    "high_side_pressure": [],
+    "low_side_pressure": [],
+    "compressor_operation": ["compressor operation", "compressor engaged", "compressor clutch", "compressor command"],
+    "ambient_temperature": ["ambient temperature", "ambient temp", "outside temp"],
+    "cooling_fan_operation": ["cooling fan operation", "cooling fan", "fan operation"],
+    "fan_command_vs_actual_operation": ["fan command", "commanded fan", "fan actual"],
+    "condenser_airflow_verification": ["condenser airflow", "airflow across condenser"],
+    "condenser_obstruction_check": ["condenser obstruction", "condenser blocked", "debris in condenser"],
+    "condenser_cleanliness_check": ["condenser clean", "condenser dirty", "condenser cleanliness"],
+    "blower_speed_affected": ["blower speed", "speed 1", "speed 2", "speed 3", "speed 4", "only high speed", "only low speed"],
+    "power_and_ground_test": ["power and ground", "power ground", "has power", "has ground"],
+    "blower_motor_test": ["blower motor test", "blower motor tested", "blower motor failed"],
+    "noise_present": ["noise present", "blower noise", "squeal", "rattle"],
+    "loss_of_specific_speeds": ["missing speed", "specific speeds", "speed not working"],
+    "relay_check": ["relay checked", "relay test", "relay ok"],
+    "control_head_or_resistor_check_if_applicable": ["control head", "blower resistor", "resistor checked"],
+    "loaded_or_unloaded_condition": ["loaded condition", "unloaded condition", "under load", "not under load"],
+    "desired_boost": ["desired boost", "commanded boost"],
+    "actual_boost": ["actual boost", "boost actual"],
+    "desired_fuel_pressure": ["desired fuel pressure", "commanded fuel pressure"],
+    "actual_fuel_pressure": ["actual fuel pressure", "fuel pressure actual"],
+    "fuel_pressure_under_load": ["fuel pressure under load", "under load fuel pressure"],
+    "air_intake_and_charge_air_check": ["charge air", "air intake", "boost leak", "cac hose"],
+    "restriction_check_if_applicable": ["restriction check", "air restriction", "exhaust restriction"],
+    "which_corner": ["left front", "right front", "left rear", "right rear", "front left", "front right", "rear left", "rear right", "lf", "rf", "lr", "rr"],
+    "noise_type": ["squeak", "squeal", "grind", "grinding", "clunk", "rattle", "scrape"],
+    "pad_or_rotor_measurement": ["pad measurement", "rotor measurement", "pad thickness", "rotor thickness"]
+  },
+  "evidence_regex_patterns": {
+    "vent_temperature": ["\\b\\d{2,3}\\s*(?:degrees|deg|f)\\b.*\\b(?:vent|a/c|ac)\\b", "\\b(?:vent|a/c|ac)\\b.*\\b\\d{2,3}\\s*(?:degrees|deg|f)\\b"],
+    "ambient_temperature": ["\\bambient\\b.*\\b\\d{2,3}\\s*(?:degrees|deg|f)\\b", "\\boutside\\b.*\\b\\d{2,3}\\s*(?:degrees|deg|f)\\b"],
+    "high_side_pressure": ["\\bhigh\\s*side\\b.*\\b\\d{2,3}\\s*psi\\b"],
+    "low_side_pressure": ["\\blow\\s*side\\b.*\\b\\d{1,3}\\s*psi\\b"],
+    "battery_voltage_during_crank": ["\\bcrank(?:ing)?\\b.*\\b\\d{1,2}\\.\\d\\s*(?:v|volt|volts)\\b", "\\b\\d{1,2}\\.\\d\\s*(?:v|volt|volts)\\b.*\\bcrank(?:ing)?\\b"],
+    "battery_test_results": ["\\b\\d{2,4}\\s*cca\\b", "\\b\\d{1,2}\\.\\d\\s*(?:v|volt|volts)\\b.*\\bbattery\\b"],
+    "battery_test": ["\\b\\d{2,4}\\s*cca\\b", "\\b\\d{1,2}\\.\\d\\s*(?:v|volt|volts)\\b.*\\bbattery\\b"],
+    "long_term_fuel_trim": ["\\b(?:ltft|long\\s*term\\s*fuel\\s*trim)\\b.*[-+]?\\d+(?:\\.\\d+)?\\s*%"],
+    "short_term_fuel_trim": ["\\b(?:stft|short\\s*term\\s*fuel\\s*trim)\\b.*[-+]?\\d+(?:\\.\\d+)?\\s*%"],
+    "scan_data": ["\\b(?:p0|p1|p2|u0|b0|c0)\\d{3}\\b"],
+    "scan_data_review": ["\\b(?:p0|p1|p2|u0|b0|c0)\\d{3}\\b"],
+    "misfire_codes": ["\\bp030[0-8]\\b"],
+    "codes_and_freeze_frame": ["\\b(?:p0|p1|p2|u0|b0|c0)\\d{3}\\b"],
+    "fault_codes": ["\\b(?:p0|p1|p2|u0|b0|c0)\\d{3}\\b"],
+    "codes_or_pending_codes": ["\\b(?:p0|p1|p2|u0|b0|c0)\\d{3}\\b"],
+    "fuel_pressure_actual_vs_desired": ["\\bactual\\s*fuel\\s*pressure\\b.*\\b\\d{1,5}\\s*psi\\b", "\\bdesired\\s*fuel\\s*pressure\\b.*\\b\\d{1,5}\\s*psi\\b"],
+    "desired_fuel_pressure": ["\\bdesired\\s*fuel\\s*pressure\\b.*\\b\\d{1,5}\\s*psi\\b"],
+    "actual_fuel_pressure": ["\\bactual\\s*fuel\\s*pressure\\b.*\\b\\d{1,5}\\s*psi\\b"],
+    "desired_boost": ["\\bdesired\\s*boost\\b.*\\b\\d{1,3}\\s*psi\\b"],
+    "actual_boost": ["\\bactual\\s*boost\\b.*\\b\\d{1,3}\\s*psi\\b"],
+    "temperature_verification": ["\\b\\d{2,3}\\s*(?:degrees|deg|f)\\b.*\\b(?:coolant|engine temp|temperature)\\b", "\\b(?:coolant|engine temp|temperature)\\b.*\\b\\d{2,3}\\s*(?:degrees|deg|f)\\b"],
+    "pad_or_rotor_measurement": ["\\b\\d+(?:\\.\\d+)?\\s*mm\\b", "\\b\\d+\\s*/\\s*32\\b"],
+    "rotor_runout_or_thickness_measurement_if_performed": ["\\b\\d+(?:\\.\\d+)?\\s*(?:mm|in)\\b.*\\brotor\\b", "\\brotor\\b.*\\b\\d+(?:\\.\\d+)?\\s*(?:mm|in)\\b"]
+  },
+  "concern_context": {
+    "courtesy_patterns": [
+      "recommend",
+      "recommended",
+      "suggest",
+      "suggested",
+      "advise",
+      "advised",
+      "refer",
+      "referred",
+      "needs diag",
+      "needs diagnosis",
+      "further diagnosis",
+      "performance test recommended",
+      "diag recommended",
+      "diagnosis recommended"
     ],
-    "visible_leak_check": [
-      "leak check",
-      "leak checked",
-      "no leak",
-      "leaking",
-      "uv dye",
-      "dye",
-      "refrigerant leak",
-      "visible leak"
+    "diagnosed_patterns": [
+      "diagnosed",
+      "diagnosis performed",
+      "diag performed",
+      "tested",
+      "test performed",
+      "performed diagnostic",
+      "performance test performed",
+      "verified concern",
+      "confirmed concern",
+      "found",
+      "confirmed"
     ],
-    "compressor_cycling": [
-      "compressor cycling",
-      "compressor cycles",
-      "compressor engaged",
-      "compressor clutch",
-      "clutch engages",
-      "not cycling"
+    "suppress_patterns": [
+      "customer declined diagnosis",
+      "declined diagnosis",
+      "customer declined diag",
+      "declined diag",
+      "tow-in only",
+      "tow in only",
+      "vehicle not running blocks test",
+      "vehicle not running and blocks test",
+      "unable to test due to no start",
+      "limited inspection requested",
+      "fleet inspection requested",
+      "fleet requested limited inspection"
     ],
-    "which_corner": [
-      "left front",
-      "right front",
-      "left rear",
-      "right rear",
-      "front left",
-      "front right",
-      "rear left",
-      "rear right",
-      "lf",
-      "rf",
-      "lr",
-      "rr",
-      "corner"
-    ],
-    "noise_type": [
-      "squeak",
-      "squeal",
-      "grind",
-      "grinding",
-      "clunk",
-      "rattle",
-      "scrape",
-      "pulsation"
-    ],
-    "pad_or_rotor_measurement": [
-      "pad",
-      "rotor",
-      "mm",
-      "32nd",
-      "thickness",
-      "measurement"
-    ],
-    "crank_or_no_crank": [
-      "cranks",
-      "no crank",
-      "crank no start",
-      "clicks",
-      "does not crank",
-      "starter engages"
-    ],
-    "battery_voltage": [
-      "battery voltage",
-      "volts",
-      "volt",
-      "v",
-      "12.",
-      "cca"
-    ],
-    "fault_codes": [
-      "dtc",
-      "code",
-      "codes",
-      "fault code",
-      "fault codes",
-      "p0",
-      "u0",
-      "b0",
-      "c0"
+    "diagnostic_data_regex": [
+      "\\b(?:p0|p1|p2|u0|b0|c0)\\d{3}\\b",
+      "\\b\\d{1,5}\\s*psi\\b",
+      "\\b\\d{1,3}\\s*(?:degrees|deg|f)\\b",
+      "\\b\\d{1,2}\\.\\d\\s*(?:v|volt|volts)\\b",
+      "\\b(?:ltft|stft|fuel\\s*trim)\\b.*[-+]?\\d+(?:\\.\\d+)?\\s*%",
+      "\\b\\d{2,4}\\s*rpm\\b",
+      "\\bmisfire\\s*(?:counter|count|data)\\b",
+      "\\bdesired\\s+(?:boost|fuel\\s*pressure)\\b",
+      "\\bactual\\s+(?:boost|fuel\\s*pressure)\\b"
     ]
   },
   "concern_completeness": {
-    "severity": "critical",
+    "required_missing_severity": "critical",
+    "expected_missing_severity": "important",
+    "ambiguous_severity": "important",
     "section": "Customer Concern"
   },
   "contradiction_detection": {
@@ -169,7 +646,8 @@
           "ac",
           "a/c",
           "air conditioning",
-          "warm air"
+          "warm air",
+          "not cold"
         ],
         "failure_keywords": [
           "warm",
@@ -193,7 +671,8 @@
           "squeak",
           "squeal",
           "grind",
-          "grinding"
+          "grinding",
+          "pulsation"
         ]
       },
       "starting": {
