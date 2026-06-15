@@ -4,6 +4,7 @@ TekMetric packet generator for DVI-reviewed repair orders.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import base64
@@ -240,6 +241,225 @@ def _sanitize_dvi_text(value):
     return value
 
 
+def _snapshot_text(value):
+    return " ".join(str(value or "").replace("\r", " ").replace("\n", " ").split())
+
+
+def _snapshot_list(value):
+    return value if isinstance(value, list) else []
+
+
+def _photo_refs(item):
+    refs = []
+    for key in ("item_images", "images"):
+        for img in _snapshot_list(item.get(key)):
+            if isinstance(img, dict):
+                url = _snapshot_text(img.get("image_url") or img.get("url"))
+                image_id = _snapshot_text(img.get("image_id") or img.get("id"))
+                if url or image_id:
+                    refs.append({"id": image_id, "url": url})
+            elif isinstance(img, str) and img.strip():
+                refs.append({"id": "", "url": _snapshot_text(img)})
+    for url in _snapshot_list(item.get("item_picture")):
+        if isinstance(url, str) and url.strip():
+            refs.append({"id": "", "url": _snapshot_text(url)})
+    return sorted(refs, key=lambda p: (p.get("id", ""), p.get("url", "")))
+
+
+def normalize_dvi_content(dvi_data):
+    """Return stable DVI content for deterministic packet staleness checks."""
+    if not isinstance(dvi_data, dict):
+        return {"reasons": [], "items": []}
+
+    content = dvi_data.get("content")
+    if not isinstance(content, dict):
+        content = dvi_data
+
+    reasons = []
+    for item in _snapshot_list(content.get("reason_vehicle_is_here")):
+        if isinstance(item, dict):
+            reasons.append({
+                "details": _snapshot_text(item.get("details") or item.get("notes")),
+                "photos": _photo_refs(item),
+            })
+
+    items = []
+    for dvi in _snapshot_list(content.get("dvis")):
+        if not isinstance(dvi, dict):
+            continue
+        dvi_name = _snapshot_text(dvi.get("dvi_name") or dvi.get("name") or "DVI")
+        for category in _snapshot_list(dvi.get("dvi_category")):
+            if not isinstance(category, dict):
+                continue
+            category_name = _snapshot_text(category.get("category_name") or "Uncategorized")
+            for dvi_item in _snapshot_list(category.get("dvi_items")):
+                if not isinstance(dvi_item, dict):
+                    continue
+                items.append({
+                    "dvi": dvi_name,
+                    "category": category_name,
+                    "name": _snapshot_text(dvi_item.get("item_name") or dvi_item.get("name")),
+                    "status": _snapshot_text(dvi_item.get("item_status") or dvi_item.get("status")),
+                    "notes": _snapshot_text(dvi_item.get("item_notes") or dvi_item.get("notes")),
+                    "photos": _photo_refs(dvi_item),
+                })
+
+    for item in _snapshot_list(content.get("items")):
+        if isinstance(item, dict):
+            items.append({
+                "dvi": "flat",
+                "category": _snapshot_text(item.get("category") or "Inspection"),
+                "name": _snapshot_text(item.get("name") or item.get("title")),
+                "status": _snapshot_text(item.get("status")),
+                "notes": _snapshot_text(item.get("notes") or item.get("description")),
+                "photos": _photo_refs(item),
+            })
+
+    reasons = sorted(reasons, key=lambda r: (
+        r.get("details", ""),
+        json.dumps(r.get("photos", []), sort_keys=True),
+    ))
+    items = sorted(items, key=lambda i: (
+        i.get("dvi", ""),
+        i.get("category", ""),
+        i.get("name", ""),
+        i.get("status", ""),
+        i.get("notes", ""),
+        json.dumps(i.get("photos", []), sort_keys=True),
+    ))
+    return {"reasons": reasons, "items": items}
+
+
+def build_dvi_snapshot_metadata(dvi_data):
+    snapshot = normalize_dvi_content(dvi_data)
+    body = json.dumps(snapshot, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    return {
+        "hash": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        "snapshot": snapshot,
+        "captured_at": datetime.utcnow().isoformat(),
+    }
+
+
+def _item_key(item):
+    return " | ".join([
+        _snapshot_text(item.get("dvi")),
+        _snapshot_text(item.get("category")),
+        _snapshot_text(item.get("name")),
+    ])
+
+
+def dvi_snapshot_diff(old_snapshot, new_snapshot):
+    old_snapshot = old_snapshot if isinstance(old_snapshot, dict) else {}
+    new_snapshot = new_snapshot if isinstance(new_snapshot, dict) else {}
+    changes = []
+
+    old_reasons = {
+        _snapshot_text(r.get("details")): r
+        for r in old_snapshot.get("reasons", [])
+        if isinstance(r, dict)
+    }
+    new_reasons = {
+        _snapshot_text(r.get("details")): r
+        for r in new_snapshot.get("reasons", [])
+        if isinstance(r, dict)
+    }
+    for details in sorted(set(new_reasons) - set(old_reasons)):
+        changes.append(f"Concern added: {details or 'blank concern'}")
+    for details in sorted(set(old_reasons) - set(new_reasons)):
+        changes.append(f"Concern removed: {details or 'blank concern'}")
+    for details in sorted(set(old_reasons) & set(new_reasons)):
+        old_photos = old_reasons[details].get("photos", [])
+        new_photos = new_reasons[details].get("photos", [])
+        if old_photos != new_photos:
+            changes.append(
+                f"Concern photos changed: {details or 'blank concern'} "
+                f"({len(old_photos)} -> {len(new_photos)})"
+            )
+
+    old_items = {
+        _item_key(item): item
+        for item in old_snapshot.get("items", [])
+        if isinstance(item, dict)
+    }
+    new_items = {
+        _item_key(item): item
+        for item in new_snapshot.get("items", [])
+        if isinstance(item, dict)
+    }
+    for key in sorted(set(new_items) - set(old_items)):
+        changes.append(f"DVI item added: {key}")
+    for key in sorted(set(old_items) - set(new_items)):
+        changes.append(f"DVI item removed: {key}")
+    for key in sorted(set(old_items) & set(new_items)):
+        old_item = old_items[key]
+        new_item = new_items[key]
+        if old_item.get("status") != new_item.get("status"):
+            changes.append(
+                f"Status changed for {key}: "
+                f"{old_item.get('status') or 'blank'} -> {new_item.get('status') or 'blank'}"
+            )
+        if old_item.get("notes") != new_item.get("notes"):
+            changes.append(f"Notes changed for {key}")
+        old_photos = old_item.get("photos", [])
+        new_photos = new_item.get("photos", [])
+        if old_photos != new_photos:
+            changes.append(f"Photos changed for {key}: {len(old_photos)} -> {len(new_photos)}")
+
+    if len(changes) > 12:
+        extra = len(changes) - 12
+        changes = changes[:12] + [f"{extra} additional DVI changes not shown"]
+    return changes
+
+
+def compare_packet_to_current_dvi(ro, packet_cache=None, current_dvi=None):
+    packet_cache = packet_cache if isinstance(packet_cache, dict) else {}
+    packet = packet_cache.get("packet") if isinstance(packet_cache.get("packet"), dict) else packet_cache
+    stored_hash = packet_cache.get("dvi_snapshot_hash") or packet.get("dvi_snapshot_hash")
+    stored_snapshot = packet_cache.get("dvi_snapshot") or packet.get("dvi_snapshot")
+    checked_at = datetime.utcnow().isoformat()
+
+    if not stored_hash or not stored_snapshot:
+        return {
+            "checked_at": checked_at,
+            "can_check": False,
+            "changed": False,
+            "stored_hash": stored_hash or "",
+            "current_hash": "",
+            "diff": ["No stored DVI snapshot is available for this packet."],
+        }
+
+    try:
+        current = current_dvi if isinstance(current_dvi, dict) else fetch_dvi_from_autoflow(ro)
+        if not isinstance(current, dict):
+            return {
+                "checked_at": checked_at,
+                "can_check": False,
+                "changed": False,
+                "stored_hash": stored_hash,
+                "current_hash": "",
+                "diff": ["Current DVI could not be loaded for comparison."],
+            }
+        current_meta = build_dvi_snapshot_metadata(_sanitize_dvi_text(current))
+        changed = current_meta["hash"] != stored_hash
+        return {
+            "checked_at": checked_at,
+            "can_check": True,
+            "changed": changed,
+            "stored_hash": stored_hash,
+            "current_hash": current_meta["hash"],
+            "diff": dvi_snapshot_diff(stored_snapshot, current_meta["snapshot"]) if changed else [],
+        }
+    except Exception as exc:
+        return {
+            "checked_at": checked_at,
+            "can_check": False,
+            "changed": False,
+            "stored_hash": stored_hash,
+            "current_hash": "",
+            "diff": [f"DVI comparison failed: {exc}"],
+        }
+
+
 def log_packet_cache_hit(ro: str, requested_by: str = "system") -> None:
     _append_api_cost_log({
         "timestamp": datetime.utcnow().isoformat(),
@@ -371,6 +591,7 @@ def generate_packet(ro, force_refresh=False, requested_by="unknown"):
         fresh_review = fetch_dvi_from_autoflow(ro) if force_refresh else None
         review = fresh_review if isinstance(fresh_review, dict) else local_review
         review = _sanitize_dvi_text(review)
+        dvi_snapshot = build_dvi_snapshot_metadata(review)
         dvi_pulled_at = datetime.utcnow().isoformat()
         shop_state = _load_json(SHOP_STATE_PATH) if SHOP_STATE_PATH.exists() else {}
         job = _find_job(shop_state, ro)
@@ -421,6 +642,9 @@ def generate_packet(ro, force_refresh=False, requested_by="unknown"):
         packet["generated_at"] = generated_at
         packet["dvi_pulled_at"] = dvi_pulled_at
         packet["dvi_item_count"] = _dvi_item_count(review)
+        packet["dvi_snapshot_hash"] = dvi_snapshot["hash"]
+        packet["dvi_snapshot"] = dvi_snapshot["snapshot"]
+        packet["dvi_snapshot_captured_at"] = dvi_snapshot["captured_at"]
         output_path = DVI_REVIEWS_DIR / f"packet_{ro}.json"
         output_path.write_text(json.dumps(packet, indent=2, ensure_ascii=False), encoding="utf-8")
         _save_job_history_packet(ro, packet, datetime.utcnow().strftime("%Y%m%d_%H%M%S"))

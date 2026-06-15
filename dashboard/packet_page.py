@@ -24,6 +24,7 @@ from core.cas.tekmetric_packet import (
     _extract_response_text,
     build_packet,
     clean_ai_response_text,
+    compare_packet_to_current_dvi,
     fetch_dvi_from_autoflow,
     format_ts,
     log_packet_cache_hit,
@@ -705,6 +706,17 @@ def _make_cache(ro: str, packet: dict, packet_html: str, previous_cache: dict | 
         "ro": ro,
         "generated_at": generated_at,
         "dvi_pulled_at": dvi_pulled_at,
+        "dvi_snapshot_hash": packet.get("dvi_snapshot_hash", ""),
+        "dvi_snapshot": packet.get("dvi_snapshot", {}),
+        "dvi_snapshot_captured_at": packet.get("dvi_snapshot_captured_at", ""),
+        "packet_stale": {
+            "checked_at": generated_at,
+            "can_check": bool(packet.get("dvi_snapshot_hash")),
+            "changed": False,
+            "stored_hash": packet.get("dvi_snapshot_hash", ""),
+            "current_hash": packet.get("dvi_snapshot_hash", ""),
+            "diff": [],
+        },
         "packet_html": packet_html,
         "packet": packet,
         "generation_log": generation_log,
@@ -716,9 +728,49 @@ def _make_cache(ro: str, packet: dict, packet_html: str, previous_cache: dict | 
     return cache
 
 
+def _stale_changed(cache: dict) -> bool:
+    stale = cache.get("packet_stale") if isinstance(cache, dict) else {}
+    return isinstance(stale, dict) and stale.get("changed") is True
+
+
+def _refresh_packet_stale_state(ro: str, cache: dict) -> dict:
+    if not isinstance(cache, dict) or not cache:
+        return cache
+    result = compare_packet_to_current_dvi(ro, packet_cache=cache)
+    if result.get("can_check"):
+        cache["packet_stale"] = result
+        packet = cache.get("packet")
+        if isinstance(packet, dict):
+            packet["packet_stale"] = result
+        try:
+            _save_cache(ro, cache)
+        except OSError as error:
+            print(f"Packet stale cache save failed for RO {ro}: {error}")
+    return cache
+
+
+def _render_stale_diff(cache: dict) -> str:
+    stale = cache.get("packet_stale") if isinstance(cache, dict) else {}
+    if not isinstance(stale, dict) or not stale.get("changed"):
+        return ""
+    diff_items = stale.get("diff") if isinstance(stale.get("diff"), list) else []
+    diff_html = "".join(f"<li>{_escape(item)}</li>" for item in diff_items[:12])
+    if not diff_html:
+        diff_html = "<li>DVI content changed after packet generation.</li>"
+    return (
+        '<div class="packet-stale-diff">'
+        "<strong>DVI updated since packet - stale packet. Re-review before presenting.</strong>"
+        f"<ul>{diff_html}</ul>"
+        "</div>"
+    )
+
+
 def _render_banner(cache: dict, just_regenerated: bool = False, requested_by: str = "") -> str:
     generated_at = format_ts(cache.get("generated_at"))
     dvi_pulled_at = format_ts(cache.get("dvi_pulled_at"))
+    if _stale_changed(cache):
+        text = f"DVI updated since packet · Original DVI pulled {dvi_pulled_at} · Packet generated {generated_at}"
+        return f'<div class="packet-banner stale"><span>{_escape(text)}</span>{_render_stale_diff(cache)}</div>'
     if just_regenerated:
         text = f"Packet updated · DVI pulled fresh from AutoFlow · {generated_at} · Requested by {requested_by or 'unknown'}"
         return f'<div class="packet-banner fresh">{_escape(text)}</div>'
@@ -868,6 +920,9 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
         .packet-banner {{border-radius:10px;padding:12px 14px;margin:0 0 16px;font-weight:900;display:flex;align-items:center;justify-content:space-between;gap:12px;}}
         .packet-banner.cached {{background:#fef3c7;border:1px solid #f59e0b;color:#78350f;}}
         .packet-banner.fresh {{background:#dcfce7;border:1px solid #16a34a;color:#14532d;}}
+        .packet-banner.stale {{display:block;background:#fee2e2;border:2px solid #dc2626;color:#7f1d1d;}}
+        .packet-stale-diff {{margin-top:10px;font-size:13px;line-height:1.5;font-weight:700;}}
+        .packet-stale-diff ul {{margin:8px 0 0 18px;padding:0;}}
         .section-box {{background:#f3f4f6;border:1px solid #d1d5db;border-radius:10px;padding:18px;margin:20px 0;}}
         h2 {{font-size:16px;letter-spacing:0.08em;margin:0 0 12px;text-transform:uppercase;}}
         .drag-order ol {{margin:0;padding-left:24px;font-size:15px;line-height:1.8;}}
@@ -1185,10 +1240,12 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
 def render_packet_page(ro):
     ro = str(ro).strip()
     cache = _load_cache(ro)
+    if cache:
+        cache = _refresh_packet_stale_state(ro, cache)
 
     if cache and cache.get("packet_html"):
         log_packet_cache_hit(ro)
-        if cache.get("job_block_photo_findings_merged"):
+        if cache.get("job_block_photo_findings_merged") and not _stale_changed(cache):
             return Response(str(cache.get("packet_html")), mimetype="text/html")
         packet = cache.get("packet") if isinstance(cache.get("packet"), dict) else {}
         if packet:

@@ -51,7 +51,13 @@ def _incoming(job: dict) -> bool:
 
 def _packet_built(ro) -> bool:
     ro_text = str(ro or "").strip()
-    return bool(ro_text and (DVI_REVIEWS_DIR / f"packet_{ro_text}.json").exists())
+    return bool(
+        ro_text
+        and (
+            (DVI_REVIEWS_DIR / f"{ro_text}_packet.json").exists()
+            or (DVI_REVIEWS_DIR / f"packet_{ro_text}.json").exists()
+        )
+    )
 
 
 def _load_json(path: Path) -> dict:
@@ -76,10 +82,23 @@ def _dvi_meta(ro) -> dict:
 
 
 def _packet_summary(ro) -> dict:
-    data = _load_json(DVI_REVIEWS_DIR / f"packet_{str(ro or '').strip()}.json")
+    ro_text = str(ro or "").strip()
+    cache = _load_json(DVI_REVIEWS_DIR / f"{ro_text}_packet.json")
+    legacy = _load_json(DVI_REVIEWS_DIR / f"packet_{ro_text}.json")
+    packet = cache.get("packet") if isinstance(cache.get("packet"), dict) else legacy
+    stale = cache.get("packet_stale") if isinstance(cache.get("packet_stale"), dict) else {}
+    drag_order = packet.get("drag_order", []) if isinstance(packet, dict) else []
+    if not isinstance(drag_order, list):
+        drag_order = []
+    stale_diff = stale.get("diff", []) if isinstance(stale.get("diff"), list) else []
+    if stale.get("changed"):
+        drag_order = ["DVI UPDATED SINCE PACKET - RE-REVIEW REQUIRED"] + stale_diff + drag_order
     return {
-        "exists": bool(data),
-        "drag_order": data.get("drag_order", [])[:6] if isinstance(data.get("drag_order"), list) else [],
+        "exists": bool(cache or legacy),
+        "stale": stale.get("changed") is True,
+        "stale_checked_at": stale.get("checked_at", "") if isinstance(stale, dict) else "",
+        "stale_diff": stale_diff[:12],
+        "drag_order": drag_order[:8],
     }
 
 
@@ -104,6 +123,15 @@ def _enriched_jobs() -> list[dict]:
         row["packet_built"] = _packet_built(ro)
         row["dvi_review_meta"] = _dvi_meta(ro)
         row["packet_summary"] = _packet_summary(ro)
+        if row["packet_summary"].get("stale"):
+            row["dvi_packet_stale"] = True
+            row["packet_stale_diff"] = row["packet_summary"].get("stale_diff", [])
+            row["workflow_status"] = "rework returned / re-review"
+            row["waiting_on"] = "Needs Review"
+            row["priority_lane"] = "P2C"
+            row["risk_level"] = "REVIEW"
+            row["next_action"] = "DVI updated since packet - re-review changes before customer presentation"
+            row["hermes_next_action"] = row["next_action"]
         enriched.append(row)
     enriched.sort(key=_sort_key)
     return enriched
