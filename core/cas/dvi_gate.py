@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Optional
 
 from core.cas.dvi_schema import (
-    DVIReview, DVIFlag,
+    DVIReview, DVIFlag, DVIReasonVehicleEntry,
     ReviewStatus, ReviewSource, TriggerEvent,
     FlagSeverity, FlagCategory, PhotoAccessStatus
 )
@@ -56,11 +56,37 @@ CONCERN_RULES = _load_concern_rules()
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _photo_count(item: dict) -> int:
-    return len(item.get("item_images", []))
+    count = 0
+    for key in ("item_images", "images"):
+        value = item.get(key)
+        if isinstance(value, list):
+            count += len(value)
+    value = item.get("item_picture")
+    if isinstance(value, list):
+        count += len(value)
+    return count
+
+
+def _video_count(item: dict) -> int:
+    count = 0
+    for key in ("videos", "item_videos", "video", "item_video"):
+        value = item.get(key)
+        if isinstance(value, list):
+            count += len(value)
+        elif value:
+            count += 1
+    return count
 
 
 def _note_text(item: dict) -> str:
     return (item.get("item_notes") or "").strip()
+
+
+def _substantive_text(value: str) -> bool:
+    text = _normalize_for_match(value)
+    if not text or len(text) < RULES["min_note_length"]:
+        return False
+    return not _is_vague(text)
 
 
 def _item_status(item: dict) -> str:
@@ -162,8 +188,148 @@ def _collect_all_dvi_items(dvi_data: dict) -> list:
     return items
 
 
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else []
+
+
+def _first_text_value(item: dict, *keys: str) -> str:
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return str(value).strip()
+    return ""
+
+
+def _entry_type(value) -> str:
+    text = str(value if value is not None else "").strip()
+    if text == "0":
+        return "Concern"
+    if text == "1":
+        return "Information"
+    return text or "Unknown"
+
+
+def _tagged_item_names(item: dict) -> list[str]:
+    names = []
+    for tagged in _as_list(item.get("tagged_items")):
+        if not isinstance(tagged, dict):
+            continue
+        for key in ("name", "item_name", "label", "title"):
+            value = tagged.get(key)
+            if value:
+                names.append(str(value))
+    for key in ("tagged_item_names", "linked_item_names"):
+        for value in _as_list(item.get(key)):
+            if value:
+                names.append(str(value))
+    return names
+
+
+def _tagged_item_ids(item: dict) -> list[str]:
+    ids = []
+    for tagged in _as_list(item.get("tagged_items")):
+        if not isinstance(tagged, dict):
+            continue
+        for key in ("id", "item_id", "dvi_item_id", "inspection_item_id"):
+            value = tagged.get(key)
+            if value not in (None, ""):
+                ids.append(str(value))
+    for key in (
+        "tagged_item_ids", "linked_item_ids", "dvi_item_ids",
+        "reason_vehicle_is_here_id", "reason_id", "rvh_id"
+    ):
+        value = item.get(key)
+        if isinstance(value, list):
+            ids.extend(str(v) for v in value if v not in (None, ""))
+        elif value not in (None, ""):
+            ids.append(str(value))
+    return ids
+
+
+def _extract_rvh_entries(dvi_data: dict) -> list[DVIReasonVehicleEntry]:
+    content = dvi_data.get("content", {}) if isinstance(dvi_data, dict) else {}
+    entries = []
+    for item in _as_list(content.get("reason_vehicle_is_here")):
+        if not isinstance(item, dict):
+            continue
+        notes = _first_text_value(item, "details", "notes", "text", "description")
+        entries.append(DVIReasonVehicleEntry(
+            entry_type=_entry_type(item.get("type", item.get("entry_type", ""))),
+            notes=notes,
+            photo_count=_photo_count(item),
+            video_count=_video_count(item),
+            linked_item_names=_tagged_item_names(item),
+            linked_item_ids=_tagged_item_ids(item),
+        ))
+    return entries
+
+
 def _normalize_for_match(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").lower()).strip()
+
+
+def _rvh_corpus(rvh_entries: list[DVIReasonVehicleEntry]) -> str:
+    parts = []
+    for entry in rvh_entries or []:
+        parts.extend([
+            entry.notes,
+            " ".join(entry.linked_item_names),
+            " ".join(entry.linked_item_ids),
+        ])
+    return _normalize_for_match(" ".join(parts))
+
+
+def _item_identity_values(item: dict) -> set[str]:
+    values = set()
+    for key in ("item_name", "name", "item_id", "id", "dvi_item_id", "inspection_item_id"):
+        value = item.get(key)
+        if value not in (None, ""):
+            values.add(_normalize_for_match(value))
+    return {value for value in values if value}
+
+
+def _meaningful_words(value: str) -> set[str]:
+    stop = {
+        "and", "the", "for", "with", "from", "this", "that", "when",
+        "item", "check", "inspect", "inspection", "vehicle", "customer"
+    }
+    return {
+        word for word in re.split(r"\W+", _normalize_for_match(value))
+        if len(word) > 3 and word not in stop
+    }
+
+
+def _rvh_entry_covers_item(entry: DVIReasonVehicleEntry, item: dict) -> bool:
+    item_values = _item_identity_values(item)
+    linked_names = {_normalize_for_match(value) for value in entry.linked_item_names}
+    linked_ids = {_normalize_for_match(value) for value in entry.linked_item_ids}
+    if item_values & (linked_names | linked_ids):
+        return True
+
+    item_name = str(item.get("item_name") or item.get("name") or "")
+    item_name_norm = _normalize_for_match(item_name)
+    entry_text = _normalize_for_match(" ".join([entry.notes] + entry.linked_item_names))
+    if item_name_norm and item_name_norm in entry_text:
+        return True
+
+    item_words = _meaningful_words(item_name)
+    entry_words = _meaningful_words(entry_text)
+    return bool(item_words and len(item_words & entry_words) >= min(2, len(item_words)))
+
+
+def _rvh_coverage_for_item(item: dict, rvh_entries: list[DVIReasonVehicleEntry]) -> dict:
+    coverage = {"note": False, "photo": False, "video": False, "entries": []}
+    for entry in rvh_entries or []:
+        if not _rvh_entry_covers_item(entry, item):
+            continue
+        coverage["entries"].append(entry)
+        if _substantive_text(entry.notes):
+            coverage["note"] = True
+        if entry.photo_count > 0:
+            coverage["photo"] = True
+        if entry.video_count > 0:
+            coverage["video"] = True
+    return coverage
 
 
 def _severity_from_config(value: str, default: str = FlagSeverity.CRITICAL) -> str:
@@ -200,7 +366,7 @@ def _canonical_concern_type(concern_type: str) -> str:
     return aliases.get(str(concern_type or ""), str(concern_type or ""))
 
 
-def _item_corpus(all_items: list) -> str:
+def _item_corpus(all_items: list, rvh_entries: list[DVIReasonVehicleEntry] = None) -> str:
     parts = []
     for item in all_items:
         parts.extend([
@@ -208,11 +374,16 @@ def _item_corpus(all_items: list) -> str:
             item.get("item_name", ""),
             _note_text(item),
         ])
+    for entry in rvh_entries or []:
+        parts.extend([
+            entry.notes,
+            " ".join(entry.linked_item_names),
+        ])
     return _normalize_for_match(" ".join(parts))
 
 
-def _evidence_present(evidence_key: str, all_items: list) -> bool:
-    corpus = _item_corpus(all_items)
+def _evidence_present(evidence_key: str, all_items: list, rvh_entries: list[DVIReasonVehicleEntry] = None) -> bool:
+    corpus = _item_corpus(all_items, rvh_entries)
     patterns = CONCERN_RULES.get("evidence_patterns", {}).get(evidence_key, [])
     regex_patterns = CONCERN_RULES.get("evidence_regex_patterns", {}).get(evidence_key, [])
     if evidence_key == "pad_or_rotor_measurement" and _has_measurement(corpus):
@@ -236,8 +407,8 @@ def _evidence_label(evidence_key: str) -> str:
     )
 
 
-def _concern_context_text(concern: str, all_items: list) -> str:
-    return _normalize_for_match(f"{concern} {_item_corpus(all_items)}")
+def _concern_context_text(concern: str, all_items: list, rvh_entries: list[DVIReasonVehicleEntry] = None) -> str:
+    return _normalize_for_match(f"{concern} {_item_corpus(all_items, rvh_entries)}")
 
 
 def _matches_any(text: str, patterns: list) -> bool:
@@ -259,8 +430,8 @@ def _has_real_diagnostic_data(text: str) -> bool:
     return False
 
 
-def _concern_context(concern: str, all_items: list) -> str:
-    text = _concern_context_text(concern, all_items)
+def _concern_context(concern: str, all_items: list, rvh_entries: list[DVIReasonVehicleEntry] = None) -> str:
+    text = _concern_context_text(concern, all_items, rvh_entries)
     settings = CONCERN_RULES.get("concern_context", {})
     if _matches_any(text, settings.get("suppress_patterns", [])):
         return "suppressed"
@@ -290,7 +461,7 @@ def _missing_labels(missing: list) -> list:
     return [_evidence_label(evidence) for evidence in missing]
 
 
-def _check_concern_completeness(dvi_data: dict, all_items: list) -> list:
+def _check_concern_completeness(dvi_data: dict, all_items: list, rvh_entries: list[DVIReasonVehicleEntry] = None) -> list:
     flags = []
     checklists = CONCERN_RULES.get("concern_checklists", {})
     settings = CONCERN_RULES.get("concern_completeness", {})
@@ -306,15 +477,15 @@ def _check_concern_completeness(dvi_data: dict, all_items: list) -> list:
         required, expected = _checklist_tiers(checklists[concern_type])
         required_missing = [
             evidence for evidence in required
-            if not _evidence_present(evidence, all_items)
+            if not _evidence_present(evidence, all_items, rvh_entries)
         ]
         expected_missing = [
             evidence for evidence in expected
-            if not _evidence_present(evidence, all_items)
+            if not _evidence_present(evidence, all_items, rvh_entries)
         ]
         if not required_missing and not expected_missing:
             continue
-        context = _concern_context(concern, all_items)
+        context = _concern_context(concern, all_items, rvh_entries)
         if context == "suppressed":
             continue
 
@@ -327,7 +498,7 @@ def _check_concern_completeness(dvi_data: dict, all_items: list) -> list:
                 section=section,
                 tech_note=concern,
                 photo_count=0,
-                measurement_present=_has_real_diagnostic_data(_concern_context_text(concern, all_items)),
+                measurement_present=_has_real_diagnostic_data(_concern_context_text(concern, all_items, rvh_entries)),
                 message=(
                     f"Diagnosed concern '{concern[:100]}' is missing required evidence: "
                     f"{', '.join(missing_labels)}."
@@ -365,7 +536,7 @@ def _check_concern_completeness(dvi_data: dict, all_items: list) -> list:
                 section=section,
                 tech_note=concern,
                 photo_count=0,
-                measurement_present=_has_real_diagnostic_data(_concern_context_text(concern, all_items)),
+                measurement_present=_has_real_diagnostic_data(_concern_context_text(concern, all_items, rvh_entries)),
                 message=(
                     f"Concern '{concern[:100]}' is missing expected advisory context: "
                     f"{', '.join(missing_labels)}."
@@ -440,10 +611,13 @@ def _check_contradictions(dvi_data: dict, all_items: list) -> list:
 
 # ─── Rule Checks ─────────────────────────────────────────────────────────────
 
-def _check_missing_photo(item: dict, section: str) -> Optional[DVIFlag]:
+def _check_missing_photo(item: dict, section: str, rvh_entries: list[DVIReasonVehicleEntry] = None) -> Optional[DVIFlag]:
     if not _is_concern(item):
         return None
     photos = _photo_count(item)
+    rvh_coverage = _rvh_coverage_for_item(item, rvh_entries or [])
+    if photos == 0 and (rvh_coverage["photo"] or rvh_coverage["video"]):
+        return None
     if photos == 0:
         return DVIFlag(
             severity=FlagSeverity.CRITICAL,
@@ -459,10 +633,13 @@ def _check_missing_photo(item: dict, section: str) -> Optional[DVIFlag]:
     return None
 
 
-def _check_blank_note(item: dict, section: str) -> Optional[DVIFlag]:
+def _check_blank_note(item: dict, section: str, rvh_entries: list[DVIReasonVehicleEntry] = None) -> Optional[DVIFlag]:
     if not _is_concern(item):
         return None
     note = _note_text(item)
+    rvh_coverage = _rvh_coverage_for_item(item, rvh_entries or [])
+    if (not note or len(note) < RULES["min_note_length"]) and rvh_coverage["note"]:
+        return None
     if not note or len(note) < RULES["min_note_length"]:
         return DVIFlag(
             severity=FlagSeverity.CRITICAL,
@@ -625,6 +802,8 @@ def run_dvi_gate(
     # Extract primary complaint
     primary_complaint = _extract_primary_complaint(dvi_data)
     review.primary_complaint = primary_complaint
+    rvh_entries = _extract_rvh_entries(dvi_data)
+    review.rvh_entries = rvh_entries
 
     # Collect all DVI items
     all_items = _collect_all_dvi_items(dvi_data)
@@ -651,8 +830,8 @@ def run_dvi_gate(
         section = item.get("_section", "Unknown")
 
         checks = [
-            _check_blank_note(item, section),
-            _check_missing_photo(item, section),
+            _check_blank_note(item, section, rvh_entries),
+            _check_missing_photo(item, section, rvh_entries),
             _check_vague_note(item, section),
             _check_missing_measurement(item, section),
             _check_leak_detail(item, section),
@@ -679,7 +858,7 @@ def run_dvi_gate(
         ))
 
     # Concern-aware advisory checks feed normal flags into the existing gate.
-    flags.extend(_check_concern_completeness(dvi_data, all_items))
+    flags.extend(_check_concern_completeness(dvi_data, all_items, rvh_entries))
     flags.extend(_check_contradictions(dvi_data, all_items))
 
     review.flags = flags

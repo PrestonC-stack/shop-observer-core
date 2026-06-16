@@ -85,6 +85,19 @@ class DVIFlag:
         )
 
 
+@dataclass
+class DVIReasonVehicleEntry:
+    entry_type: str                  # Concern | Information | raw AutoFlow type
+    notes: str                       # RVH details/notes text
+    photo_count: int = 0
+    video_count: int = 0
+    linked_item_names: List[str] = field(default_factory=list)
+    linked_item_ids: List[str] = field(default_factory=list)
+
+    def to_dict(self):
+        return asdict(self)
+
+
 # ─── DVI Review ──────────────────────────────────────────────────────────────
 
 @dataclass
@@ -102,6 +115,7 @@ class DVIReview:
     photo_access_status: str = PhotoAccessStatus.NOT_TESTED
     primary_complaint: str = ""
     complaint_addressed: bool = False
+    rvh_entries: List[DVIReasonVehicleEntry] = field(default_factory=list)
     flags: List[DVIFlag] = field(default_factory=list)
     rework_required: bool = False
     rework_slip_generated: bool = False
@@ -161,8 +175,14 @@ class DVIReview:
     @classmethod
     def from_dict(cls, data: dict) -> "DVIReview":
         flags = [DVIFlag(**f) for f in data.pop("flags", [])]
+        rvh_entries = [
+            DVIReasonVehicleEntry(**entry)
+            for entry in data.pop("rvh_entries", [])
+            if isinstance(entry, dict)
+        ]
         review = cls(**data)
         review.flags = flags
+        review.rvh_entries = rvh_entries
         return review
 
 
