@@ -15,8 +15,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DVI_REVIEWS_DIR = ROOT / "state" / "dvi_reviews"
-SHOP_STATE_PATH = ROOT / "state" / "shop_state.json"
-BOARD_STATE_PATH = ROOT / "state" / "board_state.json"
+
+try:
+    from board_loader import _load_board_state
+except ImportError:  # pragma: no cover - supports package imports in tests
+    from dashboard.board_loader import _load_board_state
 
 
 STATUS_ALIASES = {
@@ -157,8 +160,15 @@ def _read_json(path: Path) -> dict:
         return {}
 
 
+def _normalize_ro_key(value: object) -> str:
+    text = str(value or "").strip()
+    if text.lower().startswith("ro"):
+        text = text[2:].strip()
+    return text
+
+
 def _ro_id(value: dict) -> str:
-    return str(
+    return _normalize_ro_key(
         value.get("ro")
         or value.get("invoice")
         or value.get("repair_order")
@@ -176,17 +186,18 @@ def _normalize_status(status: object) -> str:
 
 def _load_jobs_by_ro() -> dict[str, dict]:
     jobs: dict[str, dict] = {}
-    for path in (SHOP_STATE_PATH, BOARD_STATE_PATH):
-        data = _read_json(path)
-        for job in data.get("jobs", []) or data.get("active_ros", []) or []:
-            if not isinstance(job, dict):
-                continue
-            ro = _ro_id(job)
-            if not ro:
-                continue
-            existing = jobs.get(ro, {})
-            merged = {**existing, **job}
-            jobs[ro] = merged
+    board_state = _load_board_state()
+    live_jobs = board_state.get("jobs", []) if isinstance(board_state, dict) else []
+    if not isinstance(live_jobs, list):
+        return jobs
+
+    for job in live_jobs:
+        if not isinstance(job, dict):
+            continue
+        ro = _ro_id(job)
+        if not ro:
+            continue
+        jobs[ro] = dict(job)
     return jobs
 
 
@@ -208,7 +219,7 @@ def _load_all_reviews() -> dict[str, dict]:
             continue
         if "review_status" not in review:
             continue
-        ro = _ro_id(review)
+        ro = _ro_id(review) or _normalize_ro_key(path.stem)
         if ro:
             reviews[ro] = review
     return reviews
@@ -356,12 +367,15 @@ def _build_records() -> list[dict]:
     for ro in all_ros:
         job = jobs.get(ro, {})
         review = reviews.get(ro, {})
+        is_live_job = ro in jobs
         workflow_status = (
             job.get("workflow_status")
             or job.get("status")
             or review.get("workflow_status")
             or "unknown"
         )
+        if not is_live_job:
+            workflow_status = "close"
         packet_status = _packet_status(ro)
         flags = review.get("flags") if isinstance(review.get("flags"), list) else []
         gate_ran_at = _gate_ran_at(review)
@@ -373,6 +387,8 @@ def _build_records() -> list[dict]:
             "vehicle": job.get("vehicle") or review.get("vehicle") or "",
             "workflow_status": workflow_status,
             "normalized_status": _normalize_status(workflow_status),
+            "is_live_job": is_live_job,
+            "stale_review": not is_live_job and bool(review),
             "review_status": review_status,
             "review_resolved": _review_resolved(review),
             "advisor_acknowledged": bool(review.get("advisor_acknowledged")),
