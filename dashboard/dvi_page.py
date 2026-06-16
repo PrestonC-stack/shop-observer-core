@@ -69,37 +69,43 @@ LANES = [
         "key": "needs_rework",
         "title": "Needs Rework",
         "subtitle": "DVI failed gate and needs correction before packet/estimate work.",
-        "tone": "red",
-    },
-    {
-        "key": "advisor_qc_review",
-        "title": "Advisor QC Review",
-        "subtitle": "Advisor needs to review documentation before closeout.",
-        "tone": "violet",
-    },
-    {
-        "key": "in_progress",
-        "title": "In Progress",
-        "subtitle": "RO is still moving through production, parts, approval, or QC.",
-        "tone": "blue",
-    },
-    {
-        "key": "tekmetric_ready",
-        "title": "TekMetric Ready",
-        "subtitle": "Packet exists and is current with the latest DVI snapshot.",
-        "tone": "green",
+        "tone": "immediate",
+        "rgb": "255,59,48",
     },
     {
         "key": "ready_for_build_packet",
         "title": "Ready For Build Packet",
         "subtitle": "Clean/pre-work ROs that still need a packet built or refreshed.",
-        "tone": "amber",
+        "tone": "ai",
+        "rgb": "168,85,247",
+    },
+    {
+        "key": "tekmetric_ready",
+        "title": "TekMetric Ready",
+        "subtitle": "Packet exists and is current with the latest DVI snapshot.",
+        "tone": "ready",
+        "rgb": "34,197,94",
+    },
+    {
+        "key": "in_progress",
+        "title": "In Progress",
+        "subtitle": "RO is still moving through production, parts, approval, or QC.",
+        "tone": "progress",
+        "rgb": "59,130,246",
+    },
+    {
+        "key": "advisor_qc_review",
+        "title": "Advisor QC Review",
+        "subtitle": "Advisor needs to review documentation before closeout.",
+        "tone": "customer",
+        "rgb": "255,149,0",
     },
     {
         "key": "done",
         "title": "Recently Done",
         "subtitle": "Ready, finished, or closed ROs from the last 24 hours. Older packets live in History.",
-        "tone": "slate",
+        "tone": "done",
+        "rgb": "34,197,94",
     },
 ]
 
@@ -478,6 +484,11 @@ def _card_actions(record: dict) -> str:
     ro = html.escape(record["ro"])
     actions = []
     if record.get("lane") == "needs_rework":
+        actions.append(
+            f'<form class="inline-form" method="post" action="/dvi/rerun/{ro}">'
+            '<button class="action-link rerun" type="submit">Re-run Gate</button>'
+            '</form>'
+        )
         slip_path = DVI_REVIEWS_DIR / f"rework_slip_{record['ro']}.html"
         if slip_path.exists():
             actions.append(f'<a class="action-link secondary" href="/dvi/slip/{ro}" target="_blank">Print Slip</a>')
@@ -486,33 +497,60 @@ def _card_actions(record: dict) -> str:
     return "\n".join(actions)
 
 
-def _render_card(record: dict) -> str:
+def _headline(record: dict) -> str:
+    lane = record.get("lane")
+    packet = record.get("packet_status", {})
+    if lane == "needs_rework":
+        return "DVI REWORK REQUIRED"
+    if lane == "ready_for_build_packet":
+        return "BUILD PACKET"
+    if lane == "tekmetric_ready":
+        return "TEKMETRIC READY"
+    if lane == "in_progress":
+        return "DVI IN PRODUCTION FLOW"
+    if lane == "advisor_qc_review":
+        return "ADVISOR QC REVIEW"
+    if packet.get("stale"):
+        return "STALE - REGENERATE"
+    return "DONE / ARCHIVED"
+
+
+def _render_card(record: dict, lane: dict, pulse_offset: int | None = None) -> str:
     ro = html.escape(record["ro"])
     packet = record.get("packet_status", {})
-    pulse = ""
-    if record.get("lane") == "needs_rework":
-        pulse = " pulse-red" if record.get("review_status") == "REWORK_REQUIRED" else " pulse-amber"
+    is_stale = packet.get("stale") is True
+    urgent = record.get("lane") == "needs_rework" or is_stale
+    pulse_class = ""
+    beacon = ""
+    if urgent:
+        pulse_class = "p1" if record.get("lane") == "needs_rework" else "stale"
+        pulse_class += f" pulse-offset-{pulse_offset or 0}"
+        beacon = '<span class="beacon-dot"></span>'
 
     gate_value = record.get("gate_ran_at")
     packet_time = packet.get("generated_at")
+    status_text = html.escape(str(record.get("workflow_status") or "unknown"))
+    gate_text = html.escape(_display_ts(gate_value))
+    packet_time_text = html.escape(_time_ago(packet_time))
     return f"""
-      <article class="dvi-card{pulse}">
-        <div class="card-head">
+      <article class="card lane-{lane['tone']} {pulse_class}" style="--rgb:{lane['rgb']}">
+        <div class="card-top">
           <div>
-            <div class="ro">RO {ro}</div>
-            <div class="customer">{html.escape(str(record.get("customer") or "Unknown Customer"))}</div>
-            <div class="vehicle">{html.escape(str(record.get("vehicle") or ""))}</div>
+            <div class="ro">RO{ro}{beacon}</div>
           </div>
           {_status_badge(record.get("review_status"))}
         </div>
-        <div class="meta-grid">
-          <div><span>Workflow</span><strong>{html.escape(str(record.get("workflow_status") or "unknown"))}</strong></div>
-          <div><span>Gate Ran</span><strong title="{html.escape(str(gate_value or ''))}">{html.escape(_display_ts(gate_value))}</strong></div>
-          <div><span>TekMetric Ready</span><strong>{_packet_badge(packet)}</strong></div>
-          <div><span>Packet Time</span><strong>{html.escape(_time_ago(packet_time))}</strong></div>
+        <div class="cust">{html.escape(str(record.get("customer") or "Unknown Customer"))}</div>
+        <div class="veh">{html.escape(str(record.get("vehicle") or ""))}</div>
+        <div class="act" style="color:rgb({lane['rgb']})">{html.escape(_headline(record))}</div>
+        <div class="pill-row">
+          <span class="pill" style="color:rgb({lane['rgb']})">STATUS {status_text}</span>
+          <span class="pill">GATE {gate_text}</span>
+          {_packet_badge(packet)}
+          <span class="time-badge" style="color:rgb({lane['rgb']})">PACKET {packet_time_text}</span>
         </div>
         <div class="card-foot">
-          <span>{int(record.get("flag_count") or 0)} flags · {int(record.get("critical_count") or 0)} critical</span>
+          <span>{int(record.get("flag_count") or 0)} flags / {int(record.get("critical_count") or 0)} critical</span>
           <div class="actions">
             {_card_actions(record)}
           </div>
@@ -522,19 +560,26 @@ def _render_card(record: dict) -> str:
 
 
 def _render_lane(lane: dict, records: list[dict]) -> str:
-    cards = "\n".join(_render_card(record) for record in records)
+    pulse_index = 0
+    rendered_cards = []
+    for record in records:
+        offset = None
+        if record.get("lane") == "needs_rework" or record.get("packet_status", {}).get("stale") is True:
+            offset = pulse_index % 4
+            pulse_index += 1
+        rendered_cards.append(_render_card(record, lane, offset))
+    cards = "\n".join(rendered_cards)
     if not cards:
         cards = '<div class="empty">Nothing here right now.</div>'
     return f"""
-      <section class="lane {lane['tone']}">
-        <div class="lane-head">
-          <div>
-            <h2>{html.escape(lane['title'])}</h2>
-            <p>{html.escape(lane['subtitle'])}</p>
+      <section class="col" style="--rgb:{lane['rgb']}">
+        <div class="col-head {lane['tone']}">
+          <div class="lane-left">
+            <span class="lane-title">{html.escape(lane['title'])}<span class="lane-subtitle">{html.escape(lane['subtitle'])}</span></span>
           </div>
           <span class="count">{len(records)}</span>
         </div>
-        <div class="lane-body">{cards}</div>
+        {cards}
       </section>
     """
 
@@ -557,214 +602,86 @@ def render_dvi_page() -> str:
   <title>DVI Workflow | Callahan Auto</title>
   <style>
     :root {{
-      color-scheme: dark;
-      --bg: #08111f;
-      --panel: #0f172a;
-      --line: #1e293b;
-      --text: #f8fafc;
-      --muted: #94a3b8;
-      --red: #ef4444;
-      --amber: #f59e0b;
-      --green: #22c55e;
-      --blue: #38bdf8;
-      --violet: #a855f7;
-      --slate: #64748b;
+      --bg-main:#050816;--bg-card:#0F172A;--bg-panel:#0B1220;--border-soft:#1E293B;--border-medium:#334155;
+      --text-primary:#FFFFFF;--text-secondary:#CBD5E1;--text-muted:#94A3B8;--text-faint:#64748B;
+      --status-immediate:#FF3B30;--status-immediate-bg:rgba(255,59,48,0.12);--status-immediate-border:rgba(255,59,48,0.75);--status-immediate-glow:rgba(255,59,48,0.48);
+      --status-customer:#FF9500;--status-customer-bg:rgba(255,149,0,0.12);--status-customer-border:rgba(255,149,0,0.70);--status-customer-glow:rgba(255,149,0,0.40);
+      --status-progress:#3B82F6;--status-progress-bg:rgba(59,130,246,0.12);--status-progress-border:rgba(59,130,246,0.65);
+      --status-ready:#22C55E;--status-ready-bg:rgba(34,197,94,0.13);--status-ready-border:rgba(34,197,94,0.68);
+      --status-parts:#00E5FF;--status-parts-bg:rgba(0,229,255,0.12);--status-parts-border:rgba(0,229,255,0.68);
+      --status-ai:#A855F7;--status-ai-bg:rgba(168,85,247,0.14);--status-ai-border:rgba(168,85,247,0.72);--status-ai-glow:rgba(168,85,247,0.45);
+      --p1-bg:#FF2D2D;--p2-bg:#FF7A00;--p3-bg:#FFD400;--p3-text:#111827;
     }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      background:
-        radial-gradient(circle at 20% 0%, rgba(56,189,248,.18), transparent 30%),
-        radial-gradient(circle at 80% 0%, rgba(168,85,247,.14), transparent 28%),
-        var(--bg);
-      color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      -webkit-font-smoothing: antialiased;
-    }}
-    header {{
-      padding: 24px 28px 18px;
-      border-bottom: 1px solid var(--line);
-      background: rgba(8,17,31,.92);
-      position: sticky;
-      top: 0;
-      z-index: 10;
-      backdrop-filter: blur(14px);
-    }}
-    .top-row {{ display:flex; justify-content:space-between; gap:18px; align-items:flex-start; }}
-    h1 {{ margin:0; font-size:28px; letter-spacing:.02em; }}
-    .sub {{ color:var(--muted); margin-top:6px; font-size:13px; }}
-    .nav {{ display:flex; gap:10px; flex-wrap:wrap; }}
-    .nav a {{
-      color:var(--text);
-      text-decoration:none;
-      border:1px solid #334155;
-      background:#0f172a;
-      border-radius:999px;
-      padding:8px 12px;
-      font-size:12px;
-      font-weight:800;
-    }}
-    .stats {{ display:flex; gap:12px; margin-top:18px; flex-wrap:wrap; }}
-    .stat {{
-      min-width:150px;
-      border:1px solid var(--line);
-      background:rgba(15,23,42,.78);
-      border-radius:14px;
-      padding:12px 14px;
-    }}
-    .stat b {{ display:block; font-size:26px; }}
-    .stat span {{ color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; }}
-    main {{ padding:22px 28px 34px; }}
-    .lane {{
-      border:1px solid var(--line);
-      background:rgba(15,23,42,.72);
-      border-radius:20px;
-      margin-bottom:20px;
-      overflow:hidden;
-      box-shadow:0 18px 40px rgba(0,0,0,.24);
-    }}
-    .lane.red {{ border-color:rgba(239,68,68,.45); }}
-    .lane.violet {{ border-color:rgba(168,85,247,.45); }}
-    .lane.blue {{ border-color:rgba(56,189,248,.42); }}
-    .lane.green {{ border-color:rgba(34,197,94,.42); }}
-    .lane.amber {{ border-color:rgba(245,158,11,.42); }}
-    .lane.slate {{ border-color:rgba(100,116,139,.55); }}
-    .lane-head {{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      padding:16px 18px;
-      border-bottom:1px solid rgba(148,163,184,.14);
-      background:linear-gradient(90deg, rgba(255,255,255,.055), rgba(255,255,255,.015));
-    }}
-    .lane-head h2 {{ margin:0; font-size:17px; text-transform:uppercase; letter-spacing:.08em; }}
-    .lane-head p {{ margin:4px 0 0; color:var(--muted); font-size:12px; }}
-    .count {{
-      display:grid;
-      place-items:center;
-      min-width:36px;
-      height:32px;
-      border-radius:12px;
-      background:rgba(255,255,255,.08);
-      font-weight:900;
-    }}
-    .lane-body {{
-      display:grid;
-      grid-template-columns:repeat(auto-fill, minmax(340px, 1fr));
-      gap:14px;
-      padding:16px;
-    }}
-    .dvi-card {{
-      position:relative;
-      border:1px solid rgba(148,163,184,.22);
-      background:linear-gradient(180deg, rgba(30,41,59,.96), rgba(15,23,42,.96));
-      border-radius:18px;
-      padding:16px;
-      overflow:hidden;
-    }}
-    .dvi-card:before {{
-      content:"";
-      position:absolute;
-      left:0;
-      top:0;
-      bottom:0;
-      width:5px;
-      background:var(--blue);
-    }}
-    .lane.red .dvi-card:before {{ background:var(--red); }}
-    .lane.violet .dvi-card:before {{ background:var(--violet); }}
-    .lane.green .dvi-card:before {{ background:var(--green); }}
-    .lane.amber .dvi-card:before {{ background:var(--amber); }}
-    .lane.slate .dvi-card:before {{ background:var(--slate); }}
-    .card-head {{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }}
-    .ro {{ font-size:18px; font-weight:950; letter-spacing:.02em; }}
-    .customer {{ margin-top:5px; font-size:13px; font-weight:800; }}
-    .vehicle {{ color:var(--muted); font-size:12px; margin-top:2px; }}
+    *{{box-sizing:border-box}}html,body{{min-height:100%}}
+    body{{margin:0;background:radial-gradient(circle at top left,#111B3A 0%,#050816 38%,#020617 100%);color:#FFFFFF;font-family:Inter,ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}}
+    header{{height:86px;padding:12px 16px;border-bottom:1px solid var(--border-soft);background:rgba(2,6,23,.72);display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center}}
+    .top-row{{display:flex;justify-content:space-between;gap:18px;align-items:center;min-width:0}}
+    h1{{margin:0;font-size:24px;font-weight:950;letter-spacing:.06em;text-transform:uppercase;color:#fff}}
+    .sub{{color:var(--text-faint);margin-top:4px;font-size:11px;font-weight:700;letter-spacing:.04em}}
+    .nav{{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}}
+    .nav a{{height:28px;border-radius:7px;border:1px solid var(--border-medium);background:rgba(15,23,42,.75);color:var(--text-muted);font-size:10px;font-weight:900;padding:7px 10px;text-decoration:none;display:inline-flex;align-items:center}}
+    .nav a:hover{{background:var(--border-soft);color:#fff}}
+    .stats{{display:flex;gap:8px;grid-column:1/-1;margin-top:-4px}}
+    .stat{{min-width:120px;height:38px;border:1px solid var(--border-soft);background:rgba(15,23,42,.68);border-radius:10px;padding:6px 10px;display:flex;align-items:center;gap:8px;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}}
+    .stat b{{font-size:22px;line-height:1;color:#38BDF8;font-weight:950}}
+    .stat span{{color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.08em;font-weight:900}}
+    main.pipeline{{height:calc(100vh - 86px);display:grid;grid-template-columns:repeat(6,minmax(210px,1fr));gap:10px;padding:10px;overflow:hidden}}
+    .col{{min-width:0;background:rgba(15,23,42,.62);border:1px solid var(--border-soft);border-radius:16px;padding:9px;overflow-y:auto;box-shadow:inset 0 1px 0 rgba(255,255,255,.035)}}
+    .col-head{{min-height:58px;border-radius:12px;padding:10px 10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:flex-start;border:1px solid rgba(var(--rgb),.62);box-shadow:0 0 22px rgba(var(--rgb),.18),inset 0 1px 0 rgba(255,255,255,.08)}}
+    .col-head.immediate{{background:linear-gradient(90deg,rgba(255,59,48,.22),rgba(255,59,48,.06))}}
+    .col-head.ai{{background:linear-gradient(90deg,rgba(168,85,247,.21),rgba(168,85,247,.055))}}
+    .col-head.ready{{background:linear-gradient(90deg,rgba(34,197,94,.18),rgba(34,197,94,.05))}}
+    .col-head.progress{{background:linear-gradient(90deg,rgba(59,130,246,.18),rgba(59,130,246,.05))}}
+    .col-head.customer{{background:linear-gradient(90deg,rgba(255,149,0,.20),rgba(255,149,0,.055))}}
+    .col-head.done{{background:linear-gradient(90deg,rgba(34,197,94,.10),rgba(100,116,139,.045));opacity:.78}}
+    .lane-title{{font-size:12px;font-weight:950;line-height:1.1;text-transform:uppercase;letter-spacing:.05em;color:#fff}}
+    .lane-subtitle{{display:block;margin-top:4px;font-size:9px;font-weight:800;letter-spacing:.04em;line-height:1.18;color:rgba(203,213,225,.64);text-transform:none}}
+    .count{{display:grid;place-items:center;min-width:28px;height:26px;border-radius:999px;background:rgba(255,255,255,.11);font-size:12px;font-weight:950;color:#fff}}
+    .card{{position:relative;overflow:hidden;background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(7,12,24,.96));border:1px solid rgba(var(--rgb),.70);border-radius:14px;padding:10px 10px 11px 13px;margin-bottom:9px;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 10px 22px rgba(0,0,0,.24)}}
+    .card:before{{content:"";position:absolute;inset:0;pointer-events:none;opacity:.14;background:radial-gradient(circle at 10% 0%,rgba(var(--rgb),.42),transparent 44%),linear-gradient(90deg,rgba(var(--rgb),.55) 0%,transparent 42%)}}
+    .card:after{{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;border-radius:14px 0 0 14px;background:rgb(var(--rgb));box-shadow:0 0 20px rgba(var(--rgb),.60)}}
+    .card>*{{position:relative;z-index:1}}
+    .card-top{{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}}
+    .ro{{font-size:16px;font-weight:1000;line-height:1;color:#fff;letter-spacing:.02em}}
+    .cust{{font-size:11px;font-weight:900;color:#E2E8F0;margin-top:8px;line-height:1.2;text-transform:uppercase}}
+    .veh{{font-size:10px;font-weight:700;color:var(--text-muted);margin-top:3px;line-height:1.2}}
+    .act{{margin-top:10px;font-size:15px;font-weight:1000;letter-spacing:.06em;line-height:1.08;text-transform:uppercase;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;min-height:32px;overflow:hidden}}
+    .pill-row{{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}}
     .badge, .packet {{
       display:inline-flex;
       align-items:center;
       border-radius:999px;
-      padding:5px 8px;
-      font-size:10px;
+      padding:4px 6px;
+      font-size:8px;
       font-weight:900;
       text-transform:uppercase;
-      letter-spacing:.06em;
+      letter-spacing:.045em;
       white-space:nowrap;
     }}
     .badge.pass, .packet-ready {{ color:#bbf7d0; border:1px solid rgba(34,197,94,.55); background:rgba(34,197,94,.13); }}
     .badge.review, .packet-unknown {{ color:#fde68a; border:1px solid rgba(245,158,11,.55); background:rgba(245,158,11,.12); }}
     .badge.rework, .packet-stale {{ color:#fecaca; border:1px solid rgba(239,68,68,.6); background:rgba(239,68,68,.14); }}
     .badge.none, .packet-missing {{ color:#cbd5e1; border:1px solid rgba(148,163,184,.35); background:rgba(148,163,184,.10); }}
-    .meta-grid {{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:10px;
-      margin-top:15px;
-    }}
-    .meta-grid div {{
-      border:1px solid rgba(148,163,184,.14);
-      background:rgba(2,6,23,.28);
-      border-radius:12px;
-      padding:10px;
-      min-height:58px;
-    }}
-    .meta-grid span {{
-      display:block;
-      color:var(--muted);
-      font-size:10px;
-      text-transform:uppercase;
-      letter-spacing:.08em;
-      margin-bottom:5px;
-    }}
-    .meta-grid strong {{ font-size:12px; overflow-wrap:anywhere; }}
-    .card-foot {{
-      display:flex;
-      justify-content:space-between;
-      gap:12px;
-      align-items:center;
-      margin-top:14px;
-      color:var(--muted);
-      font-size:12px;
-    }}
-    .actions {{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }}
-    .action-link {{
-      color:#dbeafe;
-      text-decoration:none;
-      border:1px solid rgba(59,130,246,.45);
-      background:rgba(59,130,246,.14);
-      border-radius:999px;
-      padding:6px 9px;
-      font-size:11px;
-      font-weight:800;
-    }}
-    .action-link.secondary {{ color:#c4b5fd; border-color:rgba(168,85,247,.38); background:rgba(168,85,247,.12); }}
-    .empty {{
-      color:var(--muted);
-      border:1px dashed rgba(148,163,184,.24);
-      border-radius:16px;
-      padding:22px;
-      text-align:center;
-      font-size:13px;
-    }}
-    @keyframes pulseRed {{
-      0%,100% {{ box-shadow:0 0 0 1px rgba(239,68,68,.65), 0 0 14px rgba(239,68,68,.30); }}
-      50% {{ box-shadow:0 0 0 3px rgba(239,68,68,.9), 0 0 24px rgba(239,68,68,.55); }}
-    }}
-    @keyframes pulseAmber {{
-      0%,100% {{ box-shadow:0 0 0 1px rgba(245,158,11,.55), 0 0 12px rgba(245,158,11,.25); }}
-      50% {{ box-shadow:0 0 0 3px rgba(245,158,11,.85), 0 0 22px rgba(245,158,11,.45); }}
-    }}
-    .pulse-red {{ animation:pulseRed 2.4s ease-in-out infinite; }}
-    .pulse-amber {{ animation:pulseAmber 2.4s ease-in-out infinite; }}
-    @media (prefers-reduced-motion: reduce) {{
-      .pulse-red, .pulse-amber {{ animation:none !important; }}
-    }}
-    @media (max-width: 760px) {{
-      header, main {{ padding-left:14px; padding-right:14px; }}
-      .top-row, .card-foot {{ flex-direction:column; align-items:flex-start; }}
-      .lane-body {{ grid-template-columns:1fr; }}
-      .meta-grid {{ grid-template-columns:1fr; }}
-    }}
+    .pill,.time-badge{{display:inline-flex;align-items:center;border-radius:999px;border:1px solid rgba(148,163,184,.20);background:rgba(2,6,23,.34);padding:4px 6px;font-size:8px;font-weight:950;letter-spacing:.045em;text-transform:uppercase;color:#CBD5E1;max-width:100%;overflow:hidden;text-overflow:ellipsis}}
+    .card-foot{{display:flex;flex-direction:column;gap:8px;margin-top:10px;color:var(--text-faint);font-size:10px;font-weight:800}}
+    .actions{{display:flex;gap:5px;flex-wrap:wrap}}
+    .inline-form{{display:inline;margin:0}}
+    .action-link{{border:1px solid rgba(var(--rgb),.48);background:linear-gradient(180deg,rgba(15,23,42,.94),rgba(30,41,59,.76));box-shadow:inset 0 1px 0 rgba(255,255,255,.10);color:#fff;border-radius:7px;padding:5px 7px;font-size:9px;font-weight:950;text-decoration:none;cursor:pointer;font-family:inherit}}
+    .action-link.secondary{{border-color:rgba(168,85,247,.38);color:#d8b4fe}}
+    .action-link.rerun{{border-color:rgba(255,59,48,.62);color:#fecaca}}
+    .empty{{color:var(--text-faint);border:1px dashed rgba(148,163,184,.20);border-radius:14px;padding:18px 10px;text-align:center;font-size:11px;font-weight:800;background:rgba(2,6,23,.22)}}
+    .card.p1,.card.stale{{animation:cardBeaconPulse 2.8s ease-in-out infinite}}
+    .card.p1:before,.card.stale:before{{opacity:.20;background:radial-gradient(circle at 16% 8%,rgba(255,59,48,.36),transparent 44%),linear-gradient(90deg,rgba(255,59,48,.70) 0%,transparent 45%)}}
+    .card.p1.pulse-offset-0,.card.stale.pulse-offset-0{{animation-delay:0s}}
+    .card.p1.pulse-offset-1,.card.stale.pulse-offset-1{{animation-delay:.65s}}
+    .card.p1.pulse-offset-2,.card.stale.pulse-offset-2{{animation-delay:1.3s}}
+    .card.p1.pulse-offset-3,.card.stale.pulse-offset-3{{animation-delay:1.95s}}
+    @keyframes cardBeaconPulse{{0%,100%{{box-shadow:0 0 0 1px rgba(255,59,48,.75),0 0 14px rgba(255,59,48,.45),inset 0 0 12px rgba(255,59,48,.10)}}45%{{box-shadow:0 0 0 3px rgba(255,59,48,.95),0 0 22px rgba(255,59,48,.70),inset 0 0 20px rgba(255,59,48,.18)}}}}
+    .beacon-dot{{width:9px;height:9px;border-radius:999px;background:#FF3B30;box-shadow:0 0 10px rgba(255,59,48,.85);animation:beaconDotPulse 1.4s ease-in-out infinite;display:inline-block;margin-left:8px;vertical-align:middle}}
+    @keyframes beaconDotPulse{{0%,100%{{transform:scale(.85);opacity:.65}}50%{{transform:scale(1.35);opacity:1}}}}
+    @media (prefers-reduced-motion: reduce){{.card.p1,.card.stale,.beacon-dot{{animation:none!important}}}}
+    @media (max-width: 1300px){{main.pipeline{{overflow-x:auto;grid-template-columns:repeat(6,minmax(230px,250px))}}}}
+    @media (max-width: 760px){{body{{overflow:auto}}header{{height:auto;display:block}}.top-row{{display:block}}.nav{{justify-content:flex-start;margin-top:10px}}.stats{{flex-wrap:wrap;margin-top:10px}}main.pipeline{{height:auto;display:block;overflow:visible}}.col{{margin:10px 0;max-height:none}}}}
   </style>
 </head>
 <body>
@@ -787,7 +704,7 @@ def render_dvi_page() -> str:
       <div class="stat"><b>{duplicate_count}</b><span>Duplicate Listings</span></div>
     </div>
   </header>
-  <main>
+  <main class="pipeline">
     {lane_html}
   </main>
 </body>

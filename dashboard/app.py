@@ -441,6 +441,19 @@ from pathlib import Path as _Path
 def dvi_workflow():
     return render_dvi_page()
 
+@app.route("/dvi/rerun/<ro>", methods=["POST"])
+def dvi_rerun_gate(ro):
+    import threading
+    from flask import redirect
+    from core.cas.dvi_trigger import _run_gate_for_ro
+
+    threading.Thread(
+        target=_run_gate_for_ro,
+        args=(str(ro), "manual_refresh"),
+        daemon=True,
+    ).start()
+    return redirect("/dvi")
+
 @app.route("/dvi/packet/<ro>")
 def dvi_packet(ro):
     from dashboard.packet_page import render_packet_page
