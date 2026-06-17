@@ -657,14 +657,14 @@ def _action_button(record: dict) -> str:
             '</form>'
         )
     if lane == "ready_for_build_packet":
-        return f'<a class="do-btn purple" href="/dvi/packet/{ro}">Build Packet</a>'
+        return f'<a class="do-btn purple" href="/dvi/packet/{ro}" target="_blank" rel="noopener">Build Packet</a>'
     if lane == "tekmetric_ready" or packet.get("exists"):
-        return f'<a class="do-btn green" href="{_card_href(record)}">Open Packet</a>'
+        return f'<a class="do-btn green" href="{_card_href(record)}" target="_blank" rel="noopener">Open Packet</a>'
     if lane == "advisor_qc_review":
-        return f'<a class="do-btn orange" href="{_card_href(record)}">Review</a>'
+        return f'<a class="do-btn orange" href="{_card_href(record)}" target="_blank" rel="noopener">Review</a>'
     if lane == "done":
-        return '<a class="do-btn green" href="/dvi/history">Open History</a>'
-    return f'<a class="do-btn blue" href="{_card_href(record)}">Open</a>'
+        return '<a class="do-btn green" href="/dvi/history" target="_blank" rel="noopener">Open History</a>'
+    return f'<a class="do-btn blue" href="{_card_href(record)}" target="_blank" rel="noopener">Open</a>'
 
 
 def _stage_meta(record: dict) -> tuple[str, str]:
@@ -672,18 +672,18 @@ def _stage_meta(record: dict) -> tuple[str, str]:
     packet = record.get("packet_status", {})
     status = _normalize_status(record.get("workflow_status"))
     if _is_rework(record):
-        return "Tech", f"{record.get('flag_count', 0)} failed checks"
+        return "Owner: Tech", f"{record.get('flag_count', 0)} failed checks"
     if lane == "ready_for_build_packet":
-        return "Advisor", "DVI clean"
+        return "Owner: Advisor", "Inspection: clean"
     if lane == "tekmetric_ready":
-        return "Advisor", "Packet current" if packet.get("current") else str(packet.get("state") or "Packet ready")
+        return "Owner: Advisor", "Packet current" if packet.get("current") else str(packet.get("state") or "Packet ready")
     if lane == "advisor_qc_review":
-        return "Advisor", "Tech QC done"
+        return "Owner: Advisor", "Tech QC done"
     if status in {"waiting parts", "ordering parts", "parts"}:
-        return "Parts", status.title()
+        return "Owner: Parts", f"Stage: {status}"
     if lane == "done":
-        return "History", _hours_label(record)
-    return "Tech", status.title() if status else "In progress"
+        return "Owner: History", _hours_label(record)
+    return "Owner: Tech", f"Stage: {status}" if status else "Stage: in progress"
 
 
 def _awaiting_followup_label(record: dict) -> str:
@@ -801,7 +801,9 @@ def _render_meta(record: dict, include_gate: bool = True) -> str:
     if _is_stale_24(record):
         parts.insert(1, f'<span class="pill stale-pill">{html.escape(_hours_label(record))}</span>')
     if include_gate:
-        parts.append(f'<span class="pill muted">Gate {html.escape(_time_ago(record.get("gate_ran_at")))}</span>')
+        gate_time = _time_ago(record.get("gate_ran_at"))
+        gate_label = "Gate: not run" if gate_time == "unknown" else f"Gate ran {gate_time}"
+        parts.append(f'<span class="pill muted">{html.escape(gate_label)}</span>')
     parts.append(_action_button(record))
     return '<div class="meta">' + "".join(parts) + "</div>"
 
@@ -815,7 +817,7 @@ def _render_do_now(records: list[dict]) -> str:
         href = html.escape(_card_href(record))
         vehicle = f"{record.get('customer') or 'Unknown'} · {record.get('vehicle') or ''}".strip(" ·")
         cards.append(f"""
-        <article class="screamer po{index % 3}" onclick="if(!event.target.closest('a,button,form')) window.location='{href}'">
+        <article class="screamer po{index % 3}" onclick="if(!event.target.closest('a,button,form')) window.open('{href}','_blank','noopener')">
           <div class="ro-line"><span class="ro">RO {ro}</span><span class="beacon"></span><span class="veh">{html.escape(vehicle)}</span></div>
           <div class="directive">{html.escape(_directive(record))}</div>
           {_render_meta(record)}
@@ -832,7 +834,7 @@ def _render_stage_card(record: dict, rgb: str) -> str:
     vehicle = f"{record.get('customer') or 'Unknown'} · {record.get('vehicle') or ''}".strip(" ·")
     opacity = "opacity:.72;" if record.get("lane") == "done" else ""
     return f"""
-    <article class="row" style="--rgb:{rgb};{opacity}" onclick="if(!event.target.closest('a,button,form')) window.location='{href}'">
+    <article class="row" style="--rgb:{rgb};{opacity}" onclick="if(!event.target.closest('a,button,form')) window.open('{href}','_blank','noopener')">
       <div class="ro-line"><span class="ro">RO {ro}</span><span class="veh">{html.escape(vehicle)}</span></div>
       <div class="directive">{html.escape(_directive(record))}</div>
       {_render_meta(record)}
@@ -939,8 +941,8 @@ def render_dvi_page() -> str:
     .veh{{font-size:12px;color:var(--mut);font-weight:600}}
     .directive{{font-weight:1000;letter-spacing:.02em;line-height:1.15;text-transform:uppercase}}
     .meta{{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px}}
-    .pill{{height:22px;border-radius:999px;padding:0 9px;display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.03em;border:1px solid currentColor}}
-    .pill.muted{{color:#94A3B8}}.pill.stale-pill{{color:#FF6B6B}}
+    .pill{{height:24px;border-radius:999px;padding:0 10px;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.025em;border:1px solid currentColor}}
+    .pill.muted{{color:#CBD5E1;background:rgba(148,163,184,.07);border-color:rgba(203,213,225,.38)}}.pill.stale-pill{{color:#FF6B6B}}
     .pri{{height:22px;border-radius:7px;padding:0 8px;font-size:11px;font-weight:900;display:inline-flex;align-items:center;color:#fff}}
     .pri.P1{{background:#FF2D2D}}.pri.P2{{background:#FF7A00}}.pri.P3{{background:#FFD400;color:#111}}.pri.P4{{background:#22C55E;color:#052e16}}
     .do-btn{{margin-left:auto;min-height:30px;border-radius:8px;font-size:11px;font-weight:900;padding:7px 13px;cursor:pointer;text-decoration:none;font-family:inherit;display:inline-flex;align-items:center}}
