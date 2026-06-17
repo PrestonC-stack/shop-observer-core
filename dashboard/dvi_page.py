@@ -677,9 +677,8 @@ def _status_age_hours(record: dict) -> float | None:
     try:
         if raw_hours not in (None, ""):
             hours = max(0.0, float(raw_hours))
-            if hours >= 900:
-                return None
-            return hours
+            if hours < 900:
+                return hours
     except Exception:
         pass
     for key in ("status_updated_at", "updated_at", "generated_at"):
@@ -699,8 +698,6 @@ def _is_stale_24(record: dict) -> bool:
     hours = _status_age_hours(record)
     if hours is None:
         return False
-    if record.get("stale") is True:
-        return True
     return hours >= 24
 
 
@@ -727,6 +724,17 @@ def _hours_label(record: dict) -> str:
     if hours >= 1:
         return f"{int(hours)}h"
     return f"{int(hours * 60)}m"
+
+
+def _movement_age_label(record: dict) -> str:
+    hours = _status_age_hours(record)
+    if hours is None:
+        return "TIME IN STAGE UNKNOWN"
+    if hours >= 24:
+        return f"NO MOVEMENT IN {int(hours // 24)}D {int(hours % 24)}H"
+    if hours >= 1:
+        return f"NO MOVEMENT IN {int(hours)}H"
+    return f"NO MOVEMENT IN {max(1, int(hours * 60))}M"
 
 
 def _is_rework(record: dict) -> bool:
@@ -785,6 +793,7 @@ def _directive(record: dict) -> str:
     if lane == "advisor_qc_review":
         return "REVIEW & FINALIZE"
     if lane == "in_progress":
+        movement = _movement_age_label(record)
         if _timing_unknown(record):
             if status in {"waiting parts", "ordering parts", "parts"}:
                 return "PARTS HOLD - TIME IN STAGE UNKNOWN"
@@ -794,18 +803,20 @@ def _directive(record: dict) -> str:
                 return "WAITING ON CUSTOMER - TIME IN STAGE UNKNOWN"
             if status in {"testing", "dvi updates", "inspecting"}:
                 return "DVI FLOW - TIME IN STAGE UNKNOWN"
+            if status == "servicing":
+                return "CHECK ON THIS RO - TIME IN STAGE UNKNOWN"
             return f"{status.upper() if status else 'IN PROGRESS'} - TIME IN STAGE UNKNOWN"
         if status in {"waiting parts", "ordering parts", "parts"}:
-            return "PARTS NOT IN YET - HOLD"
+            return f"PARTS HOLD - {movement}"
         if status in {"awaiting tech", "ready for tech"}:
-            return "WAITING ON TECH"
+            return f"WAITING ON TECH - {movement}"
         if status == "waiting approval":
-            return "WAITING ON CUSTOMER"
+            return f"WAITING ON CUSTOMER - {movement}"
         if status in {"testing", "dvi updates", "inspecting"}:
-            return "WAITING ON TECH - DVI FLOW"
+            return f"DVI FLOW - {movement}"
         if status == "servicing":
-            return "WATCH PRODUCTION"
-        return f"{status.upper() if status else 'IN PROGRESS'} - MONITOR PRODUCTION"
+            return f"CHECK ON THIS RO - {movement}"
+        return f"{status.upper() if status else 'IN PROGRESS'} - {movement}"
     if lane == "done":
         return "CLOSED - OPEN HISTORY IF NEEDED"
     return _fallback_directive(record, "REVIEW JOB").upper()
