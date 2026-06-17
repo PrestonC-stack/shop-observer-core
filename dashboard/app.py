@@ -439,7 +439,7 @@ from pathlib import Path as _Path
 
 @app.route("/dvi")
 def dvi_workflow():
-    return render_dvi_page()
+    return render_dvi_page(demo=request.args.get("demo") in {"1", "true", "yes"})
 
 @app.route("/dvi/rerun/<ro>", methods=["POST"])
 def dvi_rerun_gate(ro):

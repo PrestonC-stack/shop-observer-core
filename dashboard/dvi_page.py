@@ -459,6 +459,146 @@ def _build_records() -> list[dict]:
     return records
 
 
+def _demo_dt(hours_ago: float) -> str:
+    return (_now_utc() - timedelta(hours=hours_ago)).isoformat()
+
+
+def _demo_record(
+    ro: str,
+    customer: str,
+    vehicle: str,
+    workflow_status: str,
+    review_status: str,
+    priority: str,
+    technician: str,
+    hours_ago: float,
+    packet_current: bool = False,
+    packet_exists: bool = False,
+    flags: list[dict] | None = None,
+    next_action: str = "",
+    hours_in_status: float | None = None,
+) -> dict:
+    flags = flags or []
+    packet_status = {
+        "exists": packet_exists or packet_current,
+        "current": packet_current,
+        "stale": False,
+        "state": "current" if packet_current else "no packet yet",
+        "generated_at": _demo_dt(hours_ago / 2),
+        "source": "demo",
+    }
+    record = {
+        "ro": ro,
+        "customer": customer,
+        "vehicle": vehicle,
+        "workflow_status": workflow_status,
+        "normalized_status": _normalize_status(workflow_status),
+        "is_live_job": True,
+        "stale_review": False,
+        "review_status": review_status,
+        "review_resolved": False,
+        "advisor_acknowledged": False,
+        "gate_ran_at": _demo_dt(max(0.2, hours_ago - 0.2)),
+        "flags": flags,
+        "flag_count": len(flags),
+        "critical_count": len(flags),
+        "packet_status": packet_status,
+        "status_updated_at": _demo_dt(hours_ago),
+        "updated_at": "",
+        "generated_at": _demo_dt(hours_ago),
+        "priority_lane": priority,
+        "risk_level": "CRITICAL" if priority == "P1" else "",
+        "waiting_on": "Demo",
+        "technician": technician,
+        "hermes_next_action": next_action,
+        "next_action": next_action,
+        "hours_in_status": hours_in_status,
+        "stale": False,
+        "demo_mode": True,
+    }
+    record["lane"] = assign_dvi_lane(record)
+    return record
+
+
+def _demo_records() -> list[dict]:
+    return [
+        _demo_record(
+            "D9001", "Jordan Bell", "2020 Ford F-250 Powerstroke", "servicing",
+            "REWORK_REQUIRED", "P1", "Alex",
+            2.4,
+            flags=[{"message": "Missing fuel pressure reading after hard-start concern."}],
+        ),
+        _demo_record(
+            "D9002", "Maria Reyes", "2018 Honda Odyssey", "waiting parts",
+            "REWORK_REQUIRED", "P1", "Sam",
+            4.1,
+            flags=[{"message": "Brake noise concern needs which-corner note and pad measurement."}],
+        ),
+        _demo_record(
+            "D9003", "Evan Brooks", "2017 Jeep Grand Cherokee", "advisor qc review",
+            "REWORK_REQUIRED", "P2", "Luis",
+            1.3,
+            flags=[{"message": "Warning light concern needs code photo attached."}],
+        ),
+        _demo_record(
+            "D9004", "Nina Patel", "2019 Chevy Silverado 1500", "servicing",
+            "PASS", "P3", "Marco",
+            27.0,
+            next_action="WATCH PRODUCTION",
+            hours_in_status=27,
+        ),
+        _demo_record(
+            "D9005", "Theo Martin", "2021 Toyota Tacoma", "unknown",
+            "PASS", "P3", "Demo Tech",
+            0.8,
+        ),
+        _demo_record(
+            "D9006", "Paige Stone", "2016 Dodge Durango", "unknown",
+            "PASS", "P3", "Demo Tech",
+            1.0,
+            packet_current=True,
+            packet_exists=True,
+        ),
+        _demo_record(
+            "D9007", "Chris Nolan", "2022 Ford Ranger", "servicing",
+            "PASS", "P3", "Riley",
+            3.2,
+            next_action="Inspecting driveline vibration",
+        ),
+        _demo_record(
+            "D9008", "Lena Ortiz", "2015 Toyota 4Runner", "waiting parts",
+            "PASS", "P3", "Parts",
+            5.6,
+            next_action="Waiting on lower control arm ETA",
+        ),
+        _demo_record(
+            "D9009", "Calvin Price", "2020 Honda CR-V", "awaiting tech",
+            "NO_REVIEW", "P4", "",
+            0.6,
+            next_action="Assign next available tech",
+        ),
+        _demo_record(
+            "D9010", "Avery Kim", "2019 Subaru Outback", "advisor qc review",
+            "PASS", "P3", "Morgan",
+            0.9,
+        ),
+        _demo_record(
+            "D9011", "Sofia Grant", "2018 Toyota Camry", "finished",
+            "PASS", "P4", "Jamie",
+            3.0,
+            packet_current=True,
+            packet_exists=True,
+        ),
+        _demo_record(
+            "D9012", "Marcus Hill", "2021 Chevy Tahoe", "ready",
+            "PASS", "P4", "Taylor",
+            6.5,
+            packet_current=True,
+            packet_exists=True,
+        ),
+    ]
+
+
 def _lane_records(records: list[dict]) -> dict[str, list[dict]]:
     lanes = {lane["key"]: [] for lane in LANES}
     seen: set[str] = set()
@@ -647,6 +787,8 @@ def _card_href(record: dict) -> str:
 
 
 def _action_button(record: dict) -> str:
+    if record.get("demo_mode"):
+        return '<span class="do-btn demo-inert">Demo only</span>'
     ro = html.escape(str(record.get("ro") or ""))
     lane = record.get("lane")
     packet = record.get("packet_status", {})
@@ -816,8 +958,9 @@ def _render_do_now(records: list[dict]) -> str:
         ro = html.escape(str(record.get("ro") or ""))
         href = html.escape(_card_href(record))
         vehicle = f"{record.get('customer') or 'Unknown'} · {record.get('vehicle') or ''}".strip(" ·")
+        click = "" if record.get("demo_mode") else f" onclick=\"if(!event.target.closest('a,button,form')) window.open('{href}','_blank','noopener')\""
         cards.append(f"""
-        <article class="screamer po{index % 3}" onclick="if(!event.target.closest('a,button,form')) window.open('{href}','_blank','noopener')">
+        <article class="screamer po{index % 3}"{click}>
           <div class="ro-line"><span class="ro">RO {ro}</span><span class="beacon"></span><span class="veh">{html.escape(vehicle)}</span></div>
           <div class="directive">{html.escape(_directive(record))}</div>
           {_render_meta(record)}
@@ -833,8 +976,9 @@ def _render_stage_card(record: dict, rgb: str) -> str:
     href = html.escape(_card_href(record))
     vehicle = f"{record.get('customer') or 'Unknown'} · {record.get('vehicle') or ''}".strip(" ·")
     opacity = "opacity:.72;" if record.get("lane") == "done" else ""
+    click = "" if record.get("demo_mode") else f" onclick=\"if(!event.target.closest('a,button,form')) window.open('{href}','_blank','noopener')\""
     return f"""
-    <article class="row" style="--rgb:{rgb};{opacity}" onclick="if(!event.target.closest('a,button,form')) window.open('{href}','_blank','noopener')">
+    <article class="row" style="--rgb:{rgb};{opacity}"{click}>
       <div class="ro-line"><span class="ro">RO {ro}</span><span class="veh">{html.escape(vehicle)}</span></div>
       <div class="directive">{html.escape(_directive(record))}</div>
       {_render_meta(record)}
@@ -848,6 +992,9 @@ def _render_done_card(record: dict, rgb: str) -> str:
     vehicle = html.escape(str(record.get("vehicle") or ""))
     closed = html.escape(_hours_label(record))
     awaiting = html.escape(_awaiting_followup_label(record))
+    form_action = "#" if record.get("demo_mode") else f"/dvi/followup/{ro}"
+    disabled = " disabled" if record.get("demo_mode") else ""
+    button_label = "Demo only" if record.get("demo_mode") else "Archive to History"
     return f"""
     <article class="row done-card" style="--rgb:{rgb}">
       <div class="done-head">
@@ -860,20 +1007,20 @@ def _render_done_card(record: dict, rgb: str) -> str:
       <div class="follow-box">
         <div class="follow-title">Close the loop</div>
         <div class="follow-age">{awaiting}</div>
-        <form class="follow-form" method="post" action="/dvi/followup/{ro}">
+        <form class="follow-form" method="post" action="{form_action}" onsubmit="{'return false;' if record.get('demo_mode') else ''}">
           <label class="date-label">
             <span>Next appointment</span>
-            <input type="date" name="appointment_date">
+            <input type="date" name="appointment_date"{disabled}>
           </label>
           <label class="check-label">
-            <input type="checkbox" name="appointment_scheduled" value="1">
+            <input type="checkbox" name="appointment_scheduled" value="1"{disabled}>
             <span>Appointment scheduled</span>
           </label>
           <label class="check-label">
-            <input type="checkbox" name="followed_up" value="1">
+            <input type="checkbox" name="followed_up" value="1"{disabled}>
             <span>Followed up</span>
           </label>
-          <button class="archive-btn" type="submit">Archive to History</button>
+          <button class="archive-btn" type="submit"{disabled}>{button_label}</button>
         </form>
       </div>
     </article>
@@ -888,8 +1035,8 @@ def _render_stage(title: str, records: list[dict], rgb: str) -> str:
     return _render_divider(title, len(records), rgb) + body
 
 
-def render_dvi_page() -> str:
-    records = _build_records()
+def render_dvi_page(demo: bool = False) -> str:
+    records = _demo_records() if demo else _build_records()
     do_now, stages = _queue_sections(records)
     rework_count = sum(1 for record in records if _is_rework(record))
     stale_count = sum(1 for record in records if _is_stale_24(record))
@@ -901,6 +1048,14 @@ def render_dvi_page() -> str:
     done_count = len(stages.get("done", []))
     duplicate_count = len(records) - len({record["ro"] for record in records})
     generated_at = _display_ts(_now_utc().isoformat())
+    demo_banner = (
+        '<div class="demo-banner">DEMO MODE - Synthetic sample queue. No real ROs, no writes, no API calls.</div>'
+        if demo else ""
+    )
+    demo_button = (
+        '<a class="btn live" href="/dvi">Exit Demo</a>'
+        if demo else '<a class="btn" href="/dvi?demo=1">Demo Mode</a>'
+    )
 
     stage_html = "\n".join([
         _render_stage("Ready for Build Packet", stages.get("ready_for_build_packet", []), "168,85,247"),
@@ -930,6 +1085,7 @@ def render_dvi_page() -> str:
     .ctrls{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
     .btn{{height:32px;border-radius:8px;border:1px solid var(--med);background:rgba(15,23,42,.85);color:var(--txt2);font-size:11px;font-weight:800;padding:8px 12px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}}
     .btn.live{{border-color:rgba(168,85,247,.7);color:#C084FC;box-shadow:0 0 16px rgba(168,85,247,.25)}}
+    .demo-banner{{position:sticky;top:0;z-index:20;margin:-6px auto 18px;width:max-content;max-width:100%;border:1px solid rgba(168,85,247,.75);background:linear-gradient(90deg,rgba(168,85,247,.92),rgba(59,130,246,.9));color:#fff;border-radius:0 0 14px 14px;padding:8px 24px;font-size:12px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;box-shadow:0 0 28px rgba(168,85,247,.42)}}
     .divider{{display:flex;align-items:center;gap:16px;margin:34px 0 16px}}
     .dline{{flex:1;height:2px;border-radius:2px}}
     .dline.l{{background:linear-gradient(90deg,transparent,rgba(var(--c),.55))}}
@@ -951,6 +1107,7 @@ def render_dvi_page() -> str:
     .do-btn.green{{border:1px solid rgba(34,197,94,.6);background:rgba(34,197,94,.14);color:#86EFAC}}
     .do-btn.orange{{border:1px solid rgba(255,149,0,.6);background:rgba(255,149,0,.14);color:#FFB020}}
     .do-btn.blue{{border:1px solid rgba(59,130,246,.6);background:rgba(59,130,246,.14);color:#93C5FD}}
+    .do-btn.demo-inert{{border:1px solid rgba(148,163,184,.38);background:rgba(148,163,184,.08);color:#CBD5E1;cursor:default}}
     .inline-form{{display:inline;margin:0;margin-left:auto}}
     .donow{{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px}}
     .screamer{{position:relative;overflow:hidden;border-radius:16px;padding:16px 18px 16px 22px;background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(7,12,24,.96));border:1px solid rgba(255,59,48,.85);animation:beat 2.1s ease-in-out infinite;cursor:pointer}}
@@ -988,6 +1145,7 @@ def render_dvi_page() -> str:
   </style>
 </head>
 <body>
+  {demo_banner}
   <div class="top">
     <div class="title">DVI EXECUTION QUEUE<small>Powered by AdviseMe.ai · Generated {html.escape(generated_at)}</small></div>
     <div class="stats">
@@ -1001,6 +1159,7 @@ def render_dvi_page() -> str:
       <a class="btn" href="/v2">Command Board</a>
       <a class="btn" href="/dvi/history">History</a>
       <a class="btn live" href="/sanity-check">Sanity Check</a>
+      {demo_button}
     </div>
   </div>
 
