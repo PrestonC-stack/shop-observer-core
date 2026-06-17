@@ -467,6 +467,14 @@ def _status_badge(review_status: str) -> str:
 
 
 def _priority(record: dict) -> str:
+    if record.get("lane") == "done":
+        return "P4"
+    if _is_rework(record):
+        return "P1"
+    if record.get("lane") == "ready_for_build_packet":
+        return "P2"
+    if _is_stale_24(record):
+        return "P1"
     raw = str(record.get("priority_lane") or record.get("priority") or "P4").upper().strip()
     if raw.startswith("P2"):
         return "P2"
@@ -474,17 +482,30 @@ def _priority(record: dict) -> str:
 
 
 def _is_p1(record: dict) -> bool:
+    if record.get("lane") == "done":
+        return False
+    if _is_rework(record):
+        return True
+    if record.get("lane") == "ready_for_build_packet":
+        return False
+    if _is_stale_24(record):
+        return True
     return _priority(record) == "P1" or str(record.get("risk_level") or "").upper() == "CRITICAL"
 
 
 def _status_age_hours(record: dict) -> float | None:
+    if record.get("lane") == "done":
+        return None
     raw_hours = record.get("hours_in_status")
     try:
         if raw_hours not in (None, ""):
-            return max(0.0, float(raw_hours))
+            hours = max(0.0, float(raw_hours))
+            if hours >= 900:
+                return None
+            return hours
     except Exception:
         pass
-    for key in ("status_updated_at", "updated_at", "generated_at", "gate_ran_at"):
+    for key in ("status_updated_at", "updated_at", "generated_at"):
         dt = _parse_dt(record.get(key))
         if dt:
             return max(0.0, (_now_utc() - dt).total_seconds() / 3600)
@@ -492,6 +513,8 @@ def _status_age_hours(record: dict) -> float | None:
 
 
 def _is_stale_24(record: dict) -> bool:
+    if record.get("lane") == "done":
+        return False
     if record.get("stale") is True:
         return True
     hours = _status_age_hours(record)
@@ -499,9 +522,23 @@ def _is_stale_24(record: dict) -> bool:
 
 
 def _hours_label(record: dict) -> str:
+    if record.get("lane") == "done":
+        done_time = None
+        for key in ("status_updated_at", "updated_at", "generated_at", "gate_ran_at"):
+            done_time = _parse_dt(record.get(key))
+            if done_time:
+                break
+        if not done_time:
+            return "closed"
+        hours = max(0.0, (_now_utc() - done_time).total_seconds() / 3600)
+        if hours >= 24:
+            return f"closed {int(hours // 24)}d {int(hours % 24)}h ago"
+        if hours >= 1:
+            return f"closed {int(hours)}h ago"
+        return f"closed {int(hours * 60)}m ago"
     hours = _status_age_hours(record)
     if hours is None:
-        return "age unknown"
+        return "timing unknown"
     if hours >= 24:
         return f"stale {int(hours // 24)}d {int(hours % 24)}h"
     if hours >= 1:
@@ -559,7 +596,7 @@ def _directive(record: dict) -> str:
             return "WAITING ON TECH - DVI FLOW"
         return str(record.get("hermes_next_action") or record.get("next_action") or "WATCH PRODUCTION").upper()
     if lane == "done":
-        return "CONFIRM FOLLOW-UP"
+        return "CLOSED - OPEN HISTORY IF NEEDED"
     return str(record.get("hermes_next_action") or record.get("next_action") or "REVIEW JOB").upper()
 
 
@@ -609,12 +646,18 @@ def _stage_meta(record: dict) -> tuple[str, str]:
     if status in {"waiting parts", "ordering parts", "parts"}:
         return "Parts", status.title()
     if lane == "done":
-        return "Advisor", _hours_label(record).replace("stale ", "closed ")
+        return "History", _hours_label(record)
     return "Tech", status.title() if status else "In progress"
 
 
 def _do_now(record: dict) -> bool:
-    return _is_rework(record) or _is_stale_24(record) or _is_p1(record)
+    if record.get("lane") == "done":
+        return False
+    if _is_rework(record):
+        return True
+    if record.get("lane") == "ready_for_build_packet":
+        return False
+    return _is_stale_24(record) or _is_p1(record)
 
 
 def _last_updated_sort_value(record: dict) -> float:
