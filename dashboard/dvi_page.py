@@ -1078,6 +1078,37 @@ def _training_steps() -> list[dict]:
         </div>
       </div>
     """
+    owner_visual = """
+      <div class="pill-grid">
+        <span><b>Owner: Tech</b><small>Technician has the next move: inspection, rework fix, testing, or production update.</small></span>
+        <span><b>Owner: Advisor</b><small>Advisor has the next move: build packet, push packet, call, review, or finalize.</small></span>
+        <span><b>Owner: Parts</b><small>Parts department has the next move: ETA, arrival, staging, or parts blocker.</small></span>
+      </div>
+    """
+    priority_visual = """
+      <div class="priority-stack">
+        <span class="p1">P1 - Drop everything. Most urgent.</span>
+        <span class="p2">P2 - High priority. Handle after P1.</span>
+        <span class="p3">P3 - Normal controlled work.</span>
+        <span class="p4">P4 - Lowest pressure / background work.</span>
+      </div>
+    """
+    action_visual = """
+      <div class="button-grid">
+        <span class="red">Re-run Gate - re-check the DVI after a tech fixes rework.</span>
+        <span class="purple">Build Packet - create the estimate packet from a clean DVI.</span>
+        <span class="green">Open / Open Packet - open an already-built packet.</span>
+        <span class="orange">Review - advisor QC/finalization work.</span>
+      </div>
+    """
+    header_visual = """
+      <div class="button-grid">
+        <span>Command Board - returns to the main /v2 shop command board.</span>
+        <span>History - opens completed/stored packet history without regenerating.</span>
+        <span>Training - this walkthrough.</span>
+        <span>Sanity Check - printable morning sanity-check report.</span>
+      </div>
+    """
     return [
         {
             "title": "What This Board Is",
@@ -1098,6 +1129,31 @@ def _training_steps() -> list[dict]:
             "title": "Anatomy Of A Card",
             "body": "The directive is the largest text because it is the action. Supporting pills explain why: Owner, Stage, Gate, Stale, and failed checks. Data comes from AutoFlow board state, the DVI quality gate, packet cache, and time since the latest update.",
             "visual": sample_card,
+        },
+        {
+            "title": "Owners",
+            "body": "The Owner pill says who has the next move, not who owns the whole repair order forever. Tech means the technician needs to act. Advisor means the advisor needs to act. Parts means the job is waiting on parts movement or confirmation.",
+            "visual": owner_visual,
+        },
+        {
+            "title": "Priority P1-P4",
+            "body": "P1 through P4 is the urgency ladder. P1 means drop everything. P4 is the lowest pressure. Do Now uses this priority plus rework and stale timing so the top card is the most urgent card to handle first.",
+            "visual": priority_visual,
+        },
+        {
+            "title": "Stage And Gate",
+            "body": "Stage is the AutoFlow workflow_status, like servicing, waiting parts, advisor QC review, ready, or finished. Gate is the DVI quality gate result: pass, review, or rework. Stage tells where the RO is. Gate tells whether the DVI is clean enough to build from.",
+            "visual": '<div class="pill-grid"><span><b>Stage: servicing</b><small>From AutoFlow workflow_status.</small></span><span><b>Gate ran 18m ago</b><small>From the deterministic DVI quality gate.</small></span><span><b>Inspection: clean</b><small>DVI gate passed and is safe to build from.</small></span><span><b>2 failed checks</b><small>Gate found specific rework gaps.</small></span></div>',
+        },
+        {
+            "title": "Action Buttons",
+            "body": "Re-run Gate re-checks the DVI in place after a tech fixes rework. It does not delete or resubmit the inspection. Build Packet means no current packet exists yet. Open or Open Packet means the packet is already built and opens in a new tab.",
+            "visual": action_visual,
+        },
+        {
+            "title": "Header Buttons",
+            "body": "The header buttons are quick exits. Command Board opens the main shop board. History opens completed or stored packet records. Training opens this walkthrough. Sanity Check opens the printable morning report.",
+            "visual": header_visual,
         },
         {
             "title": "Recently Done",
@@ -1151,13 +1207,13 @@ def render_dvi_page(demo: bool = False) -> str:
   <style>
     :root{{--bg:#050816;--card:#0F172A;--soft:#1E293B;--med:#334155;--txt:#fff;--txt2:#CBD5E1;--mut:#94A3B8;--faint:#64748B;--status-immediate:#FF3B30;--status-customer:#FF9500;--status-progress:#3B82F6;--status-ready:#22C55E;--status-parts:#00E5FF;--status-ai:#A855F7}}
     *{{box-sizing:border-box}}
-    body{{margin:0;font-family:Inter,ui-sans-serif,system-ui,Arial,sans-serif;background:radial-gradient(circle at top left,#111B3A 0%,#050816 40%,#020617 100%);color:var(--txt);-webkit-font-smoothing:antialiased;padding:22px 26px 60px}}
+    body{{margin:0;font-family:Inter,ui-sans-serif,system-ui,Arial,sans-serif;background:radial-gradient(circle at top left,#111B3A 0%,#050816 40%,#020617 100%);color:var(--txt);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;padding:22px 26px 60px}}
     .top{{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid var(--soft);padding-bottom:16px;margin-bottom:8px;flex-wrap:wrap}}
     .title{{font-size:22px;font-weight:900;letter-spacing:.06em}}
-    .title small{{display:block;font-size:10px;font-weight:800;letter-spacing:.18em;color:#A855F7;text-transform:uppercase;margin-top:5px;text-shadow:0 0 12px rgba(168,85,247,.6)}}
+    .title small{{display:block;font-size:10px;font-weight:800;letter-spacing:.18em;color:#A855F7;text-transform:uppercase;margin-top:5px}}
     .stats{{display:flex;gap:9px;flex-wrap:wrap}}
     .stat{{min-width:78px;height:50px;background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(2,6,23,.9));border:1px solid #263954;border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center}}
-    .stat b{{font-size:22px;font-weight:900;line-height:1;text-shadow:0 0 14px currentColor}}
+    .stat b{{font-size:22px;font-weight:900;line-height:1}}
     .stat span{{font-size:8.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-top:4px}}
     .ctrls{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
     .btn{{height:32px;border-radius:8px;border:1px solid var(--med);background:rgba(15,23,42,.85);color:var(--txt2);font-size:11px;font-weight:800;padding:8px 12px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}}
@@ -1167,7 +1223,7 @@ def render_dvi_page(demo: bool = False) -> str:
     .dline{{flex:1;height:2px;border-radius:2px}}
     .dline.l{{background:linear-gradient(90deg,transparent,rgba(var(--c),.55))}}
     .dline.r{{background:linear-gradient(90deg,rgba(var(--c),.55),transparent)}}
-    .dtitle{{font-size:15px;font-weight:900;letter-spacing:.16em;text-transform:uppercase;color:rgb(var(--c));text-shadow:0 0 16px rgba(var(--c),.55);white-space:nowrap;display:flex;align-items:center;gap:11px;text-align:center}}
+    .dtitle{{font-size:15px;font-weight:900;letter-spacing:.16em;text-transform:uppercase;color:rgb(var(--c));white-space:nowrap;display:flex;align-items:center;gap:11px;text-align:center}}
     .cnt{{font-size:12px;font-weight:900;background:rgba(var(--c),.18);border:1px solid rgba(var(--c),.55);border-radius:999px;padding:3px 11px;color:rgb(var(--c));letter-spacing:.02em}}
     .ro-line{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}}
     .ro{{font-size:16px;font-weight:900}}
@@ -1274,11 +1330,11 @@ def render_dvi_training_page() -> str:
   <style>
     :root{{--bg:#050816;--card:#0F172A;--soft:#1E293B;--med:#334155;--txt:#fff;--txt2:#CBD5E1;--mut:#94A3B8;--faint:#64748B;--status-immediate:#FF3B30;--status-customer:#FF9500;--status-progress:#3B82F6;--status-ready:#22C55E;--status-parts:#00E5FF;--status-ai:#A855F7}}
     *{{box-sizing:border-box}}
-    body{{margin:0;font-family:Inter,ui-sans-serif,system-ui,Arial,sans-serif;background:radial-gradient(circle at top left,#111B3A 0%,#050816 40%,#020617 100%);color:var(--txt);-webkit-font-smoothing:antialiased;padding:24px}}
+    body{{margin:0;font-family:Inter,ui-sans-serif,system-ui,Arial,sans-serif;background:radial-gradient(circle at top left,#111B3A 0%,#050816 40%,#020617 100%);color:var(--txt);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;padding:24px}}
     .shell{{max-width:1120px;margin:0 auto}}
     .top{{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;border-bottom:1px solid var(--soft);padding-bottom:18px;margin-bottom:24px;flex-wrap:wrap}}
     h1{{margin:0;font-size:28px;font-weight:1000;letter-spacing:.06em}}
-    .sub{{color:#A855F7;font-size:10px;font-weight:900;letter-spacing:.18em;text-transform:uppercase;margin-top:6px;text-shadow:0 0 12px rgba(168,85,247,.6)}}
+    .sub{{color:#A855F7;font-size:10px;font-weight:900;letter-spacing:.18em;text-transform:uppercase;margin-top:6px}}
     .btn{{height:34px;border-radius:9px;border:1px solid var(--med);background:rgba(15,23,42,.85);color:var(--txt2);font-size:11px;font-weight:900;padding:9px 13px;text-decoration:none;display:inline-flex;align-items:center}}
     .btn.live{{border-color:rgba(168,85,247,.7);color:#C084FC;box-shadow:0 0 16px rgba(168,85,247,.25)}}
     .panel{{border:1px solid rgba(168,85,247,.35);background:linear-gradient(180deg,rgba(15,23,42,.92),rgba(2,6,23,.88));border-radius:22px;padding:22px;box-shadow:0 0 40px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.06)}}
@@ -1291,7 +1347,7 @@ def render_dvi_training_page() -> str:
     h2{{font-size:38px;line-height:1.02;margin:0 0 16px;font-weight:1000;letter-spacing:.02em}}
     p{{font-size:17px;line-height:1.65;color:#CBD5E1;margin:0;max-width:620px}}
     .visual{{border:1px solid rgba(148,163,184,.22);border-radius:18px;background:rgba(2,6,23,.42);padding:18px;min-height:280px;display:flex;align-items:center;justify-content:center}}
-    .training-hero{{font-size:30px;line-height:1.2;font-weight:1000;text-align:center;color:#fff;text-shadow:0 0 24px rgba(168,85,247,.6);max-width:440px}}
+    .training-hero{{font-size:30px;line-height:1.2;font-weight:1000;text-align:center;color:#fff;max-width:440px}}
     .mini-lanes,.band-stack,.coming-grid{{display:grid;gap:12px;width:100%}}
     .mini-lanes span,.band-stack span,.coming-grid span{{border:1px solid rgba(168,85,247,.42);background:rgba(168,85,247,.10);border-radius:13px;padding:14px 16px;font-size:14px;font-weight:900;color:#E9D5FF}}
     .mini-lanes .hot{{border-color:rgba(255,59,48,.7);background:rgba(255,59,48,.12);color:#FF8A82;box-shadow:0 0 18px rgba(255,59,48,.18)}}
@@ -1300,6 +1356,22 @@ def render_dvi_training_page() -> str:
     .band-stack span:nth-child(3){{border-color:rgba(59,130,246,.55);color:#93C5FD}}
     .band-stack span:nth-child(4){{border-color:rgba(255,149,0,.55);color:#FDBA74}}
     .band-stack span:nth-child(5){{border-color:rgba(34,197,94,.32);color:#CBD5E1}}
+    .pill-grid,.priority-stack,.button-grid{{display:grid;gap:12px;width:100%}}
+    .pill-grid{{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    .pill-grid span,.priority-stack span,.button-grid span{{border:1px solid rgba(148,163,184,.28);background:rgba(15,23,42,.72);border-radius:13px;padding:14px 16px;color:#CBD5E1;font-size:13px;line-height:1.45}}
+    .pill-grid b{{display:block;color:#fff;font-size:14px;margin-bottom:5px}}
+    .pill-grid small{{display:block;color:#94A3B8;font-size:12px;line-height:1.45}}
+    .priority-stack span{{font-weight:1000}}
+    .priority-stack .p1{{border-color:rgba(255,59,48,.68);color:#FF8A82;background:rgba(255,59,48,.10)}}
+    .priority-stack .p2{{border-color:rgba(255,149,0,.68);color:#FDBA74;background:rgba(255,149,0,.10)}}
+    .priority-stack .p3{{border-color:rgba(255,212,0,.58);color:#FDE68A;background:rgba(255,212,0,.08)}}
+    .priority-stack .p4{{border-color:rgba(34,197,94,.46);color:#86EFAC;background:rgba(34,197,94,.08)}}
+    .button-grid{{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    .button-grid span{{font-weight:900}}
+    .button-grid .red{{border-color:rgba(255,59,48,.65);color:#FF8A82;background:rgba(255,59,48,.10)}}
+    .button-grid .purple{{border-color:rgba(168,85,247,.65);color:#C084FC;background:rgba(168,85,247,.10)}}
+    .button-grid .green{{border-color:rgba(34,197,94,.60);color:#86EFAC;background:rgba(34,197,94,.10)}}
+    .button-grid .orange{{border-color:rgba(255,149,0,.60);color:#FDBA74;background:rgba(255,149,0,.10)}}
     .sample-card{{position:relative;width:100%;border-radius:16px;padding:18px;background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(7,12,24,.96));border:1px solid rgba(255,59,48,.7);box-shadow:0 0 24px rgba(255,59,48,.25);overflow:hidden}}
     .sample-card:after{{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:#FF3B30;box-shadow:0 0 18px rgba(255,59,48,.75)}}
     .tag{{position:absolute;right:12px;top:10px;border:1px solid rgba(255,59,48,.6);background:rgba(255,59,48,.12);color:#FF8A82;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;text-transform:uppercase}}
