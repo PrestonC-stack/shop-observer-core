@@ -399,6 +399,7 @@ def _build_records() -> list[dict]:
             "review_resolved": _review_resolved(review),
             "advisor_acknowledged": bool(review.get("advisor_acknowledged")),
             "gate_ran_at": gate_ran_at,
+            "flags": flags,
             "flag_count": len(flags),
             "critical_count": sum(
                 1 for flag in flags if str(flag.get("severity", "")).upper() in {"REWORK", "CRITICAL"}
@@ -407,6 +408,14 @@ def _build_records() -> list[dict]:
             "status_updated_at": job.get("status_updated_at") or job.get("last_updated_at") or "",
             "updated_at": job.get("updated_at") or "",
             "generated_at": job.get("generated_at") or "",
+            "priority_lane": job.get("priority_lane") or job.get("priority") or "P4",
+            "risk_level": job.get("risk_level") or "",
+            "waiting_on": job.get("waiting_on") or review.get("advisor") or "",
+            "technician": job.get("technician") or job.get("assigned_technician") or review.get("technician") or "",
+            "hermes_next_action": job.get("hermes_next_action") or "",
+            "next_action": job.get("next_action") or "",
+            "hours_in_status": job.get("hours_in_status"),
+            "stale": job.get("stale") is True,
         }
         record["lane"] = assign_dvi_lane(record)
         records.append(record)
@@ -457,142 +466,310 @@ def _status_badge(review_status: str) -> str:
     return f'<span class="badge {cls}">{html.escape(label)}</span>'
 
 
-def _packet_badge(packet: dict) -> str:
-    state = packet.get("state", "no packet yet")
-    if packet.get("stale"):
-        cls = "packet-stale"
-    elif packet.get("current"):
-        cls = "packet-ready"
-    elif packet.get("exists"):
-        cls = "packet-unknown"
-    else:
-        cls = "packet-missing"
-    return f'<span class="packet {cls}">{html.escape(state)}</span>'
+def _priority(record: dict) -> str:
+    raw = str(record.get("priority_lane") or record.get("priority") or "P4").upper().strip()
+    if raw.startswith("P2"):
+        return "P2"
+    return raw if raw in {"P1", "P2", "P3", "P4"} else "P4"
 
 
-def _packet_action(ro: str, packet: dict) -> str:
-    if packet.get("exists"):
-        href = f"/dvi/packet/{html.escape(ro)}/stored"
-        label = "Open Stored Packet"
-    else:
-        href = f"/dvi/packet/{html.escape(ro)}"
-        label = "Build Packet"
-    return f'<a class="action-link" href="{href}">{label}</a>'
+def _is_p1(record: dict) -> bool:
+    return _priority(record) == "P1" or str(record.get("risk_level") or "").upper() == "CRITICAL"
 
 
-def _card_actions(record: dict) -> str:
-    ro = html.escape(record["ro"])
-    actions = []
-    if record.get("lane") == "needs_rework":
-        actions.append(
-            f'<form class="inline-form" method="post" action="/dvi/rerun/{ro}">'
-            '<button class="action-link rerun" type="submit">Re-run Gate</button>'
-            '</form>'
-        )
-        slip_path = DVI_REVIEWS_DIR / f"rework_slip_{record['ro']}.html"
-        if slip_path.exists():
-            actions.append(f'<a class="action-link secondary" href="/dvi/slip/{ro}" target="_blank">Print Slip</a>')
-        actions.append(f'<a class="action-link secondary" href="/dvi/acknowledge/{ro}">Acknowledge</a>')
-    actions.append(_packet_action(ro, record.get("packet_status", {})))
-    return "\n".join(actions)
+def _status_age_hours(record: dict) -> float | None:
+    raw_hours = record.get("hours_in_status")
+    try:
+        if raw_hours not in (None, ""):
+            return max(0.0, float(raw_hours))
+    except Exception:
+        pass
+    for key in ("status_updated_at", "updated_at", "generated_at", "gate_ran_at"):
+        dt = _parse_dt(record.get(key))
+        if dt:
+            return max(0.0, (_now_utc() - dt).total_seconds() / 3600)
+    return None
 
 
-def _headline(record: dict) -> str:
+def _is_stale_24(record: dict) -> bool:
+    if record.get("stale") is True:
+        return True
+    hours = _status_age_hours(record)
+    return bool(hours is not None and hours >= 24)
+
+
+def _hours_label(record: dict) -> str:
+    hours = _status_age_hours(record)
+    if hours is None:
+        return "age unknown"
+    if hours >= 24:
+        return f"stale {int(hours // 24)}d {int(hours % 24)}h"
+    if hours >= 1:
+        return f"{int(hours)}h"
+    return f"{int(hours * 60)}m"
+
+
+def _is_rework(record: dict) -> bool:
+    return (
+        str(record.get("review_status") or "").upper().strip() == "REWORK_REQUIRED"
+        and not record.get("review_resolved")
+    )
+
+
+def _flag_gap(record: dict) -> str:
+    flags = record.get("flags") if isinstance(record.get("flags"), list) else []
+    ordered = sorted(
+        [flag for flag in flags if isinstance(flag, dict)],
+        key=lambda flag: 0 if str(flag.get("severity", "")).lower() in {"critical", "rework"} else 1,
+    )
+    if not ordered:
+        return "DVI needs correction"
+    flag = ordered[0]
+    text = str(flag.get("recommended_action") or flag.get("message") or flag.get("item_name") or "DVI needs correction")
+    text = " ".join(text.replace("\n", " ").split())
+    return text[:80]
+
+
+def _tech_name(record: dict) -> str:
+    raw = str(record.get("technician") or "").strip()
+    if not raw or raw.lower() in {"unknown", "none", "n/a"}:
+        return "TECH"
+    return raw.split()[0].upper()
+
+
+def _directive(record: dict) -> str:
     lane = record.get("lane")
-    packet = record.get("packet_status", {})
-    if lane == "needs_rework":
-        return "DVI REWORK REQUIRED"
+    status = _normalize_status(record.get("workflow_status"))
+    if _is_rework(record):
+        return f"SEND BACK TO {_tech_name(record)} - {_flag_gap(record)}"
     if lane == "ready_for_build_packet":
         return "BUILD PACKET"
     if lane == "tekmetric_ready":
-        return "TEKMETRIC READY"
-    if lane == "in_progress":
-        return "DVI IN PRODUCTION FLOW"
+        return "PUSH TO TEKMETRIC"
     if lane == "advisor_qc_review":
-        return "ADVISOR QC REVIEW"
-    if packet.get("stale"):
-        return "STALE - REGENERATE"
-    return "DONE / ARCHIVED"
+        return "REVIEW & FINALIZE"
+    if lane == "in_progress":
+        if status in {"waiting parts", "ordering parts", "parts"}:
+            return "PARTS NOT IN YET - HOLD"
+        if status in {"awaiting tech", "ready for tech"}:
+            return "WAITING ON TECH"
+        if status == "waiting approval":
+            return "WAITING ON CUSTOMER"
+        if status in {"testing", "dvi updates", "inspecting"}:
+            return "WAITING ON TECH - DVI FLOW"
+        return str(record.get("hermes_next_action") or record.get("next_action") or "WATCH PRODUCTION").upper()
+    if lane == "done":
+        return "CONFIRM FOLLOW-UP"
+    return str(record.get("hermes_next_action") or record.get("next_action") or "REVIEW JOB").upper()
 
 
-def _render_card(record: dict, lane: dict, pulse_offset: int | None = None) -> str:
-    ro = html.escape(record["ro"])
+def _card_href(record: dict) -> str:
+    ro = html.escape(str(record.get("ro") or ""))
     packet = record.get("packet_status", {})
-    is_stale = packet.get("stale") is True
-    urgent = record.get("lane") == "needs_rework" or is_stale
-    pulse_class = ""
-    beacon = ""
-    if urgent:
-        pulse_class = "p1" if record.get("lane") == "needs_rework" else "stale"
-        pulse_class += f" pulse-offset-{pulse_offset or 0}"
-        beacon = '<span class="beacon-dot"></span>'
+    if packet.get("exists"):
+        return f"/dvi/packet/{ro}/stored"
+    if record.get("lane") == "done":
+        return "/dvi/history"
+    return f"/dvi/packet/{ro}"
 
-    gate_value = record.get("gate_ran_at")
-    packet_time = packet.get("generated_at")
-    status_text = html.escape(str(record.get("workflow_status") or "unknown"))
-    gate_text = html.escape(_display_ts(gate_value))
-    packet_time_text = html.escape(_time_ago(packet_time))
+
+def _action_button(record: dict) -> str:
+    ro = html.escape(str(record.get("ro") or ""))
+    lane = record.get("lane")
+    packet = record.get("packet_status", {})
+    if _is_rework(record):
+        return (
+            f'<form class="inline-form" method="post" action="/dvi/rerun/{ro}">'
+            '<button class="do-btn red" type="submit">Re-run Gate</button>'
+            '</form>'
+        )
+    if lane == "ready_for_build_packet":
+        return f'<a class="do-btn purple" href="/dvi/packet/{ro}">Build Packet</a>'
+    if lane == "tekmetric_ready" or packet.get("exists"):
+        return f'<a class="do-btn green" href="{_card_href(record)}">Open Packet</a>'
+    if lane == "advisor_qc_review":
+        return f'<a class="do-btn orange" href="{_card_href(record)}">Review</a>'
+    if lane == "done":
+        return '<a class="do-btn green" href="/dvi/history">Open History</a>'
+    return f'<a class="do-btn blue" href="{_card_href(record)}">Open</a>'
+
+
+def _stage_meta(record: dict) -> tuple[str, str]:
+    lane = record.get("lane")
+    packet = record.get("packet_status", {})
+    status = _normalize_status(record.get("workflow_status"))
+    if _is_rework(record):
+        return "Tech", f"{record.get('flag_count', 0)} failed checks"
+    if lane == "ready_for_build_packet":
+        return "Advisor", "DVI clean"
+    if lane == "tekmetric_ready":
+        return "Advisor", "Packet current" if packet.get("current") else str(packet.get("state") or "Packet ready")
+    if lane == "advisor_qc_review":
+        return "Advisor", "Tech QC done"
+    if status in {"waiting parts", "ordering parts", "parts"}:
+        return "Parts", status.title()
+    if lane == "done":
+        return "Advisor", _hours_label(record).replace("stale ", "closed ")
+    return "Tech", status.title() if status else "In progress"
+
+
+def _do_now(record: dict) -> bool:
+    return _is_rework(record) or _is_stale_24(record) or _is_p1(record)
+
+
+def _last_updated_sort_value(record: dict) -> float:
+    for key in ("status_updated_at", "updated_at", "generated_at", "gate_ran_at"):
+        dt = _parse_dt(record.get(key))
+        if dt:
+            return dt.timestamp()
+    ro = str(record.get("ro") or "")
+    try:
+        return float(ro)
+    except Exception:
+        return 0.0
+
+
+def _ro_sort_value(record: dict) -> int:
+    try:
+        return int(str(record.get("ro") or "0"))
+    except Exception:
+        return 999999
+
+
+def _urgency_rank(record: dict) -> tuple:
+    priority = _priority(record)
+    lane = record.get("lane")
+    stale = _is_stale_24(record)
+    if _is_rework(record):
+        bucket = 0 if priority == "P1" else 1 if priority == "P2" else 2 if stale else 3
+    elif lane == "ready_for_build_packet":
+        bucket = 4 if priority in {"P1", "P2"} else 5
+    elif lane == "tekmetric_ready":
+        bucket = 6 if priority in {"P1", "P2"} else 7
+    elif lane == "in_progress":
+        bucket = 8
+    elif lane == "advisor_qc_review":
+        bucket = 9
+    elif lane == "done":
+        bucket = 10
+    else:
+        bucket = 11
+    return (bucket, 0 if stale else 1, _last_updated_sort_value(record), _ro_sort_value(record))
+
+
+def _queue_sections(records: list[dict]) -> tuple[list[dict], dict[str, list[dict]]]:
+    seen: set[str] = set()
+    do_now = []
+    stages = {lane["key"]: [] for lane in LANES if lane["key"] != "needs_rework"}
+    for record in sorted(records, key=_urgency_rank):
+        ro = str(record.get("ro") or "")
+        if ro in seen:
+            continue
+        seen.add(ro)
+        if _do_now(record):
+            do_now.append(record)
+            continue
+        lane = record.get("lane")
+        if lane == "needs_rework":
+            do_now.append(record)
+        elif lane in stages:
+            stages[lane].append(record)
+    for lane_key in stages:
+        stages[lane_key].sort(key=_urgency_rank)
+    return do_now, stages
+
+
+def _render_divider(title: str, count: int, rgb: str) -> str:
     return f"""
-      <article class="card lane-{lane['tone']} {pulse_class}" style="--rgb:{lane['rgb']}">
-        <div class="card-top">
-          <div>
-            <div class="ro">RO{ro}{beacon}</div>
-          </div>
-          {_status_badge(record.get("review_status"))}
-        </div>
-        <div class="cust">{html.escape(str(record.get("customer") or "Unknown Customer"))}</div>
-        <div class="veh">{html.escape(str(record.get("vehicle") or ""))}</div>
-        <div class="act" style="color:rgb({lane['rgb']})">{html.escape(_headline(record))}</div>
-        <div class="pill-row">
-          <span class="pill" style="color:rgb({lane['rgb']})">STATUS {status_text}</span>
-          <span class="pill">GATE {gate_text}</span>
-          {_packet_badge(packet)}
-          <span class="time-badge" style="color:rgb({lane['rgb']})">PACKET {packet_time_text}</span>
-        </div>
-        <div class="card-foot">
-          <span>{int(record.get("flag_count") or 0)} flags / {int(record.get("critical_count") or 0)} critical</span>
-          <div class="actions">
-            {_card_actions(record)}
-          </div>
-        </div>
-      </article>
+    <div class="divider" style="--c:{rgb}">
+      <span class="dline l"></span>
+      <span class="dtitle">{html.escape(title)} <span class="cnt">{count}</span></span>
+      <span class="dline r"></span>
+    </div>
     """
 
 
-def _render_lane(lane: dict, records: list[dict]) -> str:
-    pulse_index = 0
-    rendered_cards = []
-    for record in records:
-        offset = None
-        if record.get("lane") == "needs_rework" or record.get("packet_status", {}).get("stale") is True:
-            offset = pulse_index % 4
-            pulse_index += 1
-        rendered_cards.append(_render_card(record, lane, offset))
-    cards = "\n".join(rendered_cards)
-    if not cards:
-        cards = '<div class="empty">Nothing here right now.</div>'
+def _priority_badge(record: dict) -> str:
+    priority = _priority(record)
+    return f'<span class="pri {priority}">{priority}</span>'
+
+
+def _render_meta(record: dict, include_gate: bool = True) -> str:
+    owner, detail = _stage_meta(record)
+    parts = [
+        _priority_badge(record),
+        f'<span class="pill muted">{html.escape(owner)}</span>',
+        f'<span class="pill muted">{html.escape(detail)}</span>',
+    ]
+    if _is_stale_24(record):
+        parts.insert(1, f'<span class="pill stale-pill">{html.escape(_hours_label(record))}</span>')
+    if include_gate:
+        parts.append(f'<span class="pill muted">Gate {html.escape(_time_ago(record.get("gate_ran_at")))}</span>')
+    parts.append(_action_button(record))
+    return '<div class="meta">' + "".join(parts) + "</div>"
+
+
+def _render_do_now(records: list[dict]) -> str:
+    if not records:
+        return '<div class="empty-wide">No immediate DVI action right now.</div>'
+    cards = []
+    for index, record in enumerate(records):
+        ro = html.escape(str(record.get("ro") or ""))
+        href = html.escape(_card_href(record))
+        vehicle = f"{record.get('customer') or 'Unknown'} · {record.get('vehicle') or ''}".strip(" ·")
+        cards.append(f"""
+        <article class="screamer po{index % 3}" onclick="if(!event.target.closest('a,button,form')) window.location='{href}'">
+          <div class="ro-line"><span class="ro">RO {ro}</span><span class="beacon"></span><span class="veh">{html.escape(vehicle)}</span></div>
+          <div class="directive">{html.escape(_directive(record))}</div>
+          {_render_meta(record)}
+        </article>
+        """)
+    return '<div class="donow">' + "\n".join(cards) + "</div>"
+
+
+def _render_stage_card(record: dict, rgb: str) -> str:
+    ro = html.escape(str(record.get("ro") or ""))
+    href = html.escape(_card_href(record))
+    vehicle = f"{record.get('customer') or 'Unknown'} · {record.get('vehicle') or ''}".strip(" ·")
+    opacity = "opacity:.72;" if record.get("lane") == "done" else ""
     return f"""
-      <section class="col" style="--rgb:{lane['rgb']}">
-        <div class="col-head {lane['tone']}">
-          <div class="lane-left">
-            <span class="lane-title">{html.escape(lane['title'])}<span class="lane-subtitle">{html.escape(lane['subtitle'])}</span></span>
-          </div>
-          <span class="count">{len(records)}</span>
-        </div>
-        {cards}
-      </section>
+    <article class="row" style="--rgb:{rgb};{opacity}" onclick="if(!event.target.closest('a,button,form')) window.location='{href}'">
+      <div class="ro-line"><span class="ro">RO {ro}</span><span class="veh">{html.escape(vehicle)}</span></div>
+      <div class="directive">{html.escape(_directive(record))}</div>
+      {_render_meta(record)}
+    </article>
     """
+
+
+def _render_stage(title: str, records: list[dict], rgb: str) -> str:
+    body = (
+        '<div class="rows">' + "\n".join(_render_stage_card(record, rgb) for record in records) + "</div>"
+        if records else '<div class="empty-wide">Nothing queued in this stage.</div>'
+    )
+    return _render_divider(title, len(records), rgb) + body
 
 
 def render_dvi_page() -> str:
     records = _build_records()
-    lanes = _lane_records(records)
-    active_count = sum(len(lanes[lane["key"]]) for lane in LANES if lane["key"] != "done")
-    done_count = len(lanes.get("done", []))
+    do_now, stages = _queue_sections(records)
+    rework_count = sum(1 for record in records if _is_rework(record))
+    stale_count = sum(1 for record in records if _is_stale_24(record))
+    parts_held = sum(
+        1 for record in records
+        if _normalize_status(record.get("workflow_status")) in {"waiting parts", "ordering parts", "parts"}
+    )
+    in_progress_count = len(stages.get("in_progress", []))
+    done_count = len(stages.get("done", []))
     duplicate_count = len(records) - len({record["ro"] for record in records})
     generated_at = _display_ts(_now_utc().isoformat())
 
-    lane_html = "\n".join(_render_lane(lane, lanes.get(lane["key"], [])) for lane in LANES)
+    stage_html = "\n".join([
+        _render_stage("Ready for Build Packet", stages.get("ready_for_build_packet", []), "168,85,247"),
+        _render_stage("TekMetric Ready", stages.get("tekmetric_ready", []), "34,197,94"),
+        _render_stage("In Progress", stages.get("in_progress", []), "59,130,246"),
+        _render_stage("Advisor QC Review", stages.get("advisor_qc_review", []), "255,149,0"),
+        _render_stage("Recently Done", stages.get("done", []), "34,197,94"),
+    ])
 
     return f"""<!doctype html>
 <html lang="en">
@@ -601,111 +778,83 @@ def render_dvi_page() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DVI Workflow | Callahan Auto</title>
   <style>
-    :root {{
-      --bg-main:#050816;--bg-card:#0F172A;--bg-panel:#0B1220;--border-soft:#1E293B;--border-medium:#334155;
-      --text-primary:#FFFFFF;--text-secondary:#CBD5E1;--text-muted:#94A3B8;--text-faint:#64748B;
-      --status-immediate:#FF3B30;--status-immediate-bg:rgba(255,59,48,0.12);--status-immediate-border:rgba(255,59,48,0.75);--status-immediate-glow:rgba(255,59,48,0.48);
-      --status-customer:#FF9500;--status-customer-bg:rgba(255,149,0,0.12);--status-customer-border:rgba(255,149,0,0.70);--status-customer-glow:rgba(255,149,0,0.40);
-      --status-progress:#3B82F6;--status-progress-bg:rgba(59,130,246,0.12);--status-progress-border:rgba(59,130,246,0.65);
-      --status-ready:#22C55E;--status-ready-bg:rgba(34,197,94,0.13);--status-ready-border:rgba(34,197,94,0.68);
-      --status-parts:#00E5FF;--status-parts-bg:rgba(0,229,255,0.12);--status-parts-border:rgba(0,229,255,0.68);
-      --status-ai:#A855F7;--status-ai-bg:rgba(168,85,247,0.14);--status-ai-border:rgba(168,85,247,0.72);--status-ai-glow:rgba(168,85,247,0.45);
-      --p1-bg:#FF2D2D;--p2-bg:#FF7A00;--p3-bg:#FFD400;--p3-text:#111827;
-    }}
-    *{{box-sizing:border-box}}html,body{{min-height:100%}}
-    body{{margin:0;background:radial-gradient(circle at top left,#111B3A 0%,#050816 38%,#020617 100%);color:#FFFFFF;font-family:Inter,ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}}
-    header{{height:86px;padding:12px 16px;border-bottom:1px solid var(--border-soft);background:rgba(2,6,23,.72);display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center}}
-    .top-row{{display:flex;justify-content:space-between;gap:18px;align-items:center;min-width:0}}
-    h1{{margin:0;font-size:24px;font-weight:950;letter-spacing:.06em;text-transform:uppercase;color:#fff}}
-    .sub{{color:var(--text-faint);margin-top:4px;font-size:11px;font-weight:700;letter-spacing:.04em}}
-    .nav{{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}}
-    .nav a{{height:28px;border-radius:7px;border:1px solid var(--border-medium);background:rgba(15,23,42,.75);color:var(--text-muted);font-size:10px;font-weight:900;padding:7px 10px;text-decoration:none;display:inline-flex;align-items:center}}
-    .nav a:hover{{background:var(--border-soft);color:#fff}}
-    .stats{{display:flex;gap:8px;grid-column:1/-1;margin-top:-4px}}
-    .stat{{min-width:120px;height:38px;border:1px solid var(--border-soft);background:rgba(15,23,42,.68);border-radius:10px;padding:6px 10px;display:flex;align-items:center;gap:8px;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}}
-    .stat b{{font-size:22px;line-height:1;color:#38BDF8;font-weight:950}}
-    .stat span{{color:var(--text-faint);font-size:9px;text-transform:uppercase;letter-spacing:.08em;font-weight:900}}
-    main.pipeline{{height:calc(100vh - 86px);display:grid;grid-template-columns:repeat(6,minmax(210px,1fr));gap:10px;padding:10px;overflow:hidden}}
-    .col{{min-width:0;background:rgba(15,23,42,.62);border:1px solid var(--border-soft);border-radius:16px;padding:9px;overflow-y:auto;box-shadow:inset 0 1px 0 rgba(255,255,255,.035)}}
-    .col-head{{min-height:58px;border-radius:12px;padding:10px 10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:flex-start;border:1px solid rgba(var(--rgb),.62);box-shadow:0 0 22px rgba(var(--rgb),.18),inset 0 1px 0 rgba(255,255,255,.08)}}
-    .col-head.immediate{{background:linear-gradient(90deg,rgba(255,59,48,.22),rgba(255,59,48,.06))}}
-    .col-head.ai{{background:linear-gradient(90deg,rgba(168,85,247,.21),rgba(168,85,247,.055))}}
-    .col-head.ready{{background:linear-gradient(90deg,rgba(34,197,94,.18),rgba(34,197,94,.05))}}
-    .col-head.progress{{background:linear-gradient(90deg,rgba(59,130,246,.18),rgba(59,130,246,.05))}}
-    .col-head.customer{{background:linear-gradient(90deg,rgba(255,149,0,.20),rgba(255,149,0,.055))}}
-    .col-head.done{{background:linear-gradient(90deg,rgba(34,197,94,.10),rgba(100,116,139,.045));opacity:.78}}
-    .lane-title{{font-size:12px;font-weight:950;line-height:1.1;text-transform:uppercase;letter-spacing:.05em;color:#fff}}
-    .lane-subtitle{{display:block;margin-top:4px;font-size:9px;font-weight:800;letter-spacing:.04em;line-height:1.18;color:rgba(203,213,225,.64);text-transform:none}}
-    .count{{display:grid;place-items:center;min-width:28px;height:26px;border-radius:999px;background:rgba(255,255,255,.11);font-size:12px;font-weight:950;color:#fff}}
-    .card{{position:relative;overflow:hidden;background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(7,12,24,.96));border:1px solid rgba(var(--rgb),.70);border-radius:14px;padding:10px 10px 11px 13px;margin-bottom:9px;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 10px 22px rgba(0,0,0,.24)}}
-    .card:before{{content:"";position:absolute;inset:0;pointer-events:none;opacity:.14;background:radial-gradient(circle at 10% 0%,rgba(var(--rgb),.42),transparent 44%),linear-gradient(90deg,rgba(var(--rgb),.55) 0%,transparent 42%)}}
-    .card:after{{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;border-radius:14px 0 0 14px;background:rgb(var(--rgb));box-shadow:0 0 20px rgba(var(--rgb),.60)}}
-    .card>*{{position:relative;z-index:1}}
-    .card-top{{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}}
-    .ro{{font-size:16px;font-weight:1000;line-height:1;color:#fff;letter-spacing:.02em}}
-    .cust{{font-size:11px;font-weight:900;color:#E2E8F0;margin-top:8px;line-height:1.2;text-transform:uppercase}}
-    .veh{{font-size:10px;font-weight:700;color:var(--text-muted);margin-top:3px;line-height:1.2}}
-    .act{{margin-top:10px;font-size:15px;font-weight:1000;letter-spacing:.06em;line-height:1.08;text-transform:uppercase;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;min-height:32px;overflow:hidden}}
-    .pill-row{{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}}
-    .badge, .packet {{
-      display:inline-flex;
-      align-items:center;
-      border-radius:999px;
-      padding:4px 6px;
-      font-size:8px;
-      font-weight:900;
-      text-transform:uppercase;
-      letter-spacing:.045em;
-      white-space:nowrap;
-    }}
-    .badge.pass, .packet-ready {{ color:#bbf7d0; border:1px solid rgba(34,197,94,.55); background:rgba(34,197,94,.13); }}
-    .badge.review, .packet-unknown {{ color:#fde68a; border:1px solid rgba(245,158,11,.55); background:rgba(245,158,11,.12); }}
-    .badge.rework, .packet-stale {{ color:#fecaca; border:1px solid rgba(239,68,68,.6); background:rgba(239,68,68,.14); }}
-    .badge.none, .packet-missing {{ color:#cbd5e1; border:1px solid rgba(148,163,184,.35); background:rgba(148,163,184,.10); }}
-    .pill,.time-badge{{display:inline-flex;align-items:center;border-radius:999px;border:1px solid rgba(148,163,184,.20);background:rgba(2,6,23,.34);padding:4px 6px;font-size:8px;font-weight:950;letter-spacing:.045em;text-transform:uppercase;color:#CBD5E1;max-width:100%;overflow:hidden;text-overflow:ellipsis}}
-    .card-foot{{display:flex;flex-direction:column;gap:8px;margin-top:10px;color:var(--text-faint);font-size:10px;font-weight:800}}
-    .actions{{display:flex;gap:5px;flex-wrap:wrap}}
-    .inline-form{{display:inline;margin:0}}
-    .action-link{{border:1px solid rgba(var(--rgb),.48);background:linear-gradient(180deg,rgba(15,23,42,.94),rgba(30,41,59,.76));box-shadow:inset 0 1px 0 rgba(255,255,255,.10);color:#fff;border-radius:7px;padding:5px 7px;font-size:9px;font-weight:950;text-decoration:none;cursor:pointer;font-family:inherit}}
-    .action-link.secondary{{border-color:rgba(168,85,247,.38);color:#d8b4fe}}
-    .action-link.rerun{{border-color:rgba(255,59,48,.62);color:#fecaca}}
-    .empty{{color:var(--text-faint);border:1px dashed rgba(148,163,184,.20);border-radius:14px;padding:18px 10px;text-align:center;font-size:11px;font-weight:800;background:rgba(2,6,23,.22)}}
-    .card.p1,.card.stale{{animation:cardBeaconPulse 2.8s ease-in-out infinite}}
-    .card.p1:before,.card.stale:before{{opacity:.20;background:radial-gradient(circle at 16% 8%,rgba(255,59,48,.36),transparent 44%),linear-gradient(90deg,rgba(255,59,48,.70) 0%,transparent 45%)}}
-    .card.p1.pulse-offset-0,.card.stale.pulse-offset-0{{animation-delay:0s}}
-    .card.p1.pulse-offset-1,.card.stale.pulse-offset-1{{animation-delay:.65s}}
-    .card.p1.pulse-offset-2,.card.stale.pulse-offset-2{{animation-delay:1.3s}}
-    .card.p1.pulse-offset-3,.card.stale.pulse-offset-3{{animation-delay:1.95s}}
-    @keyframes cardBeaconPulse{{0%,100%{{box-shadow:0 0 0 1px rgba(255,59,48,.75),0 0 14px rgba(255,59,48,.45),inset 0 0 12px rgba(255,59,48,.10)}}45%{{box-shadow:0 0 0 3px rgba(255,59,48,.95),0 0 22px rgba(255,59,48,.70),inset 0 0 20px rgba(255,59,48,.18)}}}}
-    .beacon-dot{{width:9px;height:9px;border-radius:999px;background:#FF3B30;box-shadow:0 0 10px rgba(255,59,48,.85);animation:beaconDotPulse 1.4s ease-in-out infinite;display:inline-block;margin-left:8px;vertical-align:middle}}
-    @keyframes beaconDotPulse{{0%,100%{{transform:scale(.85);opacity:.65}}50%{{transform:scale(1.35);opacity:1}}}}
-    @media (prefers-reduced-motion: reduce){{.card.p1,.card.stale,.beacon-dot{{animation:none!important}}}}
-    @media (max-width: 1300px){{main.pipeline{{overflow-x:auto;grid-template-columns:repeat(6,minmax(230px,250px))}}}}
-    @media (max-width: 760px){{body{{overflow:auto}}header{{height:auto;display:block}}.top-row{{display:block}}.nav{{justify-content:flex-start;margin-top:10px}}.stats{{flex-wrap:wrap;margin-top:10px}}main.pipeline{{height:auto;display:block;overflow:visible}}.col{{margin:10px 0;max-height:none}}}}
+    :root{{--bg:#050816;--card:#0F172A;--soft:#1E293B;--med:#334155;--txt:#fff;--txt2:#CBD5E1;--mut:#94A3B8;--faint:#64748B;--status-immediate:#FF3B30;--status-customer:#FF9500;--status-progress:#3B82F6;--status-ready:#22C55E;--status-parts:#00E5FF;--status-ai:#A855F7}}
+    *{{box-sizing:border-box}}
+    body{{margin:0;font-family:Inter,ui-sans-serif,system-ui,Arial,sans-serif;background:radial-gradient(circle at top left,#111B3A 0%,#050816 40%,#020617 100%);color:var(--txt);-webkit-font-smoothing:antialiased;padding:22px 26px 60px}}
+    .top{{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid var(--soft);padding-bottom:16px;margin-bottom:8px;flex-wrap:wrap}}
+    .title{{font-size:22px;font-weight:900;letter-spacing:.06em}}
+    .title small{{display:block;font-size:10px;font-weight:800;letter-spacing:.18em;color:#A855F7;text-transform:uppercase;margin-top:5px;text-shadow:0 0 12px rgba(168,85,247,.6)}}
+    .stats{{display:flex;gap:9px;flex-wrap:wrap}}
+    .stat{{min-width:78px;height:50px;background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(2,6,23,.9));border:1px solid #263954;border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center}}
+    .stat b{{font-size:22px;font-weight:900;line-height:1;text-shadow:0 0 14px currentColor}}
+    .stat span{{font-size:8.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-top:4px}}
+    .ctrls{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
+    .btn{{height:32px;border-radius:8px;border:1px solid var(--med);background:rgba(15,23,42,.85);color:var(--txt2);font-size:11px;font-weight:800;padding:8px 12px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}}
+    .btn.live{{border-color:rgba(168,85,247,.7);color:#C084FC;box-shadow:0 0 16px rgba(168,85,247,.25)}}
+    .divider{{display:flex;align-items:center;gap:16px;margin:34px 0 16px}}
+    .dline{{flex:1;height:2px;border-radius:2px}}
+    .dline.l{{background:linear-gradient(90deg,transparent,rgba(var(--c),.55))}}
+    .dline.r{{background:linear-gradient(90deg,rgba(var(--c),.55),transparent)}}
+    .dtitle{{font-size:15px;font-weight:900;letter-spacing:.16em;text-transform:uppercase;color:rgb(var(--c));text-shadow:0 0 16px rgba(var(--c),.55);white-space:nowrap;display:flex;align-items:center;gap:11px;text-align:center}}
+    .cnt{{font-size:12px;font-weight:900;background:rgba(var(--c),.18);border:1px solid rgba(var(--c),.55);border-radius:999px;padding:3px 11px;color:rgb(var(--c));letter-spacing:.02em}}
+    .ro-line{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}}
+    .ro{{font-size:16px;font-weight:900}}
+    .veh{{font-size:12px;color:var(--mut);font-weight:600}}
+    .directive{{font-weight:1000;letter-spacing:.02em;line-height:1.15;text-transform:uppercase}}
+    .meta{{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px}}
+    .pill{{height:22px;border-radius:999px;padding:0 9px;display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.03em;border:1px solid currentColor}}
+    .pill.muted{{color:#94A3B8}}.pill.stale-pill{{color:#FF6B6B}}
+    .pri{{height:22px;border-radius:7px;padding:0 8px;font-size:11px;font-weight:900;display:inline-flex;align-items:center;color:#fff}}
+    .pri.P1{{background:#FF2D2D}}.pri.P2{{background:#FF7A00}}.pri.P3{{background:#FFD400;color:#111}}.pri.P4{{background:#22C55E;color:#052e16}}
+    .do-btn{{margin-left:auto;min-height:30px;border-radius:8px;font-size:11px;font-weight:900;padding:7px 13px;cursor:pointer;text-decoration:none;font-family:inherit;display:inline-flex;align-items:center}}
+    .do-btn.red{{border:1px solid rgba(255,59,48,.7);background:rgba(255,59,48,.16);color:#FF8A82}}
+    .do-btn.purple{{border:1px solid rgba(168,85,247,.6);background:rgba(168,85,247,.14);color:#C084FC}}
+    .do-btn.green{{border:1px solid rgba(34,197,94,.6);background:rgba(34,197,94,.14);color:#86EFAC}}
+    .do-btn.orange{{border:1px solid rgba(255,149,0,.6);background:rgba(255,149,0,.14);color:#FFB020}}
+    .do-btn.blue{{border:1px solid rgba(59,130,246,.6);background:rgba(59,130,246,.14);color:#93C5FD}}
+    .inline-form{{display:inline;margin:0;margin-left:auto}}
+    .donow{{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px}}
+    .screamer{{position:relative;overflow:hidden;border-radius:16px;padding:16px 18px 16px 22px;background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(7,12,24,.96));border:1px solid rgba(255,59,48,.85);animation:beat 2.1s ease-in-out infinite;cursor:pointer}}
+    .screamer:after{{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:#FF3B30;box-shadow:0 0 24px rgba(255,59,48,.9)}}
+    .screamer .directive{{font-size:21px;color:#FF5247;margin:2px 0 12px}}
+    .beacon{{width:11px;height:11px;border-radius:999px;background:#FF3B30;box-shadow:0 0 14px rgba(255,59,48,1);display:inline-block;animation:dot 1.2s ease-in-out infinite}}
+    .po0{{animation-delay:0s}}.po1{{animation-delay:.7s}}.po2{{animation-delay:1.4s}}
+    @keyframes beat{{0%,100%{{box-shadow:0 0 0 1px rgba(255,59,48,.7),0 0 16px rgba(255,59,48,.5),inset 0 1px 0 rgba(255,255,255,.06);transform:scale(1)}}50%{{box-shadow:0 0 0 4px rgba(255,59,48,1),0 0 54px rgba(255,59,48,1),inset 0 1px 0 rgba(255,255,255,.12);transform:scale(1.018)}}}}
+    @keyframes dot{{0%,100%{{transform:scale(.8);opacity:.6}}50%{{transform:scale(1.55);opacity:1;box-shadow:0 0 20px rgba(255,59,48,1)}}}}
+    .rows{{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px}}
+    .row{{position:relative;overflow:hidden;border-radius:13px;padding:12px 14px 12px 18px;background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(7,12,24,.96));border:1px solid rgba(var(--rgb),.55);box-shadow:inset 0 1px 0 rgba(255,255,255,.05);cursor:pointer}}
+    .row:after{{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:rgb(var(--rgb));box-shadow:0 0 16px rgba(var(--rgb),.5)}}
+    .row .directive{{font-size:15px;margin:0 0 9px;color:rgb(var(--rgb))}}
+    .row .ro{{font-size:14px}}
+    .empty-wide{{border:1px dashed rgba(148,163,184,.24);border-radius:13px;background:rgba(15,23,42,.55);color:#64748B;font-size:12px;font-weight:800;text-align:center;padding:18px}}
+    .legend{{margin-top:30px;padding-top:14px;border-top:1px solid var(--soft);font-size:11px;color:var(--faint);line-height:1.6}}
+    .legend b{{color:var(--txt2);font-weight:800}}
+    @media (prefers-reduced-motion:reduce){{.screamer,.beacon{{animation:none}}}}
+    @media(max-width:760px){{body{{padding:16px 14px 40px}}.dtitle{{font-size:12px;white-space:normal}}.divider{{gap:9px}}.screamer .directive{{font-size:18px}}}}
   </style>
 </head>
 <body>
-  <header>
-    <div class="top-row">
-      <div>
-        <h1>DVI Workflow</h1>
-        <div class="sub">Lifecycle lanes from workflow status, DVI gate result, and packet cache state. Generated {html.escape(generated_at)}.</div>
-      </div>
-      <nav class="nav">
-        <a href="/v2">Command Board</a>
-        <a href="/dvi/history">Packet History</a>
-        <a href="/sanity-check">Sanity Check</a>
-      </nav>
-    </div>
+  <div class="top">
+    <div class="title">DVI EXECUTION QUEUE<small>Powered by AdviseMe.ai · Generated {html.escape(generated_at)}</small></div>
     <div class="stats">
-      <div class="stat"><b>{len(records)}</b><span>Total DVI Rows</span></div>
-      <div class="stat"><b>{active_count}</b><span>Active Lanes</span></div>
-      <div class="stat"><b>{done_count}</b><span>Recently Done</span></div>
-      <div class="stat"><b>{duplicate_count}</b><span>Duplicate Listings</span></div>
+      <div class="stat"><b style="color:#FF3B30">{rework_count}</b><span>Rework</span></div>
+      <div class="stat"><b style="color:#FFD400">{stale_count}</b><span>Stale 24h+</span></div>
+      <div class="stat"><b style="color:#00E5FF">{parts_held}</b><span>Parts Held</span></div>
+      <div class="stat"><b style="color:#3B82F6">{in_progress_count}</b><span>In Progress</span></div>
+      <div class="stat"><b style="color:#22C55E">{done_count}</b><span>Done Today</span></div>
     </div>
-  </header>
-  <main class="pipeline">
-    {lane_html}
-  </main>
+    <div class="ctrls">
+      <a class="btn" href="/v2">Command Board</a>
+      <a class="btn" href="/dvi/history">History</a>
+      <a class="btn live" href="/sanity-check">Sanity Check</a>
+    </div>
+  </div>
+
+  {_render_divider("Do Now", len(do_now), "255,59,48")}
+  {_render_do_now(do_now)}
+  {stage_html}
+  <div class="legend">
+    <b>How to read it:</b> the directive is the loudest thing on every card. Work straight down: Do Now first, then each band. Rework, stale 24h+, and P1 jobs are pulled into Do Now and removed from stage bands, so there are <b>{duplicate_count}</b> duplicate listings.
+  </div>
 </body>
 </html>"""
