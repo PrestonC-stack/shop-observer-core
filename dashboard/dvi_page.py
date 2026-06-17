@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -688,13 +689,19 @@ def _status_age_hours(record: dict) -> float | None:
     return None
 
 
+def _timing_unknown(record: dict) -> bool:
+    return _status_age_hours(record) is None
+
+
 def _is_stale_24(record: dict) -> bool:
     if record.get("lane") == "done":
         return False
+    hours = _status_age_hours(record)
+    if hours is None:
+        return False
     if record.get("stale") is True:
         return True
-    hours = _status_age_hours(record)
-    return bool(hours is not None and hours >= 24)
+    return hours >= 24
 
 
 def _hours_label(record: dict) -> str:
@@ -750,6 +757,22 @@ def _tech_name(record: dict) -> str:
     return raw.split()[0].upper()
 
 
+def _sanitize_directive_text(value: object) -> str:
+    text = " ".join(str(value or "").replace("\n", " ").split())
+    if not text:
+        return ""
+    text = re.sub(r"\bNO MOVEMENT IN\s*(?:9\d{2,}|[1-9]\d{3,})\s*H(?:OURS?)?\b", "TIME IN STAGE UNKNOWN", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:9\d{2,}|[1-9]\d{3,})\s*H(?:OURS?)?\b", "TIME UNKNOWN", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:9\d{2,}|[1-9]\d{3,})\s*HRS?\b", "TIME UNKNOWN", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:9\d{2,}|[1-9]\d{3,})\s*HOURS?\b", "TIME UNKNOWN", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b999\b", "UNKNOWN", text)
+    return text.strip()
+
+
+def _fallback_directive(record: dict, default: str = "REVIEW JOB") -> str:
+    return _sanitize_directive_text(record.get("hermes_next_action") or record.get("next_action") or default)
+
+
 def _directive(record: dict) -> str:
     lane = record.get("lane")
     status = _normalize_status(record.get("workflow_status"))
@@ -762,6 +785,16 @@ def _directive(record: dict) -> str:
     if lane == "advisor_qc_review":
         return "REVIEW & FINALIZE"
     if lane == "in_progress":
+        if _timing_unknown(record):
+            if status in {"waiting parts", "ordering parts", "parts"}:
+                return "PARTS HOLD - TIME IN STAGE UNKNOWN"
+            if status in {"awaiting tech", "ready for tech"}:
+                return "WAITING ON TECH - TIME IN STAGE UNKNOWN"
+            if status == "waiting approval":
+                return "WAITING ON CUSTOMER - TIME IN STAGE UNKNOWN"
+            if status in {"testing", "dvi updates", "inspecting"}:
+                return "DVI FLOW - TIME IN STAGE UNKNOWN"
+            return f"{status.upper() if status else 'IN PROGRESS'} - TIME IN STAGE UNKNOWN"
         if status in {"waiting parts", "ordering parts", "parts"}:
             return "PARTS NOT IN YET - HOLD"
         if status in {"awaiting tech", "ready for tech"}:
@@ -770,10 +803,12 @@ def _directive(record: dict) -> str:
             return "WAITING ON CUSTOMER"
         if status in {"testing", "dvi updates", "inspecting"}:
             return "WAITING ON TECH - DVI FLOW"
-        return str(record.get("hermes_next_action") or record.get("next_action") or "WATCH PRODUCTION").upper()
+        if status == "servicing":
+            return "WATCH PRODUCTION"
+        return f"{status.upper() if status else 'IN PROGRESS'} - MONITOR PRODUCTION"
     if lane == "done":
         return "CLOSED - OPEN HISTORY IF NEEDED"
-    return str(record.get("hermes_next_action") or record.get("next_action") or "REVIEW JOB").upper()
+    return _fallback_directive(record, "REVIEW JOB").upper()
 
 
 def _card_href(record: dict) -> str:
@@ -870,7 +905,7 @@ def _ro_sort_value(record: dict) -> int:
     try:
         return int(str(record.get("ro") or "0"))
     except Exception:
-        return 999999
+        return 10**9
 
 
 def _urgency_rank(record: dict) -> tuple:
@@ -1224,13 +1259,13 @@ def render_dvi_page(demo: bool = False) -> str:
     .dline.l{{background:linear-gradient(90deg,transparent,rgba(var(--c),.55))}}
     .dline.r{{background:linear-gradient(90deg,rgba(var(--c),.55),transparent)}}
     .dtitle{{font-size:15px;font-weight:900;letter-spacing:.16em;text-transform:uppercase;color:rgb(var(--c));white-space:nowrap;display:flex;align-items:center;gap:11px;text-align:center}}
-    .cnt{{font-size:12px;font-weight:900;background:rgba(var(--c),.18);border:1px solid rgba(var(--c),.55);border-radius:999px;padding:3px 11px;color:rgb(var(--c));letter-spacing:.02em}}
+    .cnt{{font-size:12px;font-weight:900;background:rgba(var(--c),.18);border:1px solid rgba(var(--c),.55);border-radius:100px;padding:3px 11px;color:rgb(var(--c));letter-spacing:.02em}}
     .ro-line{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}}
     .ro{{font-size:16px;font-weight:900}}
     .veh{{font-size:12px;color:var(--mut);font-weight:600}}
     .directive{{font-weight:1000;letter-spacing:.02em;line-height:1.15;text-transform:uppercase}}
     .meta{{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px}}
-    .pill{{height:24px;border-radius:999px;padding:0 10px;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.025em;border:1px solid currentColor}}
+    .pill{{height:24px;border-radius:100px;padding:0 10px;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.025em;border:1px solid currentColor}}
     .pill.muted{{color:#CBD5E1;background:rgba(148,163,184,.07);border-color:rgba(203,213,225,.38)}}.pill.stale-pill{{color:#FF6B6B}}
     .pri{{height:22px;border-radius:7px;padding:0 8px;font-size:11px;font-weight:900;display:inline-flex;align-items:center;color:#fff}}
     .pri.P1{{background:#FF2D2D}}.pri.P2{{background:#FF7A00}}.pri.P3{{background:#FFD400;color:#111}}.pri.P4{{background:#22C55E;color:#052e16}}
@@ -1246,7 +1281,7 @@ def render_dvi_page(demo: bool = False) -> str:
     .screamer{{position:relative;overflow:hidden;border-radius:16px;padding:16px 18px 16px 22px;background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(7,12,24,.96));border:1px solid rgba(255,59,48,.85);animation:beat 2.1s ease-in-out infinite;cursor:pointer}}
     .screamer:after{{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:#FF3B30;box-shadow:0 0 24px rgba(255,59,48,.9)}}
     .screamer .directive{{font-size:21px;color:#FF5247;margin:2px 0 12px}}
-    .beacon{{width:11px;height:11px;border-radius:999px;background:#FF3B30;box-shadow:0 0 14px rgba(255,59,48,1);display:inline-block;animation:dot 1.2s ease-in-out infinite}}
+    .beacon{{width:11px;height:11px;border-radius:100px;background:#FF3B30;box-shadow:0 0 14px rgba(255,59,48,1);display:inline-block;animation:dot 1.2s ease-in-out infinite}}
     .po0{{animation-delay:0s}}.po1{{animation-delay:.7s}}.po2{{animation-delay:1.4s}}
     @keyframes beat{{0%,100%{{box-shadow:0 0 0 1px rgba(255,59,48,.7),0 0 16px rgba(255,59,48,.5),inset 0 1px 0 rgba(255,255,255,.06);transform:scale(1)}}50%{{box-shadow:0 0 0 4px rgba(255,59,48,1),0 0 54px rgba(255,59,48,1),inset 0 1px 0 rgba(255,255,255,.12);transform:scale(1.018)}}}}
     @keyframes dot{{0%,100%{{transform:scale(.8);opacity:.6}}50%{{transform:scale(1.55);opacity:1;box-shadow:0 0 20px rgba(255,59,48,1)}}}}
@@ -1259,7 +1294,7 @@ def render_dvi_page(demo: bool = False) -> str:
     .done-card:after{{opacity:.45;box-shadow:0 0 10px rgba(34,197,94,.24)}}
     .done-head{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}}
     .done-vehicle{{font-size:11px;color:#64748B;font-weight:700;margin-top:2px}}
-    .closed-pill{{border:1px solid rgba(34,197,94,.38);background:rgba(34,197,94,.08);color:#86EFAC;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;white-space:nowrap;text-transform:uppercase}}
+    .closed-pill{{border:1px solid rgba(34,197,94,.38);background:rgba(34,197,94,.08);color:#86EFAC;border-radius:100px;padding:5px 9px;font-size:10px;font-weight:900;white-space:nowrap;text-transform:uppercase}}
     .follow-box{{border:1px solid rgba(148,163,184,.18);background:rgba(2,6,23,.35);border-radius:11px;padding:10px;margin-top:8px}}
     .follow-title{{font-size:12px;font-weight:900;color:#CBD5E1;text-transform:uppercase;letter-spacing:.08em}}
     .follow-age{{font-size:11px;color:#94A3B8;margin-top:3px;margin-bottom:9px}}
@@ -1339,7 +1374,7 @@ def render_dvi_training_page() -> str:
     .btn.live{{border-color:rgba(168,85,247,.7);color:#C084FC;box-shadow:0 0 16px rgba(168,85,247,.25)}}
     .panel{{border:1px solid rgba(168,85,247,.35);background:linear-gradient(180deg,rgba(15,23,42,.92),rgba(2,6,23,.88));border-radius:22px;padding:22px;box-shadow:0 0 40px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.06)}}
     .progress{{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:18px;color:#94A3B8;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em}}
-    .bar{{height:8px;flex:1;border-radius:999px;background:#111827;overflow:hidden;border:1px solid #1E293B}}
+    .bar{{height:8px;flex:1;border-radius:100px;background:#111827;overflow:hidden;border:1px solid #1E293B}}
     .fill{{height:100%;width:16.66%;background:linear-gradient(90deg,#A855F7,#3B82F6);box-shadow:0 0 18px rgba(168,85,247,.7);transition:width .2s ease}}
     .step{{display:none;min-height:520px}}
     .step.active{{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,1.1fr);gap:28px;align-items:center}}
@@ -1374,13 +1409,13 @@ def render_dvi_training_page() -> str:
     .button-grid .orange{{border-color:rgba(255,149,0,.60);color:#FDBA74;background:rgba(255,149,0,.10)}}
     .sample-card{{position:relative;width:100%;border-radius:16px;padding:18px;background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(7,12,24,.96));border:1px solid rgba(255,59,48,.7);box-shadow:0 0 24px rgba(255,59,48,.25);overflow:hidden}}
     .sample-card:after{{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:#FF3B30;box-shadow:0 0 18px rgba(255,59,48,.75)}}
-    .tag{{position:absolute;right:12px;top:10px;border:1px solid rgba(255,59,48,.6);background:rgba(255,59,48,.12);color:#FF8A82;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;text-transform:uppercase}}
+    .tag{{position:absolute;right:12px;top:10px;border:1px solid rgba(255,59,48,.6);background:rgba(255,59,48,.12);color:#FF8A82;border-radius:100px;padding:5px 9px;font-size:10px;font-weight:900;text-transform:uppercase}}
     .ro-line{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}}
     .ro{{font-size:16px;font-weight:1000;color:#fff}}
     .veh{{font-size:12px;color:#94A3B8;font-weight:700}}
     .directive{{font-size:23px;line-height:1.1;font-weight:1000;color:#FF5247;text-transform:uppercase;margin:12px 0}}
     .meta{{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px}}
-    .pill{{height:24px;border-radius:999px;padding:0 10px;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.025em;border:1px solid currentColor}}
+    .pill{{height:24px;border-radius:100px;padding:0 10px;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.025em;border:1px solid currentColor}}
     .pill.muted{{color:#CBD5E1;background:rgba(148,163,184,.07);border-color:rgba(203,213,225,.38)}}.pill.stale-pill{{color:#FF6B6B}}
     .callouts{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:16px}}
     .callouts span{{border:1px dashed rgba(148,163,184,.32);border-radius:10px;padding:9px;color:#CBD5E1;font-size:11px;line-height:1.35}}
@@ -1388,7 +1423,7 @@ def render_dvi_training_page() -> str:
     .done-card:after{{background:#22C55E;opacity:.45;box-shadow:0 0 10px rgba(34,197,94,.24)}}
     .done-head{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}}
     .done-vehicle{{font-size:11px;color:#64748B;font-weight:700;margin-top:2px}}
-    .closed-pill{{border:1px solid rgba(34,197,94,.38);background:rgba(34,197,94,.08);color:#86EFAC;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;white-space:nowrap;text-transform:uppercase}}
+    .closed-pill{{border:1px solid rgba(34,197,94,.38);background:rgba(34,197,94,.08);color:#86EFAC;border-radius:100px;padding:5px 9px;font-size:10px;font-weight:900;white-space:nowrap;text-transform:uppercase}}
     .follow-box{{border:1px solid rgba(148,163,184,.18);background:rgba(2,6,23,.35);border-radius:11px;padding:10px;margin-top:8px}}
     .follow-title{{font-size:12px;font-weight:900;color:#CBD5E1;text-transform:uppercase;letter-spacing:.08em}}
     .follow-age{{font-size:11px;color:#94A3B8;margin-top:3px;margin-bottom:9px}}
