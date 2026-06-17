@@ -1035,6 +1035,83 @@ def _render_stage(title: str, records: list[dict], rgb: str) -> str:
     return _render_divider(title, len(records), rgb) + body
 
 
+def _training_steps() -> list[dict]:
+    sample_card = """
+      <div class="sample-card">
+        <div class="tag top">Directive: the next move</div>
+        <div class="ro-line"><span class="ro">RO D9001</span><span class="veh">Jordan Bell - 2020 Ford F-250</span></div>
+        <div class="directive">SEND BACK TO ALEX - Missing fuel pressure reading</div>
+        <div class="meta sample-meta">
+          <span class="pill muted">Owner: Tech</span>
+          <span class="pill stale-pill">Stale 1d 3h</span>
+          <span class="pill muted">2 failed checks</span>
+          <span class="pill muted">Gate ran 18m ago</span>
+          <span class="pill muted">Stage: servicing</span>
+        </div>
+        <div class="callouts">
+          <span>Directive = gate result + workflow status</span>
+          <span>Owner = who has the next move</span>
+          <span>Gate = DVI quality gate timestamp/result</span>
+          <span>Stage = AutoFlow workflow_status</span>
+          <span>Stale = time since last update</span>
+        </div>
+      </div>
+    """
+    done_card = """
+      <div class="sample-card done-card training-done">
+        <div class="done-head">
+          <div>
+            <div class="ro-line"><span class="ro">RO D9011</span><span class="veh">Sofia Grant</span></div>
+            <div class="done-vehicle">2018 Toyota Camry</div>
+          </div>
+          <span class="closed-pill">closed 3h ago</span>
+        </div>
+        <div class="follow-box">
+          <div class="follow-title">Close the loop</div>
+          <div class="follow-age">awaiting follow-up 3h</div>
+          <div class="training-form">
+            <span>Next appointment: 2026-06-24</span>
+            <span>Appointment scheduled</span>
+            <span>Followed up</span>
+            <span>Archive to History</span>
+          </div>
+        </div>
+      </div>
+    """
+    return [
+        {
+            "title": "What This Board Is",
+            "body": "The DVI Execution Queue tells advisors what to do next. Work top-down: clear Do Now first, then move through each stage band. The board removes guessing by turning gate results, workflow status, packet status, and timing into one action queue.",
+            "visual": '<div class="training-hero">Work top-down. Clear the loudest blockers first. Let the queue tell you the next move.</div>',
+        },
+        {
+            "title": "Do Now",
+            "body": "Do Now is the genuine urgent few: active rework, active stale jobs, and true P1 work. These cards float out of their stage so they cannot hide lower on the page. Clear Do Now before building packets or doing routine follow-up.",
+            "visual": '<div class="mini-lanes"><span class="hot">Active rework</span><span class="hot">Stale 24h+</span><span class="hot">True P1</span></div>',
+        },
+        {
+            "title": "The Stage Bands",
+            "body": "Ready for Build Packet means the inspection is clean but no current packet exists. TekMetric Ready means a current packet exists. In Progress means the RO is still moving through production, parts, approval, or tech flow. Advisor QC Review is advisor action before closeout. Recently Done is the close-the-loop checklist.",
+            "visual": '<div class="band-stack"><span>Ready for Build Packet -> build packet</span><span>TekMetric Ready -> push to TekMetric</span><span>In Progress -> monitor blocker</span><span>Advisor QC Review -> review and finalize</span><span>Recently Done -> close the loop</span></div>',
+        },
+        {
+            "title": "Anatomy Of A Card",
+            "body": "The directive is the largest text because it is the action. Supporting pills explain why: Owner, Stage, Gate, Stale, and failed checks. Data comes from AutoFlow board state, the DVI quality gate, packet cache, and time since the latest update.",
+            "visual": sample_card,
+        },
+        {
+            "title": "Recently Done",
+            "body": "Closed jobs are not ranked work. They stay in Recently Done until the advisor confirms follow-up, optionally records the next appointment date, and archives the RO to History. This is a local checklist only; it does not create an AutoFlow appointment yet.",
+            "visual": done_card,
+        },
+        {
+            "title": "What's Coming",
+            "body": "Next versions can use TekMetric data for customer approval and declined-work follow-ups, plus real appointment booking through the AutoFlow appointments API. For now, the board stays deterministic and only shows what the connected data can support.",
+            "visual": '<div class="coming-grid"><span>TekMetric-powered directives</span><span>Declined-work follow-up</span><span>Real appointment booking</span><span>More precise ownership</span></div>',
+        },
+    ]
+
+
 def render_dvi_page(demo: bool = False) -> str:
     records = _demo_records() if demo else _build_records()
     do_now, stages = _queue_sections(records)
@@ -1158,6 +1235,7 @@ def render_dvi_page(demo: bool = False) -> str:
     <div class="ctrls">
       <a class="btn" href="/v2">Command Board</a>
       <a class="btn" href="/dvi/history">History</a>
+      <a class="btn" href="/dvi/training" target="_blank" rel="noopener">Training</a>
       <a class="btn live" href="/sanity-check">Sanity Check</a>
       {demo_button}
     </div>
@@ -1169,5 +1247,127 @@ def render_dvi_page(demo: bool = False) -> str:
   <div class="legend">
     <b>How to read it:</b> the directive is the loudest thing on every card. Work straight down: Do Now first, then each band. Rework, stale 24h+, and P1 jobs are pulled into Do Now and removed from stage bands, so there are <b>{duplicate_count}</b> duplicate listings.
   </div>
+</body>
+</html>"""
+
+
+def render_dvi_training_page() -> str:
+    steps = _training_steps()
+    step_html = []
+    for index, step in enumerate(steps):
+        active = " active" if index == 0 else ""
+        step_html.append(f"""
+        <section class="step{active}" data-step="{index}">
+          <div class="eyebrow">Step {index + 1} of {len(steps)}</div>
+          <h2>{html.escape(step["title"])}</h2>
+          <p>{html.escape(step["body"])}</p>
+          <div class="visual">{step["visual"]}</div>
+        </section>
+        """)
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DVI Queue Training | Callahan Auto</title>
+  <style>
+    :root{{--bg:#050816;--card:#0F172A;--soft:#1E293B;--med:#334155;--txt:#fff;--txt2:#CBD5E1;--mut:#94A3B8;--faint:#64748B;--status-immediate:#FF3B30;--status-customer:#FF9500;--status-progress:#3B82F6;--status-ready:#22C55E;--status-parts:#00E5FF;--status-ai:#A855F7}}
+    *{{box-sizing:border-box}}
+    body{{margin:0;font-family:Inter,ui-sans-serif,system-ui,Arial,sans-serif;background:radial-gradient(circle at top left,#111B3A 0%,#050816 40%,#020617 100%);color:var(--txt);-webkit-font-smoothing:antialiased;padding:24px}}
+    .shell{{max-width:1120px;margin:0 auto}}
+    .top{{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;border-bottom:1px solid var(--soft);padding-bottom:18px;margin-bottom:24px;flex-wrap:wrap}}
+    h1{{margin:0;font-size:28px;font-weight:1000;letter-spacing:.06em}}
+    .sub{{color:#A855F7;font-size:10px;font-weight:900;letter-spacing:.18em;text-transform:uppercase;margin-top:6px;text-shadow:0 0 12px rgba(168,85,247,.6)}}
+    .btn{{height:34px;border-radius:9px;border:1px solid var(--med);background:rgba(15,23,42,.85);color:var(--txt2);font-size:11px;font-weight:900;padding:9px 13px;text-decoration:none;display:inline-flex;align-items:center}}
+    .btn.live{{border-color:rgba(168,85,247,.7);color:#C084FC;box-shadow:0 0 16px rgba(168,85,247,.25)}}
+    .panel{{border:1px solid rgba(168,85,247,.35);background:linear-gradient(180deg,rgba(15,23,42,.92),rgba(2,6,23,.88));border-radius:22px;padding:22px;box-shadow:0 0 40px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.06)}}
+    .progress{{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:18px;color:#94A3B8;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em}}
+    .bar{{height:8px;flex:1;border-radius:999px;background:#111827;overflow:hidden;border:1px solid #1E293B}}
+    .fill{{height:100%;width:16.66%;background:linear-gradient(90deg,#A855F7,#3B82F6);box-shadow:0 0 18px rgba(168,85,247,.7);transition:width .2s ease}}
+    .step{{display:none;min-height:520px}}
+    .step.active{{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,1.1fr);gap:28px;align-items:center}}
+    .eyebrow{{color:#A855F7;font-size:11px;font-weight:900;letter-spacing:.16em;text-transform:uppercase;margin-bottom:10px}}
+    h2{{font-size:38px;line-height:1.02;margin:0 0 16px;font-weight:1000;letter-spacing:.02em}}
+    p{{font-size:17px;line-height:1.65;color:#CBD5E1;margin:0;max-width:620px}}
+    .visual{{border:1px solid rgba(148,163,184,.22);border-radius:18px;background:rgba(2,6,23,.42);padding:18px;min-height:280px;display:flex;align-items:center;justify-content:center}}
+    .training-hero{{font-size:30px;line-height:1.2;font-weight:1000;text-align:center;color:#fff;text-shadow:0 0 24px rgba(168,85,247,.6);max-width:440px}}
+    .mini-lanes,.band-stack,.coming-grid{{display:grid;gap:12px;width:100%}}
+    .mini-lanes span,.band-stack span,.coming-grid span{{border:1px solid rgba(168,85,247,.42);background:rgba(168,85,247,.10);border-radius:13px;padding:14px 16px;font-size:14px;font-weight:900;color:#E9D5FF}}
+    .mini-lanes .hot{{border-color:rgba(255,59,48,.7);background:rgba(255,59,48,.12);color:#FF8A82;box-shadow:0 0 18px rgba(255,59,48,.18)}}
+    .band-stack span:nth-child(1){{border-color:rgba(168,85,247,.55);color:#C084FC}}
+    .band-stack span:nth-child(2){{border-color:rgba(34,197,94,.55);color:#86EFAC}}
+    .band-stack span:nth-child(3){{border-color:rgba(59,130,246,.55);color:#93C5FD}}
+    .band-stack span:nth-child(4){{border-color:rgba(255,149,0,.55);color:#FDBA74}}
+    .band-stack span:nth-child(5){{border-color:rgba(34,197,94,.32);color:#CBD5E1}}
+    .sample-card{{position:relative;width:100%;border-radius:16px;padding:18px;background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(7,12,24,.96));border:1px solid rgba(255,59,48,.7);box-shadow:0 0 24px rgba(255,59,48,.25);overflow:hidden}}
+    .sample-card:after{{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:#FF3B30;box-shadow:0 0 18px rgba(255,59,48,.75)}}
+    .tag{{position:absolute;right:12px;top:10px;border:1px solid rgba(255,59,48,.6);background:rgba(255,59,48,.12);color:#FF8A82;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;text-transform:uppercase}}
+    .ro-line{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}}
+    .ro{{font-size:16px;font-weight:1000;color:#fff}}
+    .veh{{font-size:12px;color:#94A3B8;font-weight:700}}
+    .directive{{font-size:23px;line-height:1.1;font-weight:1000;color:#FF5247;text-transform:uppercase;margin:12px 0}}
+    .meta{{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px}}
+    .pill{{height:24px;border-radius:999px;padding:0 10px;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.025em;border:1px solid currentColor}}
+    .pill.muted{{color:#CBD5E1;background:rgba(148,163,184,.07);border-color:rgba(203,213,225,.38)}}.pill.stale-pill{{color:#FF6B6B}}
+    .callouts{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:16px}}
+    .callouts span{{border:1px dashed rgba(148,163,184,.32);border-radius:10px;padding:9px;color:#CBD5E1;font-size:11px;line-height:1.35}}
+    .done-card{{border-color:rgba(34,197,94,.28);box-shadow:none;opacity:.86}}
+    .done-card:after{{background:#22C55E;opacity:.45;box-shadow:0 0 10px rgba(34,197,94,.24)}}
+    .done-head{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}}
+    .done-vehicle{{font-size:11px;color:#64748B;font-weight:700;margin-top:2px}}
+    .closed-pill{{border:1px solid rgba(34,197,94,.38);background:rgba(34,197,94,.08);color:#86EFAC;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;white-space:nowrap;text-transform:uppercase}}
+    .follow-box{{border:1px solid rgba(148,163,184,.18);background:rgba(2,6,23,.35);border-radius:11px;padding:10px;margin-top:8px}}
+    .follow-title{{font-size:12px;font-weight:900;color:#CBD5E1;text-transform:uppercase;letter-spacing:.08em}}
+    .follow-age{{font-size:11px;color:#94A3B8;margin-top:3px;margin-bottom:9px}}
+    .training-form{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}
+    .training-form span{{border:1px solid rgba(34,197,94,.26);background:rgba(34,197,94,.08);border-radius:8px;padding:9px;color:#CFFAFE;font-size:11px;font-weight:900}}
+    .nav{{display:flex;justify-content:space-between;gap:12px;margin-top:18px}}
+    .nav button{{height:38px;border-radius:10px;border:1px solid #334155;background:#111827;color:#fff;padding:0 18px;font-weight:900;cursor:pointer}}
+    .nav button.primary{{border-color:rgba(168,85,247,.7);background:rgba(168,85,247,.18);color:#E9D5FF}}
+    .nav button:disabled{{opacity:.45;cursor:default}}
+    @media(max-width:840px){{.step.active{{grid-template-columns:1fr}}h2{{font-size:30px}}body{{padding:16px}}}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="top">
+      <div>
+        <h1>DVI EXECUTION QUEUE TRAINING</h1>
+        <div class="sub">Self-contained advisor walkthrough - works with no live data</div>
+      </div>
+      <a class="btn live" href="/dvi">Back to Board</a>
+    </div>
+    <section class="panel">
+      <div class="progress">
+        <span id="counter">Step 1 of {len(steps)}</span>
+        <div class="bar"><div class="fill" id="fill"></div></div>
+      </div>
+      {"".join(step_html)}
+      <div class="nav">
+        <button type="button" id="backBtn">Back</button>
+        <button type="button" class="primary" id="nextBtn">Next</button>
+      </div>
+    </section>
+  </main>
+  <script>
+    const steps = Array.from(document.querySelectorAll('.step'));
+    let current = 0;
+    function showStep(index) {{
+      current = Math.max(0, Math.min(index, steps.length - 1));
+      steps.forEach((step, i) => step.classList.toggle('active', i === current));
+      document.getElementById('counter').textContent = 'Step ' + (current + 1) + ' of ' + steps.length;
+      document.getElementById('fill').style.width = (((current + 1) / steps.length) * 100) + '%';
+      document.getElementById('backBtn').disabled = current === 0;
+      document.getElementById('nextBtn').textContent = current === steps.length - 1 ? 'Restart' : 'Next';
+    }}
+    document.getElementById('backBtn').addEventListener('click', () => showStep(current - 1));
+    document.getElementById('nextBtn').addEventListener('click', () => showStep(current === steps.length - 1 ? 0 : current + 1));
+    document.addEventListener('keydown', (event) => {{
+      if (event.key === 'ArrowRight') showStep(current === steps.length - 1 ? 0 : current + 1);
+      if (event.key === 'ArrowLeft') showStep(current - 1);
+    }});
+    showStep(0);
+  </script>
 </body>
 </html>"""

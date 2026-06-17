@@ -441,6 +441,11 @@ from pathlib import Path as _Path
 def dvi_workflow():
     return render_dvi_page(demo=request.args.get("demo") in {"1", "true", "yes"})
 
+@app.route("/dvi/training")
+def dvi_training():
+    from dashboard.dvi_page import render_dvi_training_page
+    return render_dvi_training_page()
+
 @app.route("/dvi/rerun/<ro>", methods=["POST"])
 def dvi_rerun_gate(ro):
     import threading
