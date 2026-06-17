@@ -454,6 +454,14 @@ def dvi_rerun_gate(ro):
     ).start()
     return redirect("/dvi")
 
+@app.route("/dvi/followup/<ro>", methods=["POST"])
+def dvi_done_followup(ro):
+    from flask import redirect
+    from dashboard.dvi_page import record_done_followup
+
+    record_done_followup(str(ro), request.form.to_dict())
+    return redirect("/dvi")
+
 @app.route("/dvi/packet/<ro>")
 def dvi_packet(ro):
     from dashboard.packet_page import render_packet_page

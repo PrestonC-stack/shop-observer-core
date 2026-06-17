@@ -15,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DVI_REVIEWS_DIR = ROOT / "state" / "dvi_reviews"
+FOLLOWUPS_PATH = ROOT / "state" / "followups.json"
 
 try:
     from board_loader import _load_board_state
@@ -103,7 +104,7 @@ LANES = [
     {
         "key": "done",
         "title": "Recently Done",
-        "subtitle": "Ready, finished, or closed ROs from the last 24 hours. Older packets live in History.",
+        "subtitle": "Closed-loop checklist before the RO moves fully into History.",
         "tone": "done",
         "rgb": "34,197,94",
     },
@@ -164,6 +165,41 @@ def _read_json(path: Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+
+
+def _load_followups() -> dict:
+    data = _read_json(FOLLOWUPS_PATH)
+    return data if isinstance(data, dict) else {}
+
+
+def _is_followup_archived(ro: str) -> bool:
+    entry = _load_followups().get(str(ro))
+    return bool(isinstance(entry, dict) and entry.get("completed_at"))
+
+
+def record_done_followup(ro: str, payload: dict | None = None) -> dict:
+    ro_text = _normalize_ro_key(ro)
+    if not ro_text:
+        raise ValueError("RO is required")
+    payload = payload or {}
+    followups = _load_followups()
+    entry = {
+        "ro": ro_text,
+        "followed_up": str(payload.get("followed_up", "")).lower() in {"1", "true", "yes", "on"},
+        "appointment_date": str(payload.get("appointment_date") or "").strip(),
+        "appointment_scheduled": str(payload.get("appointment_scheduled", "")).lower() in {"1", "true", "yes", "on"},
+        "completed_at": _now_utc().isoformat(),
+        "source": "dvi_recently_done",
+    }
+    # Future step: create/update the actual appointment through AutoFlow's appointments API.
+    followups[ro_text] = entry
+    _write_json(FOLLOWUPS_PATH, followups)
+    return entry
 
 
 def _normalize_ro_key(value: object) -> str:
@@ -432,7 +468,7 @@ def _lane_records(records: list[dict]) -> dict[str, list[dict]]:
             continue
         seen.add(ro)
         lane = record["lane"]
-        if lane == "done" and not _recent_done(record):
+        if lane == "done" and _is_followup_archived(ro):
             continue
         lanes.setdefault(lane, []).append(record)
 
@@ -650,6 +686,22 @@ def _stage_meta(record: dict) -> tuple[str, str]:
     return "Tech", status.title() if status else "In progress"
 
 
+def _awaiting_followup_label(record: dict) -> str:
+    done_time = None
+    for key in ("status_updated_at", "updated_at", "generated_at", "gate_ran_at"):
+        done_time = _parse_dt(record.get(key))
+        if done_time:
+            break
+    if not done_time:
+        return "awaiting follow-up"
+    hours = max(0.0, (_now_utc() - done_time).total_seconds() / 3600)
+    if hours >= 24:
+        return f"awaiting follow-up {int(hours // 24)}d {int(hours % 24)}h"
+    if hours >= 1:
+        return f"awaiting follow-up {int(hours)}h"
+    return f"awaiting follow-up {int(hours * 60)}m"
+
+
 def _do_now(record: dict) -> bool:
     if record.get("lane") == "done":
         return False
@@ -713,6 +765,8 @@ def _queue_sections(records: list[dict]) -> tuple[list[dict], dict[str, list[dic
             do_now.append(record)
             continue
         lane = record.get("lane")
+        if lane == "done" and _is_followup_archived(ro):
+            continue
         if lane == "needs_rework":
             do_now.append(record)
         elif lane in stages:
@@ -771,6 +825,8 @@ def _render_do_now(records: list[dict]) -> str:
 
 
 def _render_stage_card(record: dict, rgb: str) -> str:
+    if record.get("lane") == "done":
+        return _render_done_card(record, rgb)
     ro = html.escape(str(record.get("ro") or ""))
     href = html.escape(_card_href(record))
     vehicle = f"{record.get('customer') or 'Unknown'} · {record.get('vehicle') or ''}".strip(" ·")
@@ -780,6 +836,44 @@ def _render_stage_card(record: dict, rgb: str) -> str:
       <div class="ro-line"><span class="ro">RO {ro}</span><span class="veh">{html.escape(vehicle)}</span></div>
       <div class="directive">{html.escape(_directive(record))}</div>
       {_render_meta(record)}
+    </article>
+    """
+
+
+def _render_done_card(record: dict, rgb: str) -> str:
+    ro = html.escape(str(record.get("ro") or ""))
+    customer = html.escape(str(record.get("customer") or "Unknown Customer"))
+    vehicle = html.escape(str(record.get("vehicle") or ""))
+    closed = html.escape(_hours_label(record))
+    awaiting = html.escape(_awaiting_followup_label(record))
+    return f"""
+    <article class="row done-card" style="--rgb:{rgb}">
+      <div class="done-head">
+        <div>
+          <div class="ro-line"><span class="ro">RO {ro}</span><span class="veh">{customer}</span></div>
+          <div class="done-vehicle">{vehicle}</div>
+        </div>
+        <span class="closed-pill">{closed}</span>
+      </div>
+      <div class="follow-box">
+        <div class="follow-title">Close the loop</div>
+        <div class="follow-age">{awaiting}</div>
+        <form class="follow-form" method="post" action="/dvi/followup/{ro}">
+          <label class="date-label">
+            <span>Next appointment</span>
+            <input type="date" name="appointment_date">
+          </label>
+          <label class="check-label">
+            <input type="checkbox" name="appointment_scheduled" value="1">
+            <span>Appointment scheduled</span>
+          </label>
+          <label class="check-label">
+            <input type="checkbox" name="followed_up" value="1">
+            <span>Followed up</span>
+          </label>
+          <button class="archive-btn" type="submit">Archive to History</button>
+        </form>
+      </div>
     </article>
     """
 
@@ -869,6 +963,21 @@ def render_dvi_page() -> str:
     .row:after{{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:rgb(var(--rgb));box-shadow:0 0 16px rgba(var(--rgb),.5)}}
     .row .directive{{font-size:15px;margin:0 0 9px;color:rgb(var(--rgb))}}
     .row .ro{{font-size:14px}}
+    .done-card{{cursor:default;opacity:.72;background:linear-gradient(180deg,rgba(15,23,42,.82),rgba(7,12,24,.76));border-color:rgba(34,197,94,.28)}}
+    .done-card:after{{opacity:.45;box-shadow:0 0 10px rgba(34,197,94,.24)}}
+    .done-head{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}}
+    .done-vehicle{{font-size:11px;color:#64748B;font-weight:700;margin-top:2px}}
+    .closed-pill{{border:1px solid rgba(34,197,94,.38);background:rgba(34,197,94,.08);color:#86EFAC;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;white-space:nowrap;text-transform:uppercase}}
+    .follow-box{{border:1px solid rgba(148,163,184,.18);background:rgba(2,6,23,.35);border-radius:11px;padding:10px;margin-top:8px}}
+    .follow-title{{font-size:12px;font-weight:900;color:#CBD5E1;text-transform:uppercase;letter-spacing:.08em}}
+    .follow-age{{font-size:11px;color:#94A3B8;margin-top:3px;margin-bottom:9px}}
+    .follow-form{{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center}}
+    .date-label{{grid-column:1/-1;display:grid;gap:4px;font-size:10px;font-weight:900;color:#64748B;text-transform:uppercase;letter-spacing:.06em}}
+    .date-label input{{height:31px;border-radius:8px;border:1px solid rgba(148,163,184,.26);background:#020617;color:#E2E8F0;padding:0 9px;font-family:inherit}}
+    .check-label{{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:800;color:#CBD5E1}}
+    .check-label input{{accent-color:#22C55E}}
+    .archive-btn{{grid-column:1/-1;min-height:31px;border-radius:8px;border:1px solid rgba(34,197,94,.48);background:rgba(34,197,94,.12);color:#86EFAC;font-size:11px;font-weight:900;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:.05em}}
+    .archive-btn:hover{{background:rgba(34,197,94,.2)}}
     .empty-wide{{border:1px dashed rgba(148,163,184,.24);border-radius:13px;background:rgba(15,23,42,.55);color:#64748B;font-size:12px;font-weight:800;text-align:center;padding:18px}}
     .legend{{margin-top:30px;padding-top:14px;border-top:1px solid var(--soft);font-size:11px;color:var(--faint);line-height:1.6}}
     .legend b{{color:var(--txt2);font-weight:800}}
@@ -884,7 +993,7 @@ def render_dvi_page() -> str:
       <div class="stat"><b style="color:#FFD400">{stale_count}</b><span>Stale 24h+</span></div>
       <div class="stat"><b style="color:#00E5FF">{parts_held}</b><span>Parts Held</span></div>
       <div class="stat"><b style="color:#3B82F6">{in_progress_count}</b><span>In Progress</span></div>
-      <div class="stat"><b style="color:#22C55E">{done_count}</b><span>Done Today</span></div>
+      <div class="stat"><b style="color:#22C55E">{done_count}</b><span>Recently Done</span></div>
     </div>
     <div class="ctrls">
       <a class="btn" href="/v2">Command Board</a>
