@@ -29,6 +29,7 @@ BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_advisor_game_plan.py"
 ACTIVE_ROS_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_active_ros_state.py"
 SHOP_STATE_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_shop_state.py"
 BOARD_STATE_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_board_state.py"
+STATUS_TIMESTAMPS_PATH = REPO_ROOT / "state" / "status_timestamps.json"
 
 
 from core.cas.dvi_trigger import handle_webhook_event
@@ -139,6 +140,46 @@ def _first_tech_name(techs: Any) -> str:
 def _safe_ro_filename(ro: str) -> str:
     safe = "".join(ch for ch in str(ro or "unknown") if ch.isalnum() or ch in ("-", "_"))
     return safe or "unknown"
+
+def _load_status_timestamps() -> dict[str, Any]:
+    try:
+        if STATUS_TIMESTAMPS_PATH.exists():
+            data = json.loads(STATUS_TIMESTAMPS_PATH.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+    except Exception as exc:
+        print(f"STATUS TIMESTAMP READ FAILED: {exc}")
+    return {}
+
+def _write_status_timestamps(data: dict[str, Any]) -> None:
+    STATUS_TIMESTAMPS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = STATUS_TIMESTAMPS_PATH.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(data, ensure_ascii=True, indent=2, sort_keys=True), encoding="utf-8")
+    tmp_path.replace(STATUS_TIMESTAMPS_PATH)
+
+def _normalize_status_for_clock(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().replace("_", " ").split())
+
+def _update_status_timestamp(payload: dict[str, Any], received_at: str) -> None:
+    """Clock status age from deploy time forward; first-seen entries are lower bounds."""
+    ticket = payload.get("ticket", {}) if isinstance(payload.get("ticket"), dict) else {}
+    ro = str(ticket.get("invoice", "")).strip()
+    status = str(ticket.get("status", "")).strip()
+    if not ro or not status:
+        return
+
+    data = _load_status_timestamps()
+    current = data.get(ro) if isinstance(data.get(ro), dict) else None
+    if not current:
+        data[ro] = {"status": status, "status_since": received_at, "since_first_seen": True}
+    elif _normalize_status_for_clock(current.get("status", "")) != _normalize_status_for_clock(status):
+        data[ro] = {"status": status, "status_since": received_at, "since_first_seen": False}
+    _write_status_timestamps(data)
+
+def _update_status_timestamp_safely(payload: dict[str, Any], received_at: str) -> None:
+    try:
+        _update_status_timestamp(payload, received_at)
+    except Exception as exc:
+        print(f"STATUS TIMESTAMP WRITE FAILED: {exc}")
 
 def _append_event(payload: dict[str, Any], received_at: str) -> None:
     EVENT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -286,6 +327,7 @@ def receive_autoflow_webhook():
     # Your original logic continues
     _append_event(payload, received_at)
     _append_transition_and_activity_safely(payload, received_at)
+    _update_status_timestamp_safely(payload, received_at)
     handle_webhook_event(payload, received_at)
     _rebuild_advisor_tasks()
     state_rebuild = _rebuild_local_state()

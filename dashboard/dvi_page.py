@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DVI_REVIEWS_DIR = ROOT / "state" / "dvi_reviews"
 FOLLOWUPS_PATH = ROOT / "state" / "followups.json"
+STATUS_TIMESTAMPS_PATH = ROOT / "state" / "status_timestamps.json"
 
 try:
     from board_loader import _load_board_state
@@ -175,6 +176,11 @@ def _write_json(path: Path, payload: dict) -> None:
 
 def _load_followups() -> dict:
     data = _read_json(FOLLOWUPS_PATH)
+    return data if isinstance(data, dict) else {}
+
+
+def _load_status_timestamps() -> dict:
+    data = _read_json(STATUS_TIMESTAMPS_PATH)
     return data if isinstance(data, dict) else {}
 
 
@@ -366,6 +372,29 @@ def _review_resolved(review: dict) -> bool:
     )
 
 
+def _status_clock_for_record(record: dict, clocks: dict | None = None) -> dict:
+    if isinstance(record.get("status_clock"), dict):
+        return record["status_clock"]
+    clocks = clocks if isinstance(clocks, dict) else _load_status_timestamps()
+    ro = str(record.get("ro") or "").strip()
+    entry = clocks.get(ro) if ro else None
+    if not isinstance(entry, dict):
+        return {}
+    stored_status = _normalize_status(entry.get("status"))
+    current_status = _normalize_status(record.get("workflow_status"))
+    if not stored_status or stored_status != current_status:
+        return {}
+    since = _parse_dt(entry.get("status_since"))
+    if not since:
+        return {}
+    return {
+        "status": entry.get("status", ""),
+        "status_since": since.isoformat(),
+        "elapsed_hours": max(0.0, (_now_utc() - since).total_seconds() / 3600),
+        "since_first_seen": bool(entry.get("since_first_seen")),
+    }
+
+
 def _recent_done(record: dict) -> bool:
     candidates = [
         record.get("status_updated_at"),
@@ -404,6 +433,7 @@ def assign_dvi_lane(record: dict) -> str:
 def _build_records() -> list[dict]:
     jobs = _load_jobs_by_ro()
     reviews = _load_all_reviews()
+    status_clocks = _load_status_timestamps()
     all_ros = sorted(set(jobs) | set(reviews), key=lambda x: int(x) if x.isdigit() else x)
     records: list[dict] = []
 
@@ -455,6 +485,7 @@ def _build_records() -> list[dict]:
             "stale": job.get("stale") is True,
         }
         record["lane"] = assign_dvi_lane(record)
+        record["status_clock"] = _status_clock_for_record(record, status_clocks)
         records.append(record)
 
     return records
@@ -518,6 +549,12 @@ def _demo_record(
         "demo_mode": True,
     }
     record["lane"] = assign_dvi_lane(record)
+    record["status_clock"] = {
+        "status": workflow_status,
+        "status_since": _demo_dt(hours_ago),
+        "elapsed_hours": max(0.0, float(hours_ago)),
+        "since_first_seen": False,
+    }
     return record
 
 
@@ -673,19 +710,11 @@ def _is_p1(record: dict) -> bool:
 def _status_age_hours(record: dict) -> float | None:
     if record.get("lane") == "done":
         return None
-    raw_hours = record.get("hours_in_status")
+    clock = _status_clock_for_record(record)
     try:
-        if raw_hours not in (None, ""):
-            hours = max(0.0, float(raw_hours))
-            if hours < 900:
-                return hours
+        return max(0.0, float(clock.get("elapsed_hours"))) if clock else None
     except Exception:
-        pass
-    for key in ("status_updated_at", "updated_at", "generated_at"):
-        dt = _parse_dt(record.get(key))
-        if dt:
-            return max(0.0, (_now_utc() - dt).total_seconds() / 3600)
-    return None
+        return None
 
 
 def _timing_unknown(record: dict) -> bool:
@@ -719,22 +748,32 @@ def _hours_label(record: dict) -> str:
     hours = _status_age_hours(record)
     if hours is None:
         return "timing unknown"
+    prefix = "stale >=" if _status_clock_for_record(record).get("since_first_seen") else "stale"
     if hours >= 24:
-        return f"stale {int(hours // 24)}d {int(hours % 24)}h"
+        return f"{prefix} {int(hours // 24)}d {int(hours % 24)}h"
     if hours >= 1:
         return f"{int(hours)}h"
     return f"{int(hours * 60)}m"
 
 
-def _movement_age_label(record: dict) -> str:
-    hours = _status_age_hours(record)
-    if hours is None:
-        return "TIME IN STAGE UNKNOWN"
+def _elapsed_compact(hours: float) -> str:
     if hours >= 24:
-        return f"NO MOVEMENT IN {int(hours // 24)}D {int(hours % 24)}H"
+        return f"{int(hours // 24)}D {int(hours % 24)}H"
     if hours >= 1:
-        return f"NO MOVEMENT IN {int(hours)}H"
-    return f"NO MOVEMENT IN {max(1, int(hours * 60))}M"
+        return f"{int(hours)}H"
+    return f"{max(1, int(hours * 60))}M"
+
+
+def _movement_age_label(record: dict) -> str:
+    clock = _status_clock_for_record(record)
+    if not clock:
+        return "TIME IN STAGE UNKNOWN"
+    hours = max(0.0, float(clock.get("elapsed_hours") or 0))
+    if clock.get("since_first_seen"):
+        return f"IN STAGE >={_elapsed_compact(hours)}"
+    if hours >= 24:
+        return f"NO MOVEMENT IN {_elapsed_compact(hours)}"
+    return f"NO MOVEMENT IN {_elapsed_compact(hours)}"
 
 
 def _is_rework(record: dict) -> bool:
