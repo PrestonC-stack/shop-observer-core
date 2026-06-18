@@ -446,6 +446,11 @@ def dvi_training():
     from dashboard.dvi_page import render_dvi_training_page
     return render_dvi_training_page()
 
+@app.route("/dvi/failed-checks/<ro>")
+def dvi_failed_checks(ro):
+    from dashboard.dvi_page import render_failed_checks_page
+    return render_failed_checks_page(ro)
+
 @app.route("/dvi/rerun/<ro>", methods=["POST"])
 def dvi_rerun_gate(ro):
     import threading

@@ -284,6 +284,13 @@ def _load_all_reviews() -> dict[str, dict]:
     return reviews
 
 
+def _load_review_for_ro(ro: str) -> dict:
+    ro_key = _normalize_ro_key(ro)
+    if not ro_key:
+        return {}
+    return _read_json(DVI_REVIEWS_DIR / f"{ro_key}.json")
+
+
 def _packet_paths(ro: str) -> tuple[Path, Path]:
     return (
         DVI_REVIEWS_DIR / f"{ro}_packet.json",
@@ -1064,10 +1071,18 @@ def _priority_badge(record: dict) -> str:
 
 def _render_meta(record: dict, include_gate: bool = True) -> str:
     owner, detail = _stage_meta(record)
+    ro = html.escape(str(record.get("ro") or ""))
+    flag_count = int(record.get("flag_count") or 0)
+    detail_html = (
+        f'<a class="pill failed-pill" href="/dvi/failed-checks/{ro}" target="_blank" '
+        f'rel="noopener" title="Open printable failed-check list">{flag_count} failed checks</a>'
+        if flag_count > 0
+        else f'<span class="pill muted">{html.escape(detail)}</span>'
+    )
     parts = [
         _priority_badge(record),
         f'<span class="pill muted">{html.escape(owner)}</span>',
-        f'<span class="pill muted">{html.escape(detail)}</span>',
+        detail_html,
     ]
     if _is_stale_24(record):
         parts.insert(1, f'<span class="pill stale-pill">{html.escape(_hours_label(record))}</span>')
@@ -1077,6 +1092,108 @@ def _render_meta(record: dict, include_gate: bool = True) -> str:
         parts.append(f'<span class="pill muted">{html.escape(gate_label)}</span>')
     parts.append(_action_button(record))
     return '<div class="meta">' + "".join(parts) + "</div>"
+
+
+def _flag_title(flag: dict) -> str:
+    section = str(flag.get("section") or "").strip()
+    item = str(flag.get("item_name") or "DVI item").strip()
+    if section and section.lower() != "unknown":
+        return f"{section} - {item}"
+    return item
+
+
+def _flag_issue(flag: dict) -> str:
+    return str(flag.get("message") or "Failed DVI check").strip()
+
+
+def _flag_needed(flag: dict) -> str:
+    return str(flag.get("recommended_action") or "Correct and document this DVI item.").strip()
+
+
+def render_failed_checks_page(ro: str) -> str:
+    ro_key = _normalize_ro_key(ro)
+    review = _load_review_for_ro(ro_key)
+    flags = review.get("flags") if isinstance(review.get("flags"), list) else []
+    customer = str(review.get("customer") or "Unknown Customer")
+    vehicle = str(review.get("vehicle") or "")
+    status = str(review.get("review_status") or "NO_REVIEW")
+    gate_ran = _display_ts(_gate_ran_at(review)) if review else "unknown"
+
+    if flags:
+        rows = []
+        for index, flag in enumerate([f for f in flags if isinstance(f, dict)], start=1):
+            severity = str(flag.get("severity") or "").upper()
+            category = str(flag.get("category") or "").replace("_", " ").title()
+            rows.append(f"""
+            <li class="check">
+              <div class="num">{index}</div>
+              <div>
+                <h2>{html.escape(_flag_title(flag))}</h2>
+                <p><strong>Issue:</strong> {html.escape(_flag_issue(flag))}</p>
+                <p><strong>Needed:</strong> {html.escape(_flag_needed(flag))}</p>
+                <div class="meta-line">{html.escape(severity or "FLAG")} · {html.escape(category or "DVI Check")}</div>
+              </div>
+            </li>
+            """)
+        body = '<ol class="checks">' + "".join(rows) + "</ol>"
+    elif review:
+        body = '<div class="empty">No failed checks are currently saved for this RO.</div>'
+    else:
+        body = '<div class="empty">No DVI review file was found for this RO.</div>'
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DVI Failed Checks | RO {html.escape(ro_key)}</title>
+  <style>
+    *{{box-sizing:border-box}}
+    body{{margin:0;background:#f8fafc;color:#111827;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;padding:28px}}
+    .sheet{{max-width:900px;margin:0 auto;background:white;border:1px solid #d1d5db;border-radius:14px;padding:28px;box-shadow:0 12px 30px rgba(15,23,42,.12)}}
+    .top{{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;border-bottom:3px solid #dc2626;padding-bottom:16px;margin-bottom:20px}}
+    h1{{margin:0;font-size:26px;letter-spacing:.03em;color:#991b1b}}
+    .sub{{font-size:13px;color:#4b5563;margin-top:6px;line-height:1.45}}
+    .print-btn{{border:1px solid #991b1b;background:#dc2626;color:white;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:800;cursor:pointer}}
+    .summary{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:18px 0}}
+    .box{{border:1px solid #e5e7eb;background:#f9fafb;border-radius:10px;padding:12px}}
+    .label{{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;margin-bottom:4px}}
+    .value{{font-size:15px;font-weight:800;color:#111827}}
+    .checks{{list-style:none;margin:0;padding:0;display:grid;gap:12px}}
+    .check{{display:grid;grid-template-columns:40px 1fr;gap:14px;border:1px solid #fecaca;background:#fff7f7;border-radius:12px;padding:14px;break-inside:avoid}}
+    .num{{width:32px;height:32px;border-radius:999px;background:#dc2626;color:white;display:flex;align-items:center;justify-content:center;font-weight:900}}
+    h2{{margin:0 0 8px;font-size:17px;color:#7f1d1d}}
+    p{{margin:5px 0;font-size:14px;line-height:1.5}}
+    .meta-line{{margin-top:9px;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#6b7280}}
+    .empty{{border:1px dashed #9ca3af;border-radius:12px;padding:20px;text-align:center;color:#4b5563;font-weight:700}}
+    @media print{{
+      @page{{margin:.5in}}
+      body{{background:white;padding:0}}
+      .sheet{{box-shadow:none;border:0;border-radius:0;padding:0;max-width:none}}
+      .print-btn{{display:none}}
+      .top{{border-bottom-color:#111827}}
+      .check{{background:white;border-color:#9ca3af}}
+    }}
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <div class="top">
+      <div>
+        <h1>DVI FAILED CHECKS - RO {html.escape(ro_key)}</h1>
+        <div class="sub">Print this list and send the specific fixes back to the bay. These are pulled directly from the saved DVI gate result.</div>
+      </div>
+      <button class="print-btn" type="button" onclick="window.print()">Print</button>
+    </div>
+    <section class="summary">
+      <div class="box"><div class="label">Customer</div><div class="value">{html.escape(customer)}</div></div>
+      <div class="box"><div class="label">Vehicle</div><div class="value">{html.escape(vehicle or "Not recorded")}</div></div>
+      <div class="box"><div class="label">Gate</div><div class="value">{html.escape(status)} · {html.escape(gate_ran)}</div></div>
+    </section>
+    {body}
+  </main>
+</body>
+</html>"""
 
 
 def _render_do_now(records: list[dict]) -> str:
@@ -1341,11 +1458,11 @@ def render_dvi_page(demo: bool = False) -> str:
     .title{{font-size:22px;font-weight:900;letter-spacing:.06em}}
     .title small{{display:block;font-size:10px;font-weight:800;letter-spacing:.18em;color:#A855F7;text-transform:uppercase;margin-top:5px}}
     .stats{{display:flex;gap:9px;flex-wrap:wrap}}
-    .stat{{min-width:78px;height:50px;background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(2,6,23,.9));border:1px solid #263954;border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center}}
-    .stat b{{font-size:22px;font-weight:900;line-height:1}}
-    .stat span{{font-size:8.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-top:4px}}
+    .stat{{min-width:84px;height:54px;background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(2,6,23,.9));border:1px solid #263954;border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center}}
+    .stat b{{font-size:25px;font-weight:950;line-height:1;color:#fff}}
+    .stat span{{font-size:10px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#CBD5E1;margin-top:5px}}
     .ctrls{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
-    .btn{{height:32px;border-radius:8px;border:1px solid var(--med);background:rgba(15,23,42,.85);color:var(--txt2);font-size:11px;font-weight:800;padding:8px 12px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}}
+    .btn{{height:34px;border-radius:8px;border:1px solid var(--med);background:rgba(15,23,42,.85);color:#E2E8F0;font-size:12px;font-weight:900;padding:8px 13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}}
     .btn.live{{border-color:rgba(168,85,247,.7);color:#C084FC;box-shadow:0 0 16px rgba(168,85,247,.25)}}
     .demo-banner{{position:sticky;top:0;z-index:20;margin:-6px auto 18px;width:max-content;max-width:100%;border:1px solid rgba(168,85,247,.75);background:linear-gradient(90deg,rgba(168,85,247,.92),rgba(59,130,246,.9));color:#fff;border-radius:0 0 14px 14px;padding:8px 24px;font-size:12px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;box-shadow:0 0 28px rgba(168,85,247,.42)}}
     .divider{{display:flex;align-items:center;gap:16px;margin:34px 0 16px}}
@@ -1359,8 +1476,9 @@ def render_dvi_page(demo: bool = False) -> str:
     .veh{{font-size:12px;color:var(--mut);font-weight:600}}
     .directive{{font-weight:1000;letter-spacing:.02em;line-height:1.15;text-transform:uppercase}}
     .meta{{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px}}
-    .pill{{height:24px;border-radius:100px;padding:0 10px;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.025em;border:1px solid currentColor}}
-    .pill.muted{{color:#CBD5E1;background:rgba(148,163,184,.07);border-color:rgba(203,213,225,.38)}}.pill.stale-pill{{color:#FF6B6B}}
+    .pill{{min-height:28px;border-radius:100px;padding:0 11px;display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:950;text-transform:uppercase;letter-spacing:.02em;border:1px solid currentColor;text-decoration:none}}
+    .pill.muted{{color:#E2E8F0;background:rgba(148,163,184,.09);border-color:rgba(226,232,240,.45)}}.pill.stale-pill{{color:#FF8A82;background:rgba(255,59,48,.10);border-color:rgba(255,59,48,.55)}}
+    .failed-pill{{color:#FFB4AD;background:rgba(255,59,48,.15);border-color:rgba(255,59,48,.82);cursor:pointer;box-shadow:0 0 0 1px rgba(255,59,48,.28);animation:failedPillPulse 1.65s ease-in-out infinite}}
     .pri{{height:22px;border-radius:7px;padding:0 8px;font-size:11px;font-weight:900;display:inline-flex;align-items:center;color:#fff}}
     .pri.P1{{background:#FF2D2D}}.pri.P2{{background:#FF7A00}}.pri.P3{{background:#FFD400;color:#111}}.pri.P4{{background:#22C55E;color:#052e16}}
     .do-btn{{margin-left:auto;min-height:30px;border-radius:8px;font-size:11px;font-weight:900;padding:7px 13px;cursor:pointer;text-decoration:none;font-family:inherit;display:inline-flex;align-items:center}}
@@ -1388,7 +1506,7 @@ def render_dvi_page(demo: bool = False) -> str:
     .done-card:after{{opacity:.45;box-shadow:0 0 10px rgba(34,197,94,.24)}}
     .done-head{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}}
     .done-vehicle{{font-size:11px;color:#64748B;font-weight:700;margin-top:2px}}
-    .closed-pill{{border:1px solid rgba(34,197,94,.38);background:rgba(34,197,94,.08);color:#86EFAC;border-radius:100px;padding:5px 9px;font-size:10px;font-weight:900;white-space:nowrap;text-transform:uppercase}}
+    .closed-pill{{border:1px solid rgba(34,197,94,.45);background:rgba(34,197,94,.10);color:#BBF7D0;border-radius:100px;padding:6px 10px;font-size:11.5px;font-weight:900;white-space:nowrap;text-transform:uppercase}}
     .follow-box{{border:1px solid rgba(148,163,184,.18);background:rgba(2,6,23,.35);border-radius:11px;padding:10px;margin-top:8px}}
     .follow-title{{font-size:12px;font-weight:900;color:#CBD5E1;text-transform:uppercase;letter-spacing:.08em}}
     .follow-age{{font-size:11px;color:#94A3B8;margin-top:3px;margin-bottom:9px}}
@@ -1402,7 +1520,8 @@ def render_dvi_page(demo: bool = False) -> str:
     .empty-wide{{border:1px dashed rgba(148,163,184,.24);border-radius:13px;background:rgba(15,23,42,.55);color:#64748B;font-size:12px;font-weight:800;text-align:center;padding:18px}}
     .legend{{margin-top:30px;padding-top:14px;border-top:1px solid var(--soft);font-size:11px;color:var(--faint);line-height:1.6}}
     .legend b{{color:var(--txt2);font-weight:800}}
-    @media (prefers-reduced-motion:reduce){{.screamer,.beacon{{animation:none}}}}
+    @keyframes failedPillPulse{{0%,100%{{box-shadow:0 0 0 1px rgba(255,59,48,.38),0 0 8px rgba(255,59,48,.24)}}50%{{box-shadow:0 0 0 3px rgba(255,59,48,.85),0 0 18px rgba(255,59,48,.55)}}}}
+    @media (prefers-reduced-motion:reduce){{.screamer,.beacon,.failed-pill{{animation:none}}}}
     @media(max-width:760px){{body{{padding:16px 14px 40px}}.dtitle{{font-size:12px;white-space:normal}}.divider{{gap:9px}}.screamer .directive{{font-size:18px}}}}
   </style>
 </head>
