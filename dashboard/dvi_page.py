@@ -184,6 +184,16 @@ def _load_status_timestamps() -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _write_status_timestamps(data: dict) -> None:
+    STATUS_TIMESTAMPS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = STATUS_TIMESTAMPS_PATH.with_suffix(".json.tmp")
+    tmp_path.write_text(
+        json.dumps(data, indent=2, ensure_ascii=True, sort_keys=True),
+        encoding="utf-8",
+    )
+    tmp_path.replace(STATUS_TIMESTAMPS_PATH)
+
+
 def _is_followup_archived(ro: str) -> bool:
     entry = _load_followups().get(str(ro))
     return bool(isinstance(entry, dict) and entry.get("completed_at"))
@@ -395,6 +405,39 @@ def _status_clock_for_record(record: dict, clocks: dict | None = None) -> dict:
     }
 
 
+def _bootstrap_in_progress_status_clock(record: dict, clocks: dict | None = None) -> dict:
+    """Seed lower-bound status timing for live in-progress jobs as the board sees them.
+
+    The webhook receiver upgrades this to exact timing on a real status change.
+    """
+    clocks = clocks if isinstance(clocks, dict) else _load_status_timestamps()
+    if record.get("lane") != "in_progress" or not record.get("is_live_job"):
+        return clocks
+
+    ro = str(record.get("ro") or "").strip()
+    status = str(record.get("workflow_status") or "").strip()
+    if not ro or not status:
+        return clocks
+
+    current = clocks.get(ro) if isinstance(clocks.get(ro), dict) else None
+    if current and _normalize_status(current.get("status")) == _normalize_status(status):
+        return clocks
+
+    # Re-read immediately before writing so we do not clobber a webhook write.
+    fresh_clocks = _load_status_timestamps()
+    fresh_current = fresh_clocks.get(ro) if isinstance(fresh_clocks.get(ro), dict) else None
+    if fresh_current and _normalize_status(fresh_current.get("status")) == _normalize_status(status):
+        return fresh_clocks
+
+    fresh_clocks[ro] = {
+        "status": status,
+        "status_since": _now_utc().isoformat(),
+        "since_first_seen": True,
+    }
+    _write_status_timestamps(fresh_clocks)
+    return fresh_clocks
+
+
 def _recent_done(record: dict) -> bool:
     candidates = [
         record.get("status_updated_at"),
@@ -485,6 +528,7 @@ def _build_records() -> list[dict]:
             "stale": job.get("stale") is True,
         }
         record["lane"] = assign_dvi_lane(record)
+        status_clocks = _bootstrap_in_progress_status_clock(record, status_clocks)
         record["status_clock"] = _status_clock_for_record(record, status_clocks)
         records.append(record)
 
