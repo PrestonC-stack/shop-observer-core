@@ -1157,7 +1157,7 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
         .advisor-gate {{background:#fef3c7;border:2px solid #f59e0b;color:#111827;}}
         .advisor-gate h2 {{color:#92400e;}}
         .job-block {{background:#fff;border:1px solid #cbd5e1;border-radius:10px;margin:24px 0;overflow:hidden;page-break-inside:avoid;}}
-        .job-header {{padding:12px 16px;color:#fff;font-weight:900;letter-spacing:0.04em;}}
+        .job-header {{padding:12px 16px;color:#fff;font-weight:900;letter-spacing:0.04em;user-select:text;-webkit-user-select:text;cursor:text;}}
         .job-header.concern {{background:#1e40af;}}
         .job-header.safety {{background:#dc2626;}}
         .job-header.maintenance {{background:#15803d;}}
