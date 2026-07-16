@@ -52,6 +52,19 @@ def board_v2_hitlist():
     return render_hitlist_page()
 
 
+@app.route("/activity")
+def advisor_activity():
+    from flask import redirect
+    from dashboard.activity_page import render_activity_page
+
+    selected_user = request.args.get("user", "").strip()
+    if selected_user in {"Preston", "Drew", "Mitch"}:
+        response = redirect("/activity")
+        response.set_cookie("callahan_user", selected_user, max_age=60 * 60 * 24 * 30, samesite="Lax")
+        return response
+    return render_activity_page(selected_user=request.cookies.get("callahan_user", ""))
+
+
 @app.route("/api/search")
 def api_search():
     from dashboard.board_v2 import search_results
