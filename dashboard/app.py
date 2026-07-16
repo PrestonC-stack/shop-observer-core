@@ -26,6 +26,7 @@ from board_renderer import (
     _load_callie_insights,
 )
 from confirmations import load_confirmations, record_confirmation
+from nav import render_nav
 from overrides import record_job_override
 from scoring import build_bay_metrics, build_hermes_summary_payload
 
@@ -37,6 +38,11 @@ app = Flask(__name__)
 def board():
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html = HTML_TEMPLATE.replace("__TIMESTAMP__", timestamp)
+    html = html.replace(
+        '<body class="bg-zinc-950 text-zinc-100 min-h-screen">',
+        '<body class="bg-zinc-950 text-zinc-100 min-h-screen">' + render_nav("Board"),
+        1,
+    )
     return Response(html, mimetype="text/html")
 
 
@@ -63,6 +69,16 @@ def advisor_activity():
         response.set_cookie("callahan_user", selected_user, max_age=60 * 60 * 24 * 30, samesite="Lax")
         return response
     return render_activity_page(selected_user=request.cookies.get("callahan_user", ""))
+
+
+@app.route("/timeline")
+def timeline_report():
+    from dashboard.timeline_page import render_timeline_page
+    return render_timeline_page(
+        window=request.args.get("window", "30"),
+        status_filter=request.args.get("status", "all"),
+        alert_filter=request.args.get("alerts", "all"),
+    )
 
 
 @app.route("/api/search")
@@ -388,6 +404,7 @@ def bay_performance():
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-zinc-950 text-zinc-100 min-h-screen">
+    {render_nav("Bay View")}
     <div class="max-w-7xl mx-auto px-6 py-8">
         <h1 class="text-5xl font-black tracking-wide">Bay Performance Board</h1>
         <p class="mt-2 text-zinc-400">Live support view for technicians and shop momentum.</p>

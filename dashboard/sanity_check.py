@@ -10,6 +10,7 @@ from datetime import datetime
 from flask import Response
 
 from board_loader import _load_board_state
+from nav import render_nav
 
 
 PRIORITY_COLORS = {
@@ -190,7 +191,7 @@ def render_sanity_check():
     <title>Morning Sanity Check</title>
     <style>
         * {{ box-sizing: border-box; }}
-        body {{ font-family: Arial, Helvetica, sans-serif; background: #f1f5f9; color: #111827; margin: 0; padding: 24px; }}
+        body {{ font-family: Arial, Helvetica, sans-serif; background: #f1f5f9; color: #111827; margin: 0; padding: 0 24px 24px; }}
         .page {{ max-width: 1120px; margin: 0 auto; background: #fff; padding: 28px; border-radius: 14px; box-shadow: 0 16px 34px rgba(15, 23, 42, 0.14); }}
         .top {{ display: flex; justify-content: space-between; gap: 24px; border-bottom: 3px solid #111827; padding-bottom: 18px; margin-bottom: 20px; }}
         .shop {{ font-size: 26px; font-weight: 900; letter-spacing: 0.08em; }}
@@ -227,6 +228,7 @@ def render_sanity_check():
     </style>
 </head>
 <body>
+    {render_nav("Sanity Check")}
     <main class="page">
         <header class="top">
             <div>

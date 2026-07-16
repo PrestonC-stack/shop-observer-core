@@ -37,6 +37,11 @@ except ImportError:  # pragma: no cover - runtime convenience if dotenv is unava
     def load_dotenv(*_args, **_kwargs):
         return False
 
+try:
+    from dashboard.nav import render_nav
+except ImportError:  # pragma: no cover
+    from nav import render_nav
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DVI_REVIEWS_DIR = REPO_ROOT / "state" / "dvi_reviews"
@@ -1108,7 +1113,8 @@ def _render_error(ro: str, packet: dict) -> Response:
     html_text = f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Packet Error — RO {_escape(ro)}</title></head>
-<body style="font-family:Arial,sans-serif;background:#f8fafc;color:#111827;padding:40px;">
+<body style="font-family:Arial,sans-serif;background:#f8fafc;color:#111827;margin:0;padding:0 40px 40px;">
+    {render_nav("Packets")}
     <h1>TekMetric Packet Error</h1>
     <p><strong>RO:</strong> {_escape(ro)}</p>
     <p>{message}</p>
@@ -1229,6 +1235,7 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
     </style>
 </head>
 <body>
+    {render_nav("Packets")}
     <main class="page">
         {banner_html}
         <div class="actions">
@@ -1484,6 +1491,7 @@ def _render_no_stored_packet(ro: str) -> str:
     </style>
 </head>
 <body>
+    {render_nav("Packets")}
     <main class="card">
         <h1>No stored packet yet</h1>
         <p>RO {_escape(ro)} does not have a saved packet in the cache or permanent job history store. Opening this history route did not regenerate anything and did not call AutoFlow or AI.</p>
@@ -1597,6 +1605,7 @@ def render_packet_history():
     </style>
 </head>
 <body>
+    {render_nav("Packets")}
     <main class="page">
         <div class="top">
             <div>

@@ -24,6 +24,11 @@ try:
 except ImportError:  # pragma: no cover - supports package imports in tests
     from dashboard.board_loader import _load_board_state
 
+try:
+    from dashboard.nav import render_nav
+except ImportError:  # pragma: no cover
+    from nav import render_nav
+
 
 STATUS_ALIASES = {
     "waiting_approval": "waiting approval",
@@ -1177,6 +1182,7 @@ def render_failed_checks_page(ro: str) -> str:
   </style>
 </head>
 <body>
+  {render_nav("DVI Queue")}
   <main class="sheet">
     <div class="top">
       <div>
@@ -1526,6 +1532,7 @@ def render_dvi_page(demo: bool = False) -> str:
   </style>
 </head>
 <body>
+  {render_nav("DVI Queue")}
   {demo_banner}
   <div class="top">
     <div class="title">DVI EXECUTION QUEUE<small>Powered by AdviseMe.ai · Generated {html.escape(generated_at)}</small></div>
@@ -1650,6 +1657,7 @@ def render_dvi_training_page() -> str:
   </style>
 </head>
 <body>
+  {render_nav("DVI Queue")}
   <main class="shell">
     <div class="top">
       <div>

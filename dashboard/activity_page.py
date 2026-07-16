@@ -13,6 +13,11 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from dashboard.nav import render_nav
+except ImportError:  # pragma: no cover
+    from nav import render_nav
+
 
 ROOT = Path(__file__).resolve().parents[1]
 API_COSTS_PATH = ROOT / "data" / "api_costs" / "api_costs.jsonl"
@@ -513,54 +518,54 @@ def render_activity_page(selected_user: str = "") -> str:
   <meta http-equiv="refresh" content="120">
   <title>Advisor Activity | Callahan Auto</title>
   <style>
-    :root{{--navy:#0f172a;--bg:#e8eef6;--text:#172033;--muted:#64748b;--red:#dc2626;--green:#16a34a;--orange:#ea580c;--purple:#7c3aed;--blue:#2563eb}}
+    :root{{--navy:#0f172a;--bg:#07111f;--panel:#0f1b2d;--card:#111f33;--line:#23364f;--text:#fff;--muted:#94a3b8;--red:#ef4444;--green:#22c55e;--orange:#f97316;--purple:#8b5cf6;--blue:#3b82f6}}
     *{{box-sizing:border-box}}
-    body{{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,Arial,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}}
-    .topbar{{background:var(--navy);color:#fff;padding:18px 24px;display:flex;align-items:center;justify-content:space-between;gap:18px;box-shadow:0 6px 18px rgba(15,23,42,.22)}}
+    body{{margin:0;background:radial-gradient(circle at top left,#172554 0%,#07111f 42%,#020617 100%);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,Arial,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}}
+    .topbar{{background:var(--navy);color:#fff;padding:18px 24px;display:flex;align-items:center;justify-content:space-between;gap:18px;box-shadow:0 6px 18px rgba(0,0,0,.28);border-bottom:1px solid rgba(148,163,184,.24)}}
     .title{{font-size:20px;font-weight:950;letter-spacing:.08em}}
     .sub{{font-size:11px;color:#cbd5e1;margin-top:4px;letter-spacing:.05em;text-transform:uppercase}}
-    .nav{{display:flex;gap:10px;align-items:center;flex-wrap:wrap}}
-    .nav a,.nav button{{height:34px;border-radius:9px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);color:#fff;text-decoration:none;padding:8px 12px;font-size:12px;font-weight:800;cursor:pointer}}
+    .user-actions{{display:flex;gap:10px;align-items:center;flex-wrap:wrap}}
+    .user-actions button{{height:34px;border-radius:9px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);color:#fff;text-decoration:none;padding:8px 12px;font-size:12px;font-weight:800;cursor:pointer}}
     .user-form{{display:flex;gap:8px;align-items:center;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px}}
     .user-form label{{font-size:11px;font-weight:900;color:#cbd5e1;text-transform:uppercase;letter-spacing:.08em}}
     select{{height:32px;border-radius:8px;border:1px solid #334155;background:#020617;color:#fff;padding:0 9px;font-weight:800}}
     main{{padding:22px 24px 50px;max-width:1480px;margin:0 auto}}
-    section{{background:#fff;border:1px solid #d8e0eb;border-radius:16px;box-shadow:0 8px 24px rgba(15,23,42,.08);padding:18px;margin-bottom:18px}}
-    h2{{margin:0 0 12px;font-size:17px;letter-spacing:.04em;text-transform:uppercase;color:#172033}}
+    section{{background:rgba(15,27,45,.88);border:1px solid var(--line);border-radius:16px;box-shadow:0 16px 38px rgba(0,0,0,.24);padding:18px;margin-bottom:18px}}
+    h2{{margin:0 0 12px;font-size:17px;letter-spacing:.04em;text-transform:uppercase;color:#e2e8f0}}
     .section-note{{font-size:12px;color:var(--muted);margin:-6px 0 14px}}
     table{{width:100%;border-collapse:collapse;font-size:13px}}
-    th{{text-align:left;background:#f1f5f9;color:#475569;text-transform:uppercase;letter-spacing:.06em;font-size:11px;padding:10px;border-bottom:1px solid #dbe4ef}}
-    td{{padding:11px 10px;border-bottom:1px solid #edf2f7;vertical-align:middle}}
-    tr.hot-row{{background:#fff1f2}}
+    th{{text-align:left;background:#0b1626;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;font-size:11px;padding:10px;border-bottom:1px solid #263954}}
+    td{{padding:11px 10px;border-bottom:1px solid #1e2f49;vertical-align:middle;color:#e2e8f0}}
+    tr.hot-row{{background:rgba(239,68,68,.12)}}
     .alert{{border-radius:12px;padding:14px 16px;font-weight:900;font-size:13px;letter-spacing:.03em}}
     .alert.red{{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}}
     .alert.green{{background:#dcfce7;color:#166534;border:1px solid #bbf7d0}}
     .alert.orange{{background:#ffedd5;color:#9a3412;border:1px solid #fed7aa;margin-bottom:10px}}
-    .empty{{border:1px dashed #cbd5e1;border-radius:12px;padding:16px;color:#64748b;font-weight:800;text-align:center;background:#f8fafc}}
+    .empty{{border:1px dashed #334155;border-radius:12px;padding:16px;color:#94a3b8;font-weight:800;text-align:center;background:#0b1626}}
     .who{{display:inline-flex;align-items:center;border-radius:999px;padding:5px 10px;font-size:11px;font-weight:950;color:#fff;text-transform:uppercase;letter-spacing:.04em}}
     .who.blue{{background:var(--blue)}}.who.purple{{background:var(--purple)}}.who.green{{background:var(--green)}}.who.gray{{background:#64748b}}
     .summary-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}}
-    .summary-card{{border:1px solid #dbe4ef;border-radius:14px;padding:14px;background:#f8fafc}}
+    .summary-card{{border:1px solid #263954;border-radius:14px;padding:14px;background:#111f33}}
     .summary-card .name{{font-size:18px;font-weight:950;margin-bottom:10px}}
-    .metric{{display:flex;align-items:baseline;gap:8px;margin:6px 0}}.metric b{{font-size:24px}}.metric span{{font-size:12px;color:#475569;font-weight:800}}
-    .last{{font-size:12px;color:#64748b;margin-top:10px;font-weight:800}}
+    .metric{{display:flex;align-items:baseline;gap:8px;margin:6px 0}}.metric b{{font-size:24px}}.metric span{{font-size:12px;color:#94a3b8;font-weight:800}}
+    .last{{font-size:12px;color:#94a3b8;margin-top:10px;font-weight:800}}
     .skip-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}}
-    .skip-card{{background:#fff1f2;border:2px solid #ef4444;border-radius:14px;padding:14px}}
-    .skip-card .ro{{font-size:18px;font-weight:950;color:#991b1b}}.skip-card .cust{{font-size:13px;color:#475569;font-weight:800;margin:3px 0 10px}}.bad{{font-size:14px;font-weight:950;color:#b91c1c;margin-bottom:8px}}.small{{font-size:12px;color:#475569;line-height:1.45}}
+    .skip-card{{background:rgba(127,29,29,.26);border:2px solid #ef4444;border-radius:14px;padding:14px}}
+    .skip-card .ro{{font-size:18px;font-weight:950;color:#fecaca}}.skip-card .cust{{font-size:13px;color:#cbd5e1;font-weight:800;margin:3px 0 10px}}.bad{{font-size:14px;font-weight:950;color:#fca5a5;margin-bottom:8px}}.small{{font-size:12px;color:#cbd5e1;line-height:1.45}}
     .stage-pill{{display:inline-flex;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:950;color:#111827;border:1px solid transparent}}
     .stage-pill.green{{background:#dcfce7;color:#166534;border-color:#bbf7d0}}.stage-pill.yellow{{background:#fef9c3;color:#854d0e;border-color:#fde68a}}.stage-pill.red{{background:#fee2e2;color:#991b1b;border-color:#fecaca}}.stage-pill.darkred{{background:#7f1d1d;color:#fff;border-color:#450a0a}}.stage-pill.neutral{{background:#e2e8f0;color:#334155;border-color:#cbd5e1}}
-    .gap-list{{list-style:none;margin:0;padding:0;display:grid;gap:8px}}.gap-list li{{display:flex;justify-content:space-between;gap:12px;align-items:center;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px 12px}}.gap-list span{{color:#9a3412;font-size:12px;font-weight:800}}
+    .gap-list{{list-style:none;margin:0;padding:0;display:grid;gap:8px}}.gap-list li{{display:flex;justify-content:space-between;gap:12px;align-items:center;background:rgba(154,52,18,.24);border:1px solid #f97316;border-radius:10px;padding:10px 12px}}.gap-list span{{color:#fdba74;font-size:12px;font-weight:800}}
     @media(max-width:760px){{.topbar{{align-items:flex-start;flex-direction:column}}main{{padding:14px}}table{{font-size:12px}}td,th{{padding:8px 6px}}}}
   </style>
 </head>
 <body>
+  {render_nav("Activity")}
   <header class="topbar">
     <div>
       <div class="title">ADVISOR ACTIVITY &amp; ACCOUNTABILITY</div>
       <div class="sub">Generated {generated} &middot; auto-refreshes every 2 minutes</div>
     </div>
-    <div class="nav">
-      <a href="/">Back to Board</a>
+    <div class="user-actions">
       <form class="user-form" method="get" action="/activity">
         <label for="user">Who are you?</label>
         <select id="user" name="user">{option_html}</select>
