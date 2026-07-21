@@ -603,15 +603,42 @@ def _download_photo_once(url: str) -> tuple[str, str]:
         req = Request(url, headers=headers)
         with urlopen(req, timeout=15) as response:
             status_code = getattr(response, "status", 200)
-            if status_code != 200:
-                raise ValueError(f"photo fetch returned HTTP {status_code}")
             media_type = response.headers.get_content_type() or _media_type_from_url(url)
+            if status_code != 200:
+                body_preview = response.read(200)
+                print(
+                    "# DEBUG - remove before prod | Photo fetch failed | "
+                    f"url={url[:80]} | status={status_code} | "
+                    f"content_type={media_type} | body_first_200={body_preview!r}"
+                )
+                raise ValueError(f"photo fetch returned HTTP {status_code}")
             if not str(media_type or "").lower().startswith("image/"):
+                body_preview = response.read(200)
+                print(
+                    "# DEBUG - remove before prod | Photo fetch failed | "
+                    f"url={url[:80]} | status={status_code} | "
+                    f"content_type={media_type} | body_first_200={body_preview!r}"
+                )
                 raise ValueError(f"photo fetch returned non-image content-type: {media_type}")
             image_bytes = response.read()
             if not image_bytes:
+                print(
+                    "# DEBUG - remove before prod | Photo fetch failed | "
+                    f"url={url[:80]} | status={status_code} | "
+                    f"content_type={media_type} | body_first_200=b''"
+                )
                 raise ValueError("photo fetch returned empty image data")
-    except (HTTPError, URLError, OSError, socket.timeout) as error:
+    except HTTPError as error:
+        body_preview = error.read(200)
+        content_type = error.headers.get_content_type() if error.headers else ""
+        print(
+            "# DEBUG - remove before prod | Photo fetch failed | "
+            f"url={url[:80]} | status={error.code} | "
+            f"content_type={content_type} | body_first_200={body_preview!r}"
+        )
+        print(f"Download FAILED: {error}")
+        raise
+    except (URLError, OSError, socket.timeout) as error:
         print(f"Download FAILED: {error}")
         raise
     except ValueError as error:
