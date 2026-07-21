@@ -183,6 +183,7 @@ Photo analysis:
 
 - Photo extraction checks multiple AutoFlow DVI locations, including `reason_vehicle_is_here`, `dvis.dvi_category.dvi_items.item_images`, `item_picture`, recommendations, notes, services, flat items, inspections, and hunter results.
 - `motovisuals.com` stock illustrations are filtered out.
+- DVI Photo Analysis: Fixed S3 fetch failure - browser-like headers (`User-Agent`, `Referer`, `Accept`) now sent with all TekMetric photo URL requests. Non-200 responses, non-image content types, and empty responses are rejected before Claude. Bad photos are skipped and logged. If all selected photos fail, `/analyze-photos` returns JSON 422 with readable browser alert. Implemented in `dashboard/packet_page.py`.
 - S3 photo downloads use browser-like headers and full-resolution fallback.
 - Claude vision analyzes individual photos.
 - A synthesis call creates structured RO notes/job findings for merge.
@@ -306,6 +307,10 @@ Config:
 - Anthropic packet/photo analysis uses `ANTHROPIC_API_KEY`.
 - Ollama is optional; board routes fall back to deterministic text if it is unavailable.
 - Cloudflare tunnel details live in local runtime scripts/config, not application route logic.
+
+## Known Constraints
+
+- TekMetric photo URLs (S3): require browser-like headers for server-side download - `User-Agent`, `Referer` (`tekmetric.com`), and image `Accept` types. Without these, S3 can return an HTML redirect instead of image bytes, causing downstream Claude/JSON handling failures.
 
 ## Parked Or Disabled Features
 

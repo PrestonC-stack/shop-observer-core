@@ -593,19 +593,29 @@ def _get_full_res_url(url: str) -> str:
 
 def _download_photo_once(url: str) -> tuple[str, str]:
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://app.autoflow.com/",
-        "Accept": "image/jpeg,image/png,image/*,*/*",
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://app.tekmetric.com/",
+        "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
     }
     print(f"Downloading photo: {url[:80]}")
     print(f"Headers: {headers}")
     try:
         req = Request(url, headers=headers)
         with urlopen(req, timeout=15) as response:
-            image_bytes = response.read()
+            status_code = getattr(response, "status", 200)
+            if status_code != 200:
+                raise ValueError(f"photo fetch returned HTTP {status_code}")
             media_type = response.headers.get_content_type() or _media_type_from_url(url)
+            if not str(media_type or "").lower().startswith("image/"):
+                raise ValueError(f"photo fetch returned non-image content-type: {media_type}")
+            image_bytes = response.read()
+            if not image_bytes:
+                raise ValueError("photo fetch returned empty image data")
     except (HTTPError, URLError, OSError, socket.timeout) as error:
         print(f"Download FAILED: {error}")
+        raise
+    except ValueError as error:
+        print(f"Download FAILED: {error} | URL: {url}")
         raise
     print(f"Downloaded OK: {len(image_bytes)} bytes")
     return base64.b64encode(image_bytes).decode("ascii"), media_type
@@ -1439,7 +1449,12 @@ def _render_packet_html(ro: str, packet: dict, cache: dict | None = None, just_r
             headers: {{"Content-Type": "application/json"}},
             body: JSON.stringify({{photo_urls: urls, requested_by: requester}})
         }})
-        .then(function(resp) {{ return resp.json(); }})
+        .then(function(resp) {{
+            return resp.json().then(function(data) {{
+                if (!resp.ok) throw new Error(data.error || "Photo analysis failed");
+                return data;
+            }});
+        }})
         .then(function(data) {{
             photoAnalysisRequester = data.requested_by || requester;
             renderFindings(data);
@@ -1676,6 +1691,7 @@ def render_packet_analyze_photos(ro):
     photo_urls = [str(url).strip() for url in _as_list(body.get("photo_urls")) if str(url).strip()]
     requested_by = str(body.get("requested_by") or "Drew").strip() or "Drew"
     findings = []
+    skipped_photos = []
     cache = _load_cache(ro)
     packet = cache.get("packet") if isinstance(cache.get("packet"), dict) else {}
 
@@ -1684,7 +1700,12 @@ def render_packet_analyze_photos(ro):
             photo_b64, media_type = _download_photo(url)
             finding_text = _call_claude_vision(photo_b64, media_type)
         except (HTTPError, URLError, OSError, socket.timeout, json.JSONDecodeError, ValueError) as error:
-            finding_text = f"Photo could not be loaded: {error}"
+            print(f"Skipping photo for RO {ro}: {url} | {error}")
+            skipped_photos.append({
+                "photo_url": url,
+                "error": str(error),
+            })
+            continue
         finding_text = clean_ai_response_text(finding_text)
         has_value = _has_diagnostic_value(finding_text)
         findings.append({
@@ -1695,6 +1716,16 @@ def render_packet_analyze_photos(ro):
             "suggested_merge_text": _suggested_merge_text(finding_text) if has_value else "",
         })
 
+    if not findings:
+        return jsonify({
+            "error": "No selected photos could be downloaded as valid images for analysis.",
+            "findings": [],
+            "skipped_photos": skipped_photos,
+            "photos_analyzed": 0,
+            "cost_usd": 0.0,
+            "requested_by": requested_by,
+        }), 422
+
     packet_html = str(cache.get("packet_html") or "")
     try:
         synthesis_data = _call_claude_synthesis(packet, findings, packet_html)
@@ -1702,28 +1733,29 @@ def render_packet_analyze_photos(ro):
         print(f"Photo synthesis failed for RO {ro}: {error}")
         synthesis_data = _fallback_synthesis_data(findings, str(error))
 
-    cost = len(photo_urls) * PHOTO_ANALYSIS_COST
+    cost = len(findings) * PHOTO_ANALYSIS_COST
     _append_api_cost_log({
         "timestamp": datetime.utcnow().isoformat(),
         "action": "photo_analysis",
         "trigger": "photo_analysis",
         "requested_by": requested_by,
         "ro": ro,
-        "photos_analyzed": len(photo_urls),
+        "photos_analyzed": len(findings),
         "cost_usd": cost,
         "estimated_cost_usd": cost,
         "cached": False,
     })
 
     analyzed = set(str(item) for item in _as_list(cache.get("analyzed_photos")))
-    analyzed.update(photo_urls)
+    analyzed.update(item["photo_url"] for item in findings)
     cache["analyzed_photos"] = sorted(analyzed)
     _save_cache(ro, cache)
 
     return jsonify({
         "findings": findings,
         "synthesis_data": synthesis_data,
-        "photos_analyzed": len(photo_urls),
+        "photos_analyzed": len(findings),
+        "skipped_photos": skipped_photos,
         "cost_usd": cost,
         "requested_by": requested_by,
     })
