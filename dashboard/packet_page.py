@@ -640,6 +640,15 @@ def _download_photo(url: str) -> tuple[str, str]:
         return _download_photo_once(full_res_url)
 
 
+def _is_timeout_error(error: Exception) -> bool:
+    if isinstance(error, (socket.timeout, TimeoutError)):
+        return True
+    if isinstance(error, URLError):
+        reason = getattr(error, "reason", None)
+        return isinstance(reason, (socket.timeout, TimeoutError)) or "timed out" in str(reason).lower()
+    return "timed out" in str(error).lower()
+
+
 def _call_claude_vision(photo_b64: str, media_type: str) -> str:
     load_dotenv(REPO_ROOT / ".env")
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -687,8 +696,11 @@ def _call_claude_vision(photo_b64: str, media_type: str) -> str:
         method="POST",
     )
     try:
-        with urlopen(req, timeout=30) as response:
+        with urlopen(req, timeout=90) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except (socket.timeout, TimeoutError) as error:
+        print(f"Claude vision API timed out: {error}")
+        raise
     except HTTPError as error:
         error_body = error.read().decode("utf-8")
         print(f"Claude API error {error.code}: {error_body[:500]}")
@@ -891,8 +903,11 @@ If a finding matches multiple jobs, use the most specific one.
         method="POST",
     )
     try:
-        with urlopen(req, timeout=45) as response:
+        with urlopen(req, timeout=90) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except (socket.timeout, TimeoutError) as error:
+        print(f"Claude synthesis API timed out: {error}")
+        raise
     except HTTPError as error:
         error_body = error.read().decode("utf-8")
         print(f"Claude synthesis API error {error.code}: {error_body[:500]}")
@@ -1701,14 +1716,38 @@ def render_packet_analyze_photos(ro):
     requested_by = str(body.get("requested_by") or "Drew").strip() or "Drew"
     findings = []
     skipped_photos = []
+    if len(photo_urls) > 6:
+        skipped_for_limit = photo_urls[6:]
+        print(
+            f"WARNING: RO {ro} photo analysis selected {len(photo_urls)} photos; "
+            f"skipping {len(skipped_for_limit)} to stay within the timeout window."
+        )
+        skipped_photos.extend({
+            "photo_url": url,
+            "error": "Skipped: max 6 photos per analysis to stay within timeout window.",
+        } for url in skipped_for_limit)
+        photo_urls = photo_urls[:6]
     cache = _load_cache(ro)
     packet = cache.get("packet") if isinstance(cache.get("packet"), dict) else {}
 
     for url in photo_urls:
         try:
             photo_b64, media_type = _download_photo(url)
-            finding_text = _call_claude_vision(photo_b64, media_type)
         except (HTTPError, URLError, OSError, socket.timeout, json.JSONDecodeError, ValueError) as error:
+            print(f"Skipping photo for RO {ro}: {url} | {error}")
+            skipped_photos.append({
+                "photo_url": url,
+                "error": str(error),
+            })
+            continue
+        try:
+            finding_text = _call_claude_vision(photo_b64, media_type)
+        except (HTTPError, URLError, OSError, socket.timeout, TimeoutError, json.JSONDecodeError, ValueError) as error:
+            if _is_timeout_error(error):
+                print(f"Claude photo analysis timed out for RO {ro}: {error}")
+                return jsonify({
+                    "error": "Analysis timed out — try selecting fewer photos (6 or fewer recommended)"
+                }), 408
             print(f"Skipping photo for RO {ro}: {url} | {error}")
             skipped_photos.append({
                 "photo_url": url,
@@ -1738,7 +1777,12 @@ def render_packet_analyze_photos(ro):
     packet_html = str(cache.get("packet_html") or "")
     try:
         synthesis_data = _call_claude_synthesis(packet, findings, packet_html)
-    except (HTTPError, URLError, OSError, socket.timeout, json.JSONDecodeError, ValueError) as error:
+    except (HTTPError, URLError, OSError, socket.timeout, TimeoutError, json.JSONDecodeError, ValueError) as error:
+        if _is_timeout_error(error):
+            print(f"Claude photo synthesis timed out for RO {ro}: {error}")
+            return jsonify({
+                "error": "Analysis timed out — try selecting fewer photos (6 or fewer recommended)"
+            }), 408
         print(f"Photo synthesis failed for RO {ro}: {error}")
         synthesis_data = _fallback_synthesis_data(findings, str(error))
 
