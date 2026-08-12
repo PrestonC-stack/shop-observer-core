@@ -332,6 +332,16 @@ def _rvh_coverage_for_item(item: dict, rvh_entries: list[DVIReasonVehicleEntry])
     return coverage
 
 
+def _has_item_media(item: dict, rvh_coverage: dict | None = None) -> bool:
+    coverage = rvh_coverage or {}
+    return _photo_count(item) > 0 or bool(coverage.get("photo") or coverage.get("video"))
+
+
+def _has_adequate_note(item: dict, rvh_coverage: dict | None = None) -> bool:
+    coverage = rvh_coverage or {}
+    return _substantive_text(_note_text(item)) or bool(coverage.get("note"))
+
+
 def _severity_from_config(value: str, default: str = FlagSeverity.CRITICAL) -> str:
     normalized = str(value or "").strip().lower()
     if normalized == FlagSeverity.IMPORTANT:
@@ -614,11 +624,8 @@ def _check_contradictions(dvi_data: dict, all_items: list) -> list:
 def _check_missing_photo(item: dict, section: str, rvh_entries: list[DVIReasonVehicleEntry] = None) -> Optional[DVIFlag]:
     if not _is_concern(item):
         return None
-    photos = _photo_count(item)
     rvh_coverage = _rvh_coverage_for_item(item, rvh_entries or [])
-    if photos == 0 and (rvh_coverage["photo"] or rvh_coverage["video"]):
-        return None
-    if photos == 0:
+    if not _has_item_media(item, rvh_coverage) and not _has_adequate_note(item, rvh_coverage):
         return DVIFlag(
             severity=FlagSeverity.CRITICAL,
             category=FlagCategory.MISSING_PHOTO,
@@ -627,8 +634,8 @@ def _check_missing_photo(item: dict, section: str, rvh_entries: list[DVIReasonVe
             tech_note=_note_text(item),
             photo_count=0,
             measurement_present=_has_measurement(_note_text(item)),
-            message="Item marked as concern but no photo attached.",
-            recommended_action="Add at least one photo documenting this concern."
+            message="Item marked as concern but has no photo and no adequate note.",
+            recommended_action="Add a photo OR a specific note describing what was found."
         )
     return None
 
@@ -638,7 +645,7 @@ def _check_blank_note(item: dict, section: str, rvh_entries: list[DVIReasonVehic
         return None
     note = _note_text(item)
     rvh_coverage = _rvh_coverage_for_item(item, rvh_entries or [])
-    if (not note or len(note) < RULES["min_note_length"]) and rvh_coverage["note"]:
+    if _has_item_media(item, rvh_coverage) or rvh_coverage["note"]:
         return None
     if not note or len(note) < RULES["min_note_length"]:
         return DVIFlag(
@@ -655,10 +662,13 @@ def _check_blank_note(item: dict, section: str, rvh_entries: list[DVIReasonVehic
     return None
 
 
-def _check_vague_note(item: dict, section: str) -> Optional[DVIFlag]:
+def _check_vague_note(item: dict, section: str, rvh_entries: list[DVIReasonVehicleEntry] = None) -> Optional[DVIFlag]:
     if not _is_concern(item):
         return None
     note = _note_text(item)
+    rvh_coverage = _rvh_coverage_for_item(item, rvh_entries or [])
+    if _has_item_media(item, rvh_coverage) or rvh_coverage["note"]:
+        return None
     if not note:
         return None  # already caught by blank_note check
     if _is_vague(note):
@@ -674,6 +684,23 @@ def _check_vague_note(item: dict, section: str) -> Optional[DVIFlag]:
             recommended_action="Add location, severity, test result, or measurement."
         )
     return None
+
+
+def _leak_note_has_location_and_severity(note: str) -> bool:
+    note_lower = note.lower()
+    has_location = any(
+        word in note_lower
+        for word in ["front", "rear", "left", "right", "top", "bottom",
+                     "pan", "seal", "gasket", "line", "fitting", "hose",
+                     "valve", "cover", "sump", "drain", "pump", "housing"]
+    )
+    has_severity = any(
+        word in note_lower
+        for word in ["minor", "moderate", "severe", "heavy", "light", "active",
+                     "drip", "dripping", "seep", "seeping", "wet", "damp",
+                     "saturated", "residue", "slow", "major"]
+    )
+    return has_location and has_severity
 
 
 def _check_missing_measurement(item: dict, section: str) -> Optional[DVIFlag]:
@@ -704,7 +731,7 @@ def _check_missing_measurement(item: dict, section: str) -> Optional[DVIFlag]:
     return None
 
 
-def _check_leak_detail(item: dict, section: str) -> Optional[DVIFlag]:
+def _check_leak_detail(item: dict, section: str, rvh_entries: list[DVIReasonVehicleEntry] = None) -> Optional[DVIFlag]:
     """Leak items need location and severity."""
     if not _is_concern(item):
         return None
@@ -712,15 +739,13 @@ def _check_leak_detail(item: dict, section: str) -> Optional[DVIFlag]:
     if item_name not in RULES["leak_items"]:
         return None
     note = _note_text(item)
+    rvh_coverage = _rvh_coverage_for_item(item, rvh_entries or [])
+    if _has_item_media(item, rvh_coverage):
+        return None
+    rvh_notes = " ".join(entry.notes for entry in rvh_coverage.get("entries", []))
+    combined_note = f"{note} {rvh_notes}".strip()
     photos = _photo_count(item)
-    # Need either a photo or a location/severity description
-    has_location = any(
-        word in note.lower()
-        for word in ["front", "rear", "left", "right", "top", "bottom",
-                     "pan", "seal", "gasket", "line", "fitting", "hose",
-                     "valve", "cover", "sump", "drain"]
-    )
-    if not has_location and photos == 0:
+    if photos == 0 and not _leak_note_has_location_and_severity(combined_note):
         return DVIFlag(
             severity=FlagSeverity.CRITICAL,
             category=FlagCategory.MISSING_PHOTO,
@@ -733,6 +758,86 @@ def _check_leak_detail(item: dict, section: str) -> Optional[DVIFlag]:
             recommended_action="Add photo and describe leak location and severity."
         )
     return None
+
+
+def _dedupe_text(values: list[str]) -> list[str]:
+    seen = set()
+    result = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(text)
+    return result
+
+
+def _combine_item_flags(item_flags: list[DVIFlag]) -> Optional[DVIFlag]:
+    if not item_flags:
+        return None
+    if len(item_flags) == 1:
+        return item_flags[0]
+
+    severity_rank = {
+        FlagSeverity.INFO: 1,
+        FlagSeverity.IMPORTANT: 2,
+        FlagSeverity.CRITICAL: 3,
+    }
+    highest_severity = max(
+        (flag.severity for flag in item_flags),
+        key=lambda severity: severity_rank.get(severity, 0),
+    )
+    primary_flag = next(
+        flag for flag in item_flags
+        if severity_rank.get(flag.severity, 0) == severity_rank.get(highest_severity, 0)
+    )
+
+    doc_flags = {
+        FlagCategory.MISSING_PHOTO,
+        FlagCategory.BLANK_NOTE,
+        FlagCategory.VAGUE_NOTE,
+    }
+    has_doc_gap = any(flag.category in doc_flags for flag in item_flags)
+    has_leak_gap = any("Leak reported" in flag.message for flag in item_flags)
+    has_missing_photo = any(flag.category == FlagCategory.MISSING_PHOTO for flag in item_flags)
+
+    issues = []
+    actions = []
+
+    if has_leak_gap:
+        issues.append("Leak concern has no photo and no adequate location/severity note.")
+        actions.append("Add a photo OR a specific note describing leak location and severity.")
+    elif has_doc_gap:
+        issues.append("Item marked as concern but has no photo and no adequate note.")
+        actions.append(
+            "Add a photo OR a specific note describing what was found "
+            "(location, severity, or measurement)."
+        )
+
+    for flag in item_flags:
+        if has_leak_gap and (
+            flag.category in doc_flags or "Leak reported" in flag.message
+        ):
+            continue
+        if has_doc_gap and flag.category in doc_flags:
+            continue
+        issues.append(flag.message)
+        actions.append(flag.recommended_action)
+
+    return DVIFlag(
+        severity=highest_severity,
+        category=FlagCategory.MISSING_PHOTO if has_missing_photo else primary_flag.category,
+        item_name=primary_flag.item_name,
+        section=primary_flag.section,
+        tech_note=primary_flag.tech_note,
+        photo_count=max(flag.photo_count for flag in item_flags),
+        measurement_present=any(flag.measurement_present for flag in item_flags),
+        message=" ".join(_dedupe_text(issues)),
+        recommended_action=" ".join(_dedupe_text(actions)),
+    )
 
 
 def _check_not_inspected_safety(item: dict, section: str) -> Optional[DVIFlag]:
@@ -832,15 +937,16 @@ def run_dvi_gate(
         checks = [
             _check_blank_note(item, section, rvh_entries),
             _check_missing_photo(item, section, rvh_entries),
-            _check_vague_note(item, section),
+            _check_vague_note(item, section, rvh_entries),
             _check_missing_measurement(item, section),
-            _check_leak_detail(item, section),
+            _check_leak_detail(item, section, rvh_entries),
             _check_not_inspected_safety(item, section),
         ]
 
-        for flag in checks:
-            if flag is not None:
-                flags.append(flag)
+        item_flags = [flag for flag in checks if flag is not None]
+        combined_flag = _combine_item_flags(item_flags)
+        if combined_flag is not None:
+            flags.append(combined_flag)
 
     # Check primary complaint coverage
     review.complaint_addressed = _complaint_addressed(primary_complaint, all_items)
