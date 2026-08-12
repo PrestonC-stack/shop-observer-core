@@ -4,6 +4,8 @@ AutoFlow Webhook Receiver + Hermes Memory Integration
 
 import json
 import logging
+import os
+import queue
 import subprocess
 import sys
 import threading
@@ -62,6 +64,56 @@ def _configure_logger() -> logging.Logger:
 
 
 LOGGER = _configure_logger()
+
+
+HERMES_WEBHOOK_TIMEOUT_SECONDS = float(os.getenv("HERMES_WEBHOOK_TIMEOUT_SECONDS", "3"))
+
+
+def _process_autoflow_event_with_timeout(payload: dict[str, Any]) -> Any:
+    result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
+
+    def run_hermes() -> None:
+        try:
+            result_queue.put_nowait(("ok", bridge.process_autoflow_event(payload)))
+        except Exception as exc:
+            result_queue.put_nowait(("error", exc))
+
+    thread = threading.Thread(
+        target=run_hermes,
+        name="hermes-autoflow-webhook",
+        daemon=True,
+    )
+    thread.start()
+    thread.join(HERMES_WEBHOOK_TIMEOUT_SECONDS)
+
+    if thread.is_alive():
+        LOGGER.error(
+            "Hermes processing timed out after %s seconds",
+            HERMES_WEBHOOK_TIMEOUT_SECONDS,
+        )
+        return {
+            "status": "timeout",
+            "message": "Hermes processing timed out; webhook ingestion continued",
+        }
+
+    try:
+        status, value = result_queue.get_nowait()
+    except queue.Empty:
+        LOGGER.warning("Hermes processing completed without returning a result")
+        return {
+            "status": "unknown",
+            "message": "Hermes processing completed without a result; webhook ingestion continued",
+        }
+
+    if status == "error":
+        LOGGER.error("Hermes processing failed: %s: %s", type(value).__name__, value)
+        return {
+            "status": "error",
+            "message": "Hermes processing failed; webhook ingestion continued",
+        }
+
+    return value
+
 
 def _deep_get(container: Any, path: tuple[Any, ...]) -> Any:
     value = container
@@ -365,41 +417,51 @@ def _print_summary(summary: dict[str, str]) -> None:
 # ====================== MAIN ROUTE ======================
 @app.post("/webhooks/autoflow")
 def receive_autoflow_webhook():
-    if not request.is_json:
-        return jsonify({"status": "error", "message": "JSON payload required"}), 400
-    
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        return jsonify({"status": "error", "message": "JSON object required"}), 400
+    try:
+        if not request.is_json:
+            return jsonify({"status": "error", "message": "JSON payload required"}), 400
 
-    received_at = datetime.now(timezone.utc).isoformat()
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"status": "error", "message": "JSON object required"}), 400
 
-    # === HERMES INTEGRATION ===
-    hermes_result = bridge.process_autoflow_event(payload)
+        received_at = datetime.now(timezone.utc).isoformat()
 
-    # Your original logic continues
-    _append_event(payload, received_at)
-    _append_transition_and_activity_safely(payload, received_at)
-    _update_status_timestamp_safely(payload, received_at)
-    handle_webhook_event(payload, received_at)
-    _rebuild_advisor_tasks()
-    _start_background_state_rebuild()
-    
-    summary = _safe_summary(payload, received_at)
-    _print_summary(summary)
+        # === HERMES INTEGRATION ===
+        hermes_result = _process_autoflow_event_with_timeout(payload)
 
-    return jsonify({
-        "status": "received",
-        "hermes_saved": hermes_result.get("saved_to_hermes", False),
-        "event_type": summary["event_type"],
-        "invoice_or_ro": summary["invoice_or_ro"],
-        "tasks_rebuilt": True,
-        "active_ros_rebuilt": False,
-        "shop_state_rebuilt": False,
-        "board_state_rebuilt": False,
-        "state_rebuild_queued": True,
-        "state_rebuild_failures": [],
-    })
+        # Your original logic continues
+        _append_event(payload, received_at)
+        _append_transition_and_activity_safely(payload, received_at)
+        _update_status_timestamp_safely(payload, received_at)
+        handle_webhook_event(payload, received_at)
+        _rebuild_advisor_tasks()
+        _start_background_state_rebuild()
+
+        summary = _safe_summary(payload, received_at)
+        _print_summary(summary)
+
+        hermes_saved = (
+            hermes_result.get("saved_to_hermes", False)
+            if isinstance(hermes_result, dict)
+            else False
+        )
+
+        return jsonify({
+            "status": "received",
+            "hermes_saved": hermes_saved,
+            "event_type": summary["event_type"],
+            "invoice_or_ro": summary["invoice_or_ro"],
+            "tasks_rebuilt": True,
+            "active_ros_rebuilt": False,
+            "shop_state_rebuilt": False,
+            "board_state_rebuilt": False,
+            "state_rebuild_queued": True,
+            "state_rebuild_failures": [],
+        })
+    except Exception as exc:
+        LOGGER.exception("Unhandled AutoFlow webhook error")
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
 @app.get("/health")
 def health_check():
