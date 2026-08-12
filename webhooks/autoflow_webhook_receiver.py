@@ -3,9 +3,12 @@ AutoFlow Webhook Receiver + Hermes Memory Integration
 """
 
 import json
+import logging
 import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -30,11 +33,35 @@ ACTIVE_ROS_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_active_ros_state.py"
 SHOP_STATE_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_shop_state.py"
 BOARD_STATE_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build_board_state.py"
 STATUS_TIMESTAMPS_PATH = REPO_ROOT / "state" / "status_timestamps.json"
+LOG_DIR = REPO_ROOT / "logs"
+LOG_FILE = LOG_DIR / "autoflow_webhook_receiver.log"
 
 
 from core.cas.dvi_trigger import handle_webhook_event
 app = Flask(__name__)
 bridge = HermesWebhookBridge()   # ← Hermes Bridge
+
+
+def _configure_logger() -> logging.Logger:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("autoflow_webhook_receiver")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    if not logger.handlers:
+        handler = RotatingFileHandler(
+            LOG_FILE,
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+        )
+        logger.addHandler(handler)
+    return logger
+
+
+LOGGER = _configure_logger()
 
 def _deep_get(container: Any, path: tuple[Any, ...]) -> Any:
     value = container
@@ -301,6 +328,32 @@ def _rebuild_local_state() -> dict[str, Any]:
         "failures": failures,
     }
 
+
+def _run_background_state_rebuild() -> None:
+    try:
+        LOGGER.info("Background state rebuild chain started")
+        state_rebuild = _rebuild_local_state()
+        if state_rebuild["failures"]:
+            LOGGER.error(
+                "Background state rebuild chain completed with failures: %s",
+                state_rebuild["failures"],
+            )
+        else:
+            LOGGER.info("Background state rebuild chain completed successfully")
+    except Exception as exc:
+        LOGGER.error("Background state rebuild chain failed: %s", exc)
+
+
+def _start_background_state_rebuild() -> None:
+    thread = threading.Thread(
+        target=_run_background_state_rebuild,
+        name="autoflow-state-rebuild",
+        daemon=True,
+    )
+    thread.start()
+    LOGGER.info("Background state rebuild chain queued")
+
+
 def _print_summary(summary: dict[str, str]) -> None:
     print("AUTOFLOW WEBHOOK EVENT")
     print(f"- event type: {summary['event_type']}")
@@ -330,7 +383,7 @@ def receive_autoflow_webhook():
     _update_status_timestamp_safely(payload, received_at)
     handle_webhook_event(payload, received_at)
     _rebuild_advisor_tasks()
-    state_rebuild = _rebuild_local_state()
+    _start_background_state_rebuild()
     
     summary = _safe_summary(payload, received_at)
     _print_summary(summary)
@@ -341,10 +394,11 @@ def receive_autoflow_webhook():
         "event_type": summary["event_type"],
         "invoice_or_ro": summary["invoice_or_ro"],
         "tasks_rebuilt": True,
-        "active_ros_rebuilt": state_rebuild["active_ros_rebuilt"],
-        "shop_state_rebuilt": state_rebuild["shop_state_rebuilt"],
-        "board_state_rebuilt": state_rebuild["board_state_rebuilt"],
-        "state_rebuild_failures": state_rebuild["failures"],
+        "active_ros_rebuilt": False,
+        "shop_state_rebuilt": False,
+        "board_state_rebuilt": False,
+        "state_rebuild_queued": True,
+        "state_rebuild_failures": [],
     })
 
 @app.get("/health")
