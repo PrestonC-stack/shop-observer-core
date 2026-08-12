@@ -39,7 +39,7 @@ LOG_FILE = LOG_DIR / "autoflow_webhook_receiver.log"
 
 from core.cas.dvi_trigger import handle_webhook_event
 app = Flask(__name__)
-bridge = HermesWebhookBridge()   # ← Hermes Bridge
+bridge = HermesWebhookBridge()   # Hermes Bridge
 
 
 def _configure_logger() -> logging.Logger:
@@ -406,5 +406,5 @@ def health_check():
     return jsonify({"status": "ok", "service": "autoflow_webhook_receiver", "hermes": "connected"})
 
 if __name__ == "__main__":
-    print("🚀 Starting AutoFlow Webhook Receiver with Hermes Memory...")
+    print("Starting AutoFlow Webhook Receiver with Hermes Memory...")
     app.run(host="127.0.0.1", port=5055, debug=False)
