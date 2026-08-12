@@ -1,12 +1,31 @@
 # Callahan AI - System State
 
-Last Updated: June 15, 2026  
+Last Updated: August 12, 2026  
 Branch: ai-build-stabilization  
 Codex workspace: `C:\CALLAHAN\AI Workspace\shop-observer-core`  
 Runtime workspace: `C:\AI-RUNTIME\shop-observer-core`  
 Public board URL: `https://tasks.callahanautoaz.net`
 
 This is the repo truth map. It reflects what exists now, not a roadmap. It should be updated whenever routes, runtime ownership, packet/DVI flow, or scoring behavior changes.
+
+## Production Incident - AutoFlow Webhook Outage (2026-08-01 to 2026-08-12)
+
+The AutoFlow webhook receiver silently stopped processing events for roughly 11 days. No AutoFlow status updates, DVI completions, or new RO data were captured during the outage window unless they were later reconstructed manually.
+
+Root causes found in sequence:
+
+- `bridge.process_autoflow_event()` in the Hermes integration had no timeout, causing every webhook request to hang indefinitely. Fixed by wrapping the call in a background thread with a 3-second timeout via `_process_autoflow_event_with_timeout` in commit `86edc7d`. This protection was briefly dropped in a later commit and restored in commit `99a484a`.
+- `webhooks/autoflow_webhook_receiver.py` line ~409 crashed on startup with `UnicodeEncodeError` when launched with redirected or non-console output, due to an emoji character in a print statement. Fixed by removing the emoji in commit `4a7a470`.
+- A second identical Unicode crash existed in `C:\AI-RUNTIME\hermes\orchestration\hermes_webhook_bridge.py`. This file is outside the `shop-observer-core` repo and is not visible to or editable by Codex. It required a manual fix directly on the runtime machine, was not committed to any repo, and must be reapplied manually if the machine is rebuilt unless the file is brought under version control.
+- The webhook handler previously ran the full state rebuild chain (`active_ros` -> `shop_state` -> `board_state`) synchronously inside the request, taking 60+ seconds and risking AutoFlow-side timeouts or retries. Fixed by moving the rebuild chain to a background thread after the response is sent in commit `86edc7d`.
+
+Known follow-ups still open:
+
+- RO `13684`, and any other RO created or updated during the 2026-08-01 to 2026-08-12 outage window, was never backfilled. Its history is permanently missing unless manually reconstructed from TekMetric/AutoFlow directly.
+- `C:\AI-RUNTIME\hermes\orchestration\hermes_webhook_bridge.py` is not under version control anywhere Codex can access. Bring it into a repo Codex can see, or document it clearly as a manual-edit-only runtime file.
+- No scheduled task exists for `scripts/build_active_ros_state.py`, `scripts/build_shop_state.py`, or `scripts/build_board_state.py`. They only run via webhook trigger or manual invocation, so if the webhook pipeline breaks silently again, the board can go stale with no automatic recovery.
+- Basic file logging was added to the webhook receiver during this incident at `logs/autoflow_webhook_receiver.log`; this made final diagnosis possible. Extend the same logging pattern to `scripts/build_shop_state.py`, `scripts/build_active_ros_state.py`, and `scripts/build_board_state.py`.
+- `scripts/health_check.py` and `scripts/register_scheduled_tasks.ps1` currently exist as untracked files. Confirm whether they were completed and commit them, or note them as incomplete.
 
 ## Production Entry Points
 
