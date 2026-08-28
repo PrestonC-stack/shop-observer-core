@@ -10,18 +10,9 @@ NAV_ITEMS = [
     ("DVI Queue", "/dvi", True),
     ("Activity", "/activity", True),
     ("Timeline", "/timeline", True),
-    ("Morning Brief", "/v2/morning-brief", False),
-    ("Afternoon Brief", "/v2/afternoon-brief", False),
     ("Drew", "/drew", True),
     ("Mitch", "/mitch", True),
-    ("Preston", "/preston", False),
-    ("Hit List", "/hit-list", False),
     ("Sanity Check", "/sanity-check", True),
-    ("Bay View", "/bay-view", False),
-    ("Tech Sheet", "/tech-sheet", False),
-    ("KPI Targets", "/kpi-targets", False),
-    ("Technicians", "/technicians", False),
-    ("Packets", "/packets", False),
 ]
 
 
