@@ -11,6 +11,7 @@ STATE_DIR = ROOT / "state"
 CONFIG_DIR = ROOT / "config"
 SHOP_STATE_FILE = STATE_DIR / "shop_state.json"
 BOARD_STATE_FILE = STATE_DIR / "board_state.json"
+EVENT_LOG_FILE = ROOT / "data" / "autoflow_events" / "autoflow_events.jsonl"
 ROSTER_FILE = CONFIG_DIR / "employee_roster.json"
 SOURCE_PRECEDENCE_FILE = CONFIG_DIR / "source_precedence.json"
 
@@ -40,6 +41,55 @@ def _normalize_text(value: Any, default: str = "") -> str:
         return default
     text = str(value).strip()
     return text if text else default
+
+
+def _deep_get(container: Any, path: tuple[Any, ...]) -> Any:
+    value = container
+    for key in path:
+        if isinstance(value, dict):
+            value = value.get(key)
+        elif isinstance(value, list) and isinstance(key, int):
+            if key < 0 or key >= len(value):
+                return None
+            value = value[key]
+        else:
+            return None
+    return value
+
+
+def _first_value(container: dict[str, Any], *paths: tuple[Any, ...]) -> Any:
+    for path in paths:
+        value = _deep_get(container, path)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _parse_event_time(value: Any) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _ro_lookup_keys(value: Any) -> list[str]:
+    text = _normalize_text(value, "")
+    if not text:
+        return []
+
+    keys = {text, text.upper()}
+    if text.upper().startswith("RO-"):
+        suffix = text[3:].strip()
+        if suffix:
+            keys.add(suffix)
+            keys.add(suffix.upper())
+    else:
+        keys.add(f"RO-{text}")
+        keys.add(f"RO-{text.upper()}")
+    return [key for key in keys if key]
 
 
 def _to_bool(value: Any) -> bool:
@@ -207,6 +257,70 @@ def _load_shop_state() -> dict[str, Any]:
     }
 
 
+def _load_latest_event_text_by_ro() -> dict[str, str]:
+    if not EVENT_LOG_FILE.exists():
+        return {}
+
+    latest_by_ro: dict[str, tuple[datetime, str]] = {}
+    for line in EVENT_LOG_FILE.read_text(encoding="utf-8").splitlines():
+        try:
+            record = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(record, dict):
+            continue
+
+        payload = record.get("payload", record)
+        if not isinstance(payload, dict):
+            payload = {}
+
+        ro = _first_value(
+            payload,
+            ("ticket", "invoice"),
+            ("ticket", "remote_id"),
+            ("invoice_or_ro",),
+            ("ro",),
+            ("invoice",),
+            ("invoice_number",),
+            ("ro_number",),
+            ("roNumber",),
+            ("repair_order",),
+            ("work_order", "invoice"),
+            ("work_order", "ro_number"),
+        )
+        activity_text = _first_value(
+            record,
+            ("text",),
+            ("activity_text",),
+            ("latest_activity",),
+            ("payload", "text"),
+            ("payload", "activity_text"),
+            ("payload", "latest_activity"),
+            ("payload", "event", "text"),
+            ("payload", "event", "activity_text"),
+            ("payload", "ticket", "text"),
+            ("payload", "ticket", "activity_text"),
+        )
+        if ro in (None, "", [], {}) or activity_text in (None, "", [], {}):
+            continue
+
+        timestamp = _first_value(
+            payload,
+            ("event", "timestamp"),
+            ("timestamp",),
+            ("received_at",),
+        ) or record.get("received_at")
+        parsed_time = _parse_event_time(timestamp)
+        text = _normalize_text(activity_text, "")
+
+        for key in _ro_lookup_keys(ro):
+            current = latest_by_ro.get(key)
+            if current is None or parsed_time >= current[0]:
+                latest_by_ro[key] = (parsed_time, text)
+
+    return {ro: text for ro, (_timestamp, text) in latest_by_ro.items()}
+
+
 def _waiting_on(job: dict[str, Any], normalized_status: str) -> str:
     advisor_owner = _normalize_owner_name(job.get("advisor", ""))
     if normalized_status in {"technical advisement", "technical overview"}:
@@ -370,7 +484,7 @@ def _next_action(job: dict[str, Any], waiting_on: str, lane: str, alerts: list[d
     return "Take the next small step that removes uncertainty and keeps momentum moving."
 
 
-def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
+def _build_job_state(job: dict[str, Any], latest_event_text_by_ro: dict[str, str] | None = None) -> dict[str, Any]:
     raw_status = _normalize_text(job.get("workflow_status"), "unknown")
     normalized_status = _canonical_status(raw_status)
     waiting_on = _waiting_on(job, normalized_status)
@@ -424,6 +538,15 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
         reasons.append("Operator-reported external status: " + source_tekmetric_status + ".")
     reasons.append(chosen_reason)
 
+    latest_event_text_by_ro = latest_event_text_by_ro or {}
+    latest_activity = ""
+    for key in _ro_lookup_keys(job.get("ro")):
+        latest_activity = latest_event_text_by_ro.get(key, "")
+        if latest_activity:
+            break
+    if not latest_activity:
+        latest_activity = _normalize_text(job.get("latest_activity") or job.get("activity_text"), "")
+
     result = {
         "ro": _normalize_text(job.get("ro"), "Unknown RO"),
         "customer": _normalize_text(job.get("customer"), "Unknown Customer"),
@@ -436,6 +559,8 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
         "technician_candidates": technician_candidates,
         "summary": _normalize_text(job.get("summary"), ""),
         "notes": _normalize_text(job.get("notes"), ""),
+        "latest_activity": latest_activity,
+        "activity_text": latest_activity,
         "reason_vehicle_is_here": job.get("reason_vehicle_is_here", []) if isinstance(job.get("reason_vehicle_is_here"), list) else [],
         "clocked_in": _to_bool(job.get("clocked_in")),
         "progress_percent": progress_percent,
@@ -478,7 +603,7 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
             "labor_hours_completed": labor_hours_completed,
             "labor_hours_remaining": labor_hours_remaining,
             "progress_percent": progress_percent,
-            "latest_activity": _normalize_text(job.get("latest_activity"), ""),
+            "latest_activity": latest_activity,
             "advisor_known": _normalize_text(job.get("advisor"), "").lower() in ACTIVE_ADVISORS,
             "active_tech_detected": any(_is_active_tech_name(name) for name in technicians),
             "routing_bucket_detected": any(_is_routing_bucket_name(name) for name in technicians + technician_candidates),
@@ -527,7 +652,8 @@ def _build_job_state(job: dict[str, Any]) -> dict[str, Any]:
 def build_board_state() -> dict[str, Any]:
     shop_state = _load_shop_state()
     raw_jobs = shop_state.get("jobs") if isinstance(shop_state, dict) else []
-    jobs = [_build_job_state(job) for job in raw_jobs if isinstance(job, dict)]
+    latest_event_text_by_ro = _load_latest_event_text_by_ro()
+    jobs = [_build_job_state(job, latest_event_text_by_ro) for job in raw_jobs if isinstance(job, dict)]
 
     lane_counts = {lane: 0 for lane in ("P1", "P2", "P3", "P4")}
     owner_counts = {owner: 0 for owner in ("Mitch", "Drew", "Preston", "External Hold", "Needs Review")}
