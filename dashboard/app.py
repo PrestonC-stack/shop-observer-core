@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, redirect, request, send_from_directory
 
 from board_loader import (
     BOARD_ACTION_LOG_PATH,
@@ -47,9 +47,8 @@ def board():
 
 
 @app.route("/v2")
-def board_v2():
-    from dashboard.board_v2 import render_board_v2
-    return render_board_v2()
+def board_v2_redirect():
+    return redirect("/", code=302)
 
 
 @app.route("/v2/hitlist")
