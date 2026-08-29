@@ -29,9 +29,11 @@ from confirmations import load_confirmations, record_confirmation
 from nav import render_nav
 from overrides import record_job_override
 from scoring import build_bay_metrics, build_hermes_summary_payload
+from webhooks.github_deploy_webhook import github_deploy_webhook
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
+app.register_blueprint(github_deploy_webhook)
 
 
 @app.route("/")
