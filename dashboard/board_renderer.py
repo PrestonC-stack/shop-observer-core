@@ -25,6 +25,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from board_loader import _find_job
+from scripts.scoring_engine import STATUS_DISPLAY_MAP
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -78,24 +79,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
                 <button id="refresh-jobs" class="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-zinc-800" type="button">Refresh Board</button>
             </div>
-        </div>
-
-        <div class="mt-5 flex flex-wrap gap-2">
-            <button class="top-tab active rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold" data-panel="board-panel">Board</button>
-            <button class="top-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-panel="analytics-panel">Analytics</button>
-            <button class="top-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-panel="data-input-panel">Data Input</button>
-            <button class="top-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-panel="training-panel">Training</button>
-            <button id="morning-briefing" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">Morning Briefing</button>
-            <button id="afternoon-briefing-top" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">Afternoon Brief</button>
-            <a href="/sanity-check" target="_blank" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">🔍 Sanity Check</a>
-            <a href="/bay-performance" target="_blank" class="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300">Bay View</a>
-        </div>
-
-        <div class="mt-3 flex flex-wrap gap-2">
-            <button class="role-tab active rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold" data-role="board">Board</button>
-            <button class="role-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-role="mitch">Mitch</button>
-            <button class="role-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-role="drew">Drew</button>
-            <button class="role-tab rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-semibold text-zinc-300" data-role="preston">Preston</button>
         </div>
 
         <div id="board-panel" class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
@@ -265,6 +248,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .replace(/'/g, "&#39;");
         }
 
+        const STATUS_DISPLAY_MAP = __STATUS_DISPLAY_MAP__;
+
+        function displayStatus(value) {
+            const raw = String(value || "unknown").trim() || "unknown";
+            const lower = raw.toLowerCase();
+            const spaced = lower.replace(/_/g, " ").replace(/\\s+/g, " ");
+            const underscored = spaced.replace(/ /g, "_");
+            return STATUS_DISPLAY_MAP[lower] || STATUS_DISPLAY_MAP[spaced] || STATUS_DISPLAY_MAP[underscored] || raw;
+        }
+
         function laneMeta(lane) {
             const map = {
                 P1: { cls: "lane-p1", title: "P1", subtitle: "Critical - Action Now" },
@@ -360,6 +353,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function renderJobCard(job) {
             const alerts = Array.isArray(job.alerts) ? job.alerts : [];
             const alertCodes = alerts.map((alert) => alert.code || "");
+            const statusLabel = displayStatus(job.workflow_status || job.canonical_status || "unknown");
             const pulse = (alertCodes.includes("verify_tech_clock_in") || alertCodes.includes("missing_tech_assignment")) ? " pulse-card" : "";
             const incoming = job.incoming_soon && job.incoming_soon.active
                 ? '<div class="mt-3 rounded-xl bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">Incoming soon: ' +
@@ -381,7 +375,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                             '<div class="text-[11px] text-zinc-400">Waiting on ' + escapeHtml(job.waiting_on || "Needs Review") + "</div>" +
                         "</div>" +
                     "</div>" +
-                    '<div class="mt-3 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Status:</span> ' + escapeHtml(job.workflow_status || "unknown") + "</div>" +
+                    '<div class="mt-3 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Status:</span> ' + escapeHtml(statusLabel) + "</div>" +
                     '<div class="mt-2 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Next move:</span> ' + escapeHtml(job.hermes_next_action || job.next_action || "Keep momentum moving.") + "</div>" +
                     actionIcons(job) +
                     formatAlert(job) +
@@ -659,7 +653,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     '</div>' +
                     '<div class="mt-4 space-y-2">' +
                         (group.jobs.length
-                            ? group.jobs.slice(0, 6).map((job) => '<button class="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 data-input-job" data-ro="' + escapeHtml(job.ro || "") + '">' + escapeHtml(job.ro || "Unknown RO") + ' - ' + escapeHtml(job.customer || "Unknown Customer") + ' - ' + escapeHtml(job.workflow_status || "unknown") + '</button>').join("")
+                            ? group.jobs.slice(0, 6).map((job) => '<button class="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 data-input-job" data-ro="' + escapeHtml(job.ro || "") + '">' + escapeHtml(job.ro || "Unknown RO") + ' - ' + escapeHtml(job.customer || "Unknown Customer") + ' - ' + escapeHtml(displayStatus(job.workflow_status || job.canonical_status || "unknown")) + '</button>').join("")
                             : '<div class="rounded-2xl border border-dashed border-zinc-800 px-4 py-3 text-sm text-zinc-500">Nothing in this correction bucket right now.</div>') +
                     '</div>' +
                 '</div>'
@@ -903,7 +897,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
             document.getElementById("modal-body").innerHTML =
                 '<div class="grid grid-cols-1 gap-4 md:grid-cols-2">' +
-                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Status</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.workflow_status || "unknown") + "</div></div>" +
+                    '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Status</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(displayStatus(job.workflow_status || job.canonical_status || "unknown")) + "</div></div>" +
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Risk</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.risk_level || "NORMAL") + "</div></div>" +
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Advisor</div><div class="mt-2 text-lg font-bold text-zinc-100">' + escapeHtml(job.advisor || "Unknown") + "</div></div>" +
                     '<div class="rounded-2xl bg-zinc-900 p-4"><div class="text-xs uppercase tracking-wide text-zinc-500">Technician</div><div class="mt-2 text-lg font-bold ' + ((String(job.technician || "").toLowerCase() === "unassigned" || !String(job.technician || "").trim()) ? "text-amber-300" : "text-zinc-100") + '">' + escapeHtml(job.technician || "Unassigned") + "</div></div>" +
@@ -1225,8 +1219,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         document.addEventListener("DOMContentLoaded", () => {
             document.getElementById("refresh-jobs").addEventListener("click", hardRefreshBoard);
             document.getElementById("close-modal").addEventListener("click", closeJobModal);
-            document.getElementById("morning-briefing").addEventListener("click", loadMorningBriefing);
-            document.getElementById("afternoon-briefing-top").addEventListener("click", loadAfternoonBriefing);
+            const morningBriefing = document.getElementById("morning-briefing");
+            const afternoonBriefingTop = document.getElementById("afternoon-briefing-top");
+            if (morningBriefing) morningBriefing.addEventListener("click", loadMorningBriefing);
+            if (afternoonBriefingTop) afternoonBriefingTop.addEventListener("click", loadAfternoonBriefing);
             document.getElementById("open-hermes-ask").addEventListener("click", openHermesAskModal);
             document.querySelectorAll(".role-tab").forEach((button) => {
                 button.addEventListener("click", () => setRole(button.dataset.role || "board"));
@@ -1240,6 +1236,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </script>
 </body>
 </html>"""
+
+
+HTML_TEMPLATE = HTML_TEMPLATE.replace("__STATUS_DISPLAY_MAP__", json.dumps(STATUS_DISPLAY_MAP, sort_keys=True))
 
 
 def _load_callie_insights(force=False):
