@@ -29,7 +29,7 @@ from board_loader import _find_job
 from scripts.scoring_engine import STATUS_DISPLAY_MAP
 
 HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -38,21 +38,37 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600&display=swap');
         :root {
-          --canvas:  #F2F0EB;
-          --card:    #FFFFFF;
-          --nav:     #0F2035;
+          --canvas: #F2F0EB;
+          --card: #FFFFFF;
+          --nav: #0F2035;
           --divider: #E8E4DC;
-          --text-primary:   #1A1814;
+          --ink: #1A1814;
+          --text-primary: var(--ink);
           --text-secondary: #5C574F;
-          --text-muted:     #9C9589;
-          --p1:   #B91C1C;
-          --p2:   #C2410C;
-          --p3:   #1D4E89;
+          --text-muted: #9C9589;
+          --p1: #B91C1C;
+          --p2: #C2410C;
+          --p3: #1D4E89;
           --dvi-t: #0F766E;
           --dvi-r: #6D28D9;
-          --adv:   #92400E;
+          --adv: #92400E;
         }
         body { background: var(--canvas); color: var(--text-primary); font-family: 'Inter', sans-serif; }
+        body.bg-zinc-950 { background: var(--canvas) !important; color: var(--ink) !important; }
+        .command-board .bg-zinc-950,
+        .command-board .bg-zinc-900,
+        .command-board .bg-zinc-800 { background: var(--card) !important; }
+        .command-board .border-zinc-800,
+        .command-board .border-zinc-700 { border-color: var(--divider) !important; }
+        .command-board .text-zinc-100,
+        .command-board .text-zinc-200 { color: var(--ink) !important; }
+        .command-board .text-zinc-300,
+        .command-board .text-zinc-400 { color: var(--text-secondary) !important; }
+        .command-board .text-zinc-500,
+        .command-board .text-zinc-600 { color: var(--text-muted) !important; }
+        .command-board input,
+        .command-board select,
+        .command-board textarea { background: var(--card) !important; color: var(--ink) !important; border-color: var(--divider) !important; }
         .brand-heading { font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.025em; }
         .left-rail { background: var(--nav); color: #fff; }
         .left-rail .kpi-number { font-family: 'Barlow Condensed', sans-serif; font-size: 32px; font-weight: 700; line-height: 0.95; font-variant-numeric: tabular-nums; }
@@ -68,7 +84,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .lane-p4 { --lane-color: var(--text-muted); }
         .lane-header { color: var(--lane-color); font-family: 'Barlow Condensed', sans-serif; }
         .lane-count { background: color-mix(in srgb, var(--lane-color) 12%, transparent); color: var(--lane-color); border: 1px solid color-mix(in srgb, var(--lane-color) 35%, transparent); }
-        .job-card, .board-card { position: relative; overflow: hidden; border: 1px solid var(--divider); background: var(--card); color: var(--text-primary); box-shadow: 0 12px 28px rgba(15,32,53,0.08); }
+        .card, .job-card, .board-card { position: relative; overflow: hidden; border: 1px solid var(--divider); background: var(--card); color: var(--ink); box-shadow: 0 12px 28px rgba(15,32,53,0.08); }
         .job-card::before, .board-card .card-rail { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--rail-color, var(--text-muted)); }
         .card-ro { color: var(--text-primary); font-family: 'Barlow Condensed', sans-serif; font-variant-numeric: tabular-nums; }
         .card-secondary { color: var(--text-secondary); }
@@ -105,22 +121,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.18), 0 0 24px rgba(245, 158, 11, 0.52); filter: brightness(1.18); }
             100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.0), 0 0 8px rgba(245, 158, 11, 0.18); filter: brightness(1.00); }
         }
-        @media (prefers-color-scheme: dark) {
-          :root:not([data-theme="light"]) {
-            --canvas: #0F1419;
-            --card:   #1A2535;
-            --divider: #2A3545;
-            --text-primary:   #E8E4DC;
-            --text-secondary: #94A3B8;
-            --text-muted:     #64748B;
-          }
-          body { background: var(--canvas); }
-          .job-card, .board-card, .metric-card, .panel-card { box-shadow: 0 12px 28px rgba(0,0,0,0.28); }
-        }
     </style>
 </head>
 <body class="bg-zinc-950 text-zinc-100 min-h-screen">
-    <div class="max-w-screen-2xl mx-auto px-4 py-6 md:px-6">
+    <div class="command-board max-w-screen-2xl mx-auto px-4 py-6 md:px-6">
         <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
                 <h1 class="brand-heading text-4xl font-bold tracking-wide">Shop Command Board</h1>
