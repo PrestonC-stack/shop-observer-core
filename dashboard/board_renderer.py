@@ -16,6 +16,7 @@ BOARD_ACTION_LOG_PATH = os.path.join(REPO_ROOT, "state", "board_actions.jsonl")
 HERMES_LOG_PATH = os.path.join(REPO_ROOT, "state", "hermes_feedback.jsonl")
 BOARD_OVERRIDE_LOG_PATH = os.path.join(REPO_ROOT, "state", "board_overrides.jsonl")
 CALLIE_INSIGHTS_PATH = os.path.join(REPO_ROOT, "data", "callie_insights.json")
+HERMES_RECOMMENDATIONS_PATH = os.path.join(REPO_ROOT, "state", "hermes_recommendations.json")
 CALLIE_MODEL = os.environ.get("CALLIE_MODEL", "qwen2.5-coder:7b")
 CALLIE_INSIGHTS_TTL_SECONDS = 90
 CALLIE_TIMEOUT_SECONDS = int(os.environ.get("CALLIE_TIMEOUT_SECONDS", "45"))
@@ -723,11 +724,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function renderHermesSummary(payload) {
             const target = document.getElementById("hermes-summary");
             if (!target) return;
+            const recommendations = payload.scheduler_recommendations || payload.hermes_recommendations || {};
+            const recommendationAlerts = Array.isArray(recommendations.alerts) ? recommendations.alerts : [];
             const conflictCount = Number(payload.conflict_count || ((payload.conflicts || []).length) || 0);
-            const header = payload.shop_summary || payload.summary || "No summary available.";
+            const header = recommendations.summary || payload.shop_summary || payload.summary || "No summary available.";
             const details = [];
+            recommendationAlerts.slice(0, 4).forEach((alert) => {
+                details.push("Hermes alert: " + alert);
+            });
             if (payload.summary && payload.shop_summary && payload.summary !== payload.shop_summary) {
                 details.push(payload.summary);
+            }
+            if (Array.isArray(recommendations.suggestions) && recommendations.suggestions.length) {
+                details.push("Suggested next move: " + recommendations.suggestions[0]);
             }
             if (conflictCount > 0) {
                 details.push("Active source/data conflicts: " + conflictCount);
@@ -741,7 +750,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 '<div class="mb-3 rounded-2xl bg-zinc-900 px-4 py-3 text-sm text-zinc-100">' + escapeHtml(line) + "</div>"
             )).join("") || '<div class="rounded-2xl bg-zinc-900 px-4 py-3 text-sm text-zinc-400">No summary available.</div>';
 
-            document.getElementById("hermes-updated-at").textContent = "Last Callie update: " + (payload.timestamp || payload.generated_at || "--");
+            const recommendationTime = recommendations.generated_at || payload.timestamp || payload.generated_at || "--";
+            document.getElementById("hermes-updated-at").textContent = "Last Callie update: " + recommendationTime;
         }
 
         function loadBoardState() {
@@ -1241,6 +1251,30 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 HTML_TEMPLATE = HTML_TEMPLATE.replace("__STATUS_DISPLAY_MAP__", json.dumps(STATUS_DISPLAY_MAP, sort_keys=True))
 
 
+def _load_hermes_recommendations():
+    try:
+        path = Path(HERMES_RECOMMENDATIONS_PATH)
+        if path.exists():
+            with path.open(encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if isinstance(payload, dict):
+                return payload
+    except Exception:
+        pass
+    return {}
+
+
+def _with_hermes_recommendations(payload):
+    if not isinstance(payload, dict):
+        payload = {}
+    merged = dict(payload)
+    recommendations = _load_hermes_recommendations()
+    if recommendations:
+        merged["scheduler_recommendations"] = recommendations
+        merged["hermes_recommendations"] = recommendations
+    return merged
+
+
 def _load_callie_insights(force=False):
     now = time.time()
     cached_payload = _CALLIE_INSIGHTS_CACHE.get("payload")
@@ -1266,12 +1300,14 @@ def _load_callie_insights(force=False):
         if path.exists():
             with path.open(encoding="utf-8") as handle:
                 payload = json.load(handle)
+            payload = _with_hermes_recommendations(payload)
             _CALLIE_INSIGHTS_CACHE["payload"] = payload
             _CALLIE_INSIGHTS_CACHE["expires_at"] = now + CALLIE_INSIGHTS_TTL_SECONDS
             return payload
     except Exception:
         pass
 
+    fallback = _with_hermes_recommendations(fallback)
     _CALLIE_INSIGHTS_CACHE["payload"] = fallback
     _CALLIE_INSIGHTS_CACHE["expires_at"] = now + 10
     return fallback

@@ -1,6 +1,8 @@
 param(
     [int]$IntervalMinutes = 15,
-    [string]$TaskName = "Callahan AI Shop Observer Scheduled Rebuild"
+    [string]$TaskName = "Callahan AI Shop Observer Scheduled Rebuild",
+    [int]$HermesIntervalMinutes = 35,
+    [string]$HermesTaskName = "Callahan-Hermes-Scheduler"
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,6 +10,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $LogsDir = Join-Path $RepoRoot "logs"
 $LogFile = Join-Path $LogsDir "scheduled_rebuild.log"
+$HermesLogFile = Join-Path $LogsDir "hermes_scheduler.log"
 $PythonExe = (Get-Command py -ErrorAction SilentlyContinue).Source
 
 if (-not $PythonExe) {
@@ -78,8 +81,54 @@ Register-ScheduledTask `
     -Description $description `
     -Force | Out-Null
 
+$hermesRunnerScript = @"
+`$ErrorActionPreference = "Stop"
+`$RepoRoot = "$RepoRoot"
+`$LogFile = "$HermesLogFile"
+`$PythonExe = "$PythonExe"
+
+function Write-HermesLog {
+    param([string]`$Message)
+    `$timestamp = (Get-Date).ToString("o")
+    Add-Content -Path `$LogFile -Value "`$timestamp `$Message"
+}
+
+Set-Location `$RepoRoot
+Write-HermesLog "HERMES SCHEDULER TASK START"
+& `$PythonExe (Join-Path `$RepoRoot "scripts\hermes_scheduler.py") *>> `$LogFile
+if (`$LASTEXITCODE -ne 0) {
+    Write-HermesLog "HERMES SCHEDULER TASK FAILED exit_code=`$LASTEXITCODE"
+    exit `$LASTEXITCODE
+}
+Write-HermesLog "HERMES SCHEDULER TASK COMPLETE"
+"@
+
+$encodedHermesRunner = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($hermesRunnerScript))
+$hermesAction = New-ScheduledTaskAction `
+    -Execute "powershell.exe" `
+    -Argument "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encodedHermesRunner"
+
+$hermesTrigger = New-ScheduledTaskTrigger `
+    -Once `
+    -At (Get-Date).AddMinutes(1) `
+    -RepetitionInterval (New-TimeSpan -Minutes $HermesIntervalMinutes) `
+    -RepetitionDuration (New-TimeSpan -Days 3650)
+
+$hermesDescription = "Runs Hermes background recommendations every $HermesIntervalMinutes minutes. Logs to $HermesLogFile."
+
+Register-ScheduledTask `
+    -TaskName $HermesTaskName `
+    -Action $hermesAction `
+    -Trigger $hermesTrigger `
+    -Settings $settings `
+    -Description $hermesDescription `
+    -Force | Out-Null
+
 Write-Host "Registered scheduled task: $TaskName"
 Write-Host "Interval minutes: $IntervalMinutes"
+Write-Host "Registered scheduled task: $HermesTaskName"
+Write-Host "Hermes interval minutes: $HermesIntervalMinutes"
 Write-Host "Repo root: $RepoRoot"
 Write-Host "Log file: $LogFile"
+Write-Host "Hermes log file: $HermesLogFile"
 Write-Host "Next step: open Task Scheduler and confirm the task appears under Task Scheduler Library."
