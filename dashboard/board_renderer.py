@@ -133,6 +133,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .modal-shell { max-height: min(90vh, 980px); overflow-y: auto; width: min(100%, 1080px); }
         .modal-mode-active { background: rgba(16, 185, 129, 0.18); border-color: rgb(16 185 129 / 0.95); color: #ecfdf5; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.22); }
         .metric-card, .panel-card { background: var(--card); color: var(--text-primary); border-color: var(--divider); }
+        .lane-card { background: transparent !important; }
+        .lane-card .card-empty,
+        .lane-card [class*="empty"],
+        .lane-card [class*="placeholder"] {
+          background: var(--card) !important;
+          border: 1px dashed var(--rule) !important;
+          color: var(--muted) !important;
+        }
         @keyframes pulseBorder {
             0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.75), 0 0 18px rgba(245, 158, 11, 0.42); filter: brightness(1.05); }
             50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.18), 0 0 24px rgba(245, 158, 11, 0.52); filter: brightness(1.18); }
