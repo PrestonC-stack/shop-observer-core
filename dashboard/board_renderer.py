@@ -84,9 +84,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .lane-p2 { --lane-color: var(--p2); }
         .lane-p3 { --lane-color: var(--p3); }
         .lane-p4 { --lane-color: var(--muted); }
+        /* Lane columns and empty states */
+        .lane, .lane-column, .priority-lane, [class*="lane"] {
+          background: transparent !important;
+        }
+
+        /* Job card empty states / placeholder cards */
+        .card-empty, .empty-slot, .empty-card, .placeholder-card, [class*="empty"], [class*="placeholder"] {
+          background: var(--card) !important;
+          border: 1px dashed var(--rule) !important;
+          color: var(--muted) !important;
+        }
         .priority-lane-header { background: var(--card) !important; border: 1px solid var(--rule) !important; }
         .lane-header { color: var(--lane-color); font-family: 'Barlow Condensed', sans-serif; }
-        .lane-count { background: color-mix(in srgb, var(--lane-color) 12%, transparent); color: var(--lane-color); border: 1px solid color-mix(in srgb, var(--lane-color) 35%, transparent); }
+        .lane-count { background: color-mix(in srgb, var(--lane-color) 12%, transparent) !important; color: var(--lane-color); border: 1px solid color-mix(in srgb, var(--lane-color) 35%, transparent); }
         .card { background: var(--card) !important; border: 1px solid var(--rule) !important; border-radius: 8px !important; border-left: 5px solid var(--p1) !important; color: var(--ink) !important; }
         .command-board .card { background: var(--card) !important; color: var(--ink) !important; }
         .job-card { position: relative; overflow: hidden; background: var(--card) !important; border: 1px solid var(--rule) !important; border-radius: 8px !important; border-left: 5px solid var(--rail-color, var(--p1)) !important; color: var(--ink) !important; box-shadow: 0 12px 28px rgba(15,32,53,0.08); }
@@ -574,7 +585,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function renderLaneSection(title, jobs, emptyText) {
             if (!jobs.length) {
-                return '<div class="rounded-2xl border border-dashed border-white/10 bg-zinc-950/60 p-4 text-sm text-zinc-400">' + escapeHtml(emptyText) + "</div>";
+                return '<div class="card-empty rounded-2xl border border-dashed p-4 text-sm" style="background: var(--card); border: 1px dashed var(--rule); color: var(--muted);">' + escapeHtml(emptyText) + "</div>";
             }
             return '<div class="space-y-3"><div class="text-sm font-semibold uppercase tracking-wide text-white/90">' +
                 escapeHtml(title) + "</div>" + jobs.map(renderJobCard).join("") + "</div>";
@@ -632,7 +643,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             snapshot.innerHTML =
                 '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Visible jobs:</span> ' + jobs.length + "</div>" +
                 '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Open helper alerts:</span> ' + alerts.length + "</div>" +
-                '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-200"><span class="font-semibold">Current ownership load:</span> ' + escapeHtml(ownerText || "No jobs visible.") + "</div>" +
+                '<div class="rounded-2xl p-4" style="background: var(--card); border: 1px dashed var(--rule); color: var(--muted);"><span class="font-semibold">Current ownership load:</span> ' + escapeHtml(ownerText || "No jobs visible.") + "</div>" +
                 '<div class="rounded-2xl bg-zinc-950 p-4 text-zinc-300">This board is here to reduce memory burden, tighten handoffs, and keep customers from becoming a surprise.</div>';
         }
 
