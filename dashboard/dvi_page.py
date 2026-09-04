@@ -1059,9 +1059,9 @@ def _queue_sections(records: list[dict]) -> tuple[list[dict], dict[str, list[dic
     return do_now, stages
 
 
-def _render_divider(title: str, count: int, rgb: str) -> str:
+def _render_divider(title: str, count: int, color: str) -> str:
     return f"""
-    <div class="divider" style="--c:{rgb}">
+    <div class="divider" style="--section-color:{color}">
       <span class="dline l"></span>
       <span class="dtitle">{html.escape(title)} <span class="cnt">{count}</span></span>
       <span class="dline r"></span>
@@ -1221,16 +1221,16 @@ def _render_do_now(records: list[dict]) -> str:
     return '<div class="donow">' + "\n".join(cards) + "</div>"
 
 
-def _render_stage_card(record: dict, rgb: str) -> str:
+def _render_stage_card(record: dict, color: str) -> str:
     if record.get("lane") == "done":
-        return _render_done_card(record, rgb)
+        return _render_done_card(record, color)
     ro = html.escape(str(record.get("ro") or ""))
     href = html.escape(_card_href(record))
     vehicle = f"{record.get('customer') or 'Unknown'} · {record.get('vehicle') or ''}".strip(" ·")
     opacity = "opacity:.72;" if record.get("lane") == "done" else ""
     click = "" if record.get("demo_mode") else f" onclick=\"if(!event.target.closest('a,button,form')) window.open('{href}','_blank','noopener')\""
     return f"""
-    <article class="row" style="--rgb:{rgb};{opacity}"{click}>
+    <article class="row" style="--section-color:{color};{opacity}"{click}>
       <div class="ro-line"><span class="ro">RO {ro}</span><span class="veh">{html.escape(vehicle)}</span></div>
       <div class="directive">{html.escape(_directive(record))}</div>
       {_render_meta(record)}
@@ -1238,7 +1238,7 @@ def _render_stage_card(record: dict, rgb: str) -> str:
     """
 
 
-def _render_done_card(record: dict, rgb: str) -> str:
+def _render_done_card(record: dict, color: str) -> str:
     ro = html.escape(str(record.get("ro") or ""))
     customer = html.escape(str(record.get("customer") or "Unknown Customer"))
     vehicle = html.escape(str(record.get("vehicle") or ""))
@@ -1248,7 +1248,7 @@ def _render_done_card(record: dict, rgb: str) -> str:
     disabled = " disabled" if record.get("demo_mode") else ""
     button_label = "Demo only" if record.get("demo_mode") else "Archive to History"
     return f"""
-    <article class="row done-card" style="--rgb:{rgb}">
+    <article class="row done-card" style="--section-color:{color}">
       <div class="done-head">
         <div>
           <div class="ro-line"><span class="ro">RO {ro}</span><span class="veh">{customer}</span></div>
@@ -1279,12 +1279,12 @@ def _render_done_card(record: dict, rgb: str) -> str:
     """
 
 
-def _render_stage(title: str, records: list[dict], rgb: str) -> str:
+def _render_stage(title: str, records: list[dict], color: str) -> str:
     body = (
-        '<div class="rows">' + "\n".join(_render_stage_card(record, rgb) for record in records) + "</div>"
+        '<div class="rows">' + "\n".join(_render_stage_card(record, color) for record in records) + "</div>"
         if records else '<div class="empty-wide">Nothing queued in this stage.</div>'
     )
-    return _render_divider(title, len(records), rgb) + body
+    return _render_divider(title, len(records), color) + body
 
 
 def _training_steps() -> list[dict]:
@@ -1443,91 +1443,111 @@ def render_dvi_page(demo: bool = False) -> str:
     )
 
     stage_html = "\n".join([
-        _render_stage("Ready for Build Packet", stages.get("ready_for_build_packet", []), "168,85,247"),
-        _render_stage("TekMetric Ready", stages.get("tekmetric_ready", []), "34,197,94"),
-        _render_stage("In Progress", stages.get("in_progress", []), "59,130,246"),
-        _render_stage("Advisor QC Review", stages.get("advisor_qc_review", []), "255,149,0"),
-        _render_stage("Recently Done", stages.get("done", []), "34,197,94"),
+        _render_stage("Ready for Build Packet", stages.get("ready_for_build_packet", []), "var(--dvi-t)"),
+        _render_stage("TekMetric Ready", stages.get("tekmetric_ready", []), "var(--dvi-t)"),
+        _render_stage("In Progress", stages.get("in_progress", []), "var(--p3)"),
+        _render_stage("Advisor QC Review", stages.get("advisor_qc_review", []), "var(--p3)"),
+        _render_stage("Recently Done", stages.get("done", []), "var(--p3)"),
     ])
 
     return f"""<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DVI Workflow | Callahan Auto</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600&display=swap">
   <style>
-    :root{{--bg:#050816;--card:#0F172A;--soft:#1E293B;--med:#334155;--txt:#fff;--txt2:#CBD5E1;--mut:#94A3B8;--faint:#64748B;--status-immediate:#FF3B30;--status-customer:#FF9500;--status-progress:#3B82F6;--status-ready:#22C55E;--status-parts:#00E5FF;--status-ai:#A855F7}}
+    :root{{
+      --canvas: #F2F0EB;
+      --card:   #FFFFFF;
+      --nav:    #0F2035;
+      --ink:    #1A1814;
+      --muted:  #5C574F;
+      --rule:   #D8D4CC;
+      --p1:     #B91C1C;
+      --dvi-t:  #0F766E;
+      --dvi-r:  #6D28D9;
+      --p3:     #1D4E89;
+      --soft: var(--rule);
+      --med: var(--rule);
+      --txt: var(--ink);
+      --txt2: var(--ink);
+      --mut: var(--muted);
+      --faint: var(--muted);
+      --status-immediate: var(--p1);
+      --status-customer: var(--p3);
+      --status-progress: var(--p3);
+      --status-ready: var(--dvi-t);
+      --status-parts: var(--p3);
+      --status-ai: var(--dvi-r);
+    }}
     *{{box-sizing:border-box}}
-    body{{margin:0;font-family:Inter,ui-sans-serif,system-ui,Arial,sans-serif;background:radial-gradient(circle at top left,#111B3A 0%,#050816 40%,#020617 100%);color:var(--txt);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;padding:22px 26px 60px}}
-    .top{{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid var(--soft);padding-bottom:16px;margin-bottom:8px;flex-wrap:wrap}}
-    .title{{font-size:22px;font-weight:900;letter-spacing:.06em}}
-    .title small{{display:block;font-size:10px;font-weight:800;letter-spacing:.18em;color:#A855F7;text-transform:uppercase;margin-top:5px}}
+    body{{margin:0;background:var(--canvas) !important;color:var(--ink);font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;padding:22px 26px 60px}}
+    .top{{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid var(--rule);padding-bottom:16px;margin-bottom:8px;flex-wrap:wrap}}
+    .title{{font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:800;letter-spacing:.06em;color:var(--ink)}}
+    .title small{{display:block;font-family:'Inter',sans-serif;font-size:10px;font-weight:800;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;margin-top:5px}}
     .stats{{display:flex;gap:9px;flex-wrap:wrap}}
-    .stat{{min-width:84px;height:54px;background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(2,6,23,.9));border:1px solid #263954;border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center}}
-    .stat b{{font-size:25px;font-weight:950;line-height:1;color:#fff}}
-    .stat span{{font-size:10px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#CBD5E1;margin-top:5px}}
+    .stat{{min-width:84px;height:54px;background:var(--card) !important;border:1px solid var(--rule);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center}}
+    .stat b{{font-size:25px;font-weight:950;line-height:1}}
+    .stat span{{font-size:10px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-top:5px}}
     .ctrls{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
-    .btn{{height:34px;border-radius:8px;border:1px solid var(--med);background:rgba(15,23,42,.85);color:#E2E8F0;font-size:12px;font-weight:900;padding:8px 13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}}
-    .btn.live{{border-color:rgba(168,85,247,.7);color:#C084FC;box-shadow:0 0 16px rgba(168,85,247,.25)}}
-    .demo-banner{{position:sticky;top:0;z-index:20;margin:-6px auto 18px;width:max-content;max-width:100%;border:1px solid rgba(168,85,247,.75);background:linear-gradient(90deg,rgba(168,85,247,.92),rgba(59,130,246,.9));color:#fff;border-radius:0 0 14px 14px;padding:8px 24px;font-size:12px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;box-shadow:0 0 28px rgba(168,85,247,.42)}}
+    .btn{{height:34px;border-radius:8px;border:1px solid var(--rule);background:var(--card) !important;color:var(--ink);font-size:12px;font-weight:900;padding:8px 13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}}
+    .btn.live{{border-color:var(--dvi-r);color:var(--dvi-r)}}
+    .demo-banner{{position:sticky;top:0;z-index:20;margin:-6px auto 18px;width:max-content;max-width:100%;border:1px solid var(--dvi-r);background:var(--card) !important;color:var(--dvi-r);border-radius:0 0 14px 14px;padding:8px 24px;font-size:12px;font-weight:900;letter-spacing:.12em;text-transform:uppercase}}
     .divider{{display:flex;align-items:center;gap:16px;margin:34px 0 16px}}
     .dline{{flex:1;height:2px;border-radius:2px}}
-    .dline.l{{background:linear-gradient(90deg,transparent,rgba(var(--c),.55))}}
-    .dline.r{{background:linear-gradient(90deg,rgba(var(--c),.55),transparent)}}
-    .dtitle{{font-size:15px;font-weight:900;letter-spacing:.16em;text-transform:uppercase;color:rgb(var(--c));white-space:nowrap;display:flex;align-items:center;gap:11px;text-align:center}}
-    .cnt{{font-size:12px;font-weight:900;background:rgba(var(--c),.18);border:1px solid rgba(var(--c),.55);border-radius:100px;padding:3px 11px;color:rgb(var(--c));letter-spacing:.02em}}
+    .dline.l{{background:linear-gradient(90deg,transparent,var(--section-color))}}
+    .dline.r{{background:linear-gradient(90deg,var(--section-color),transparent)}}
+    .dtitle{{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--section-color);white-space:nowrap;display:flex;align-items:center;gap:11px;text-align:center}}
+    .cnt{{font-size:12px;font-weight:900;background:var(--card);border:1px solid var(--section-color);border-radius:100px;padding:3px 11px;color:var(--section-color);letter-spacing:.02em}}
     .ro-line{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}}
     .ro{{font-size:16px;font-weight:900}}
     .veh{{font-size:12px;color:var(--mut);font-weight:600}}
     .directive{{font-weight:1000;letter-spacing:.02em;line-height:1.15;text-transform:uppercase}}
     .meta{{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px}}
     .pill{{min-height:28px;border-radius:100px;padding:0 11px;display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:950;text-transform:uppercase;letter-spacing:.02em;border:1px solid currentColor;text-decoration:none}}
-    .pill.muted{{color:#E2E8F0;background:rgba(148,163,184,.09);border-color:rgba(226,232,240,.45)}}.pill.stale-pill{{color:#FF8A82;background:rgba(255,59,48,.10);border-color:rgba(255,59,48,.55)}}
-    .failed-pill{{color:#FFB4AD;background:rgba(255,59,48,.15);border-color:rgba(255,59,48,.82);cursor:pointer;box-shadow:0 0 0 1px rgba(255,59,48,.28);animation:failedPillPulse 1.65s ease-in-out infinite}}
+    .pill.muted{{color:var(--muted);background:var(--card);border-color:var(--rule)}}.pill.stale-pill{{color:var(--p1);background:#FEF2F2;border-color:var(--p1)}}
+    .failed-pill{{color:var(--p1);background:#FEF2F2;border-color:var(--p1);cursor:pointer}}
     .pri{{height:22px;border-radius:7px;padding:0 8px;font-size:11px;font-weight:900;display:inline-flex;align-items:center;color:#fff}}
     .pri.P1{{background:#FF2D2D}}.pri.P2{{background:#FF7A00}}.pri.P3{{background:#FFD400;color:#111}}.pri.P4{{background:#22C55E;color:#052e16}}
     .do-btn{{margin-left:auto;min-height:30px;border-radius:8px;font-size:11px;font-weight:900;padding:7px 13px;cursor:pointer;text-decoration:none;font-family:inherit;display:inline-flex;align-items:center}}
-    .do-btn.red{{border:1px solid rgba(255,59,48,.7);background:rgba(255,59,48,.16);color:#FF8A82}}
-    .do-btn.purple{{border:1px solid rgba(168,85,247,.6);background:rgba(168,85,247,.14);color:#C084FC}}
-    .do-btn.green{{border:1px solid rgba(34,197,94,.6);background:rgba(34,197,94,.14);color:#86EFAC}}
-    .do-btn.orange{{border:1px solid rgba(255,149,0,.6);background:rgba(255,149,0,.14);color:#FFB020}}
-    .do-btn.blue{{border:1px solid rgba(59,130,246,.6);background:rgba(59,130,246,.14);color:#93C5FD}}
-    .do-btn.demo-inert{{border:1px solid rgba(148,163,184,.38);background:rgba(148,163,184,.08);color:#CBD5E1;cursor:default}}
+    .do-btn.red{{border:1px solid var(--p1);background:#FEF2F2;color:var(--p1)}}
+    .do-btn.purple{{border:1px solid var(--dvi-r);background:#F5F3FF;color:var(--dvi-r)}}
+    .do-btn.green{{border:1px solid var(--dvi-t);background:#ECFDF5;color:var(--dvi-t)}}
+    .do-btn.orange{{border:1px solid var(--p3);background:#EFF6FF;color:var(--p3)}}
+    .do-btn.blue{{border:1px solid var(--p3);background:#EFF6FF;color:var(--p3)}}
+    .do-btn.demo-inert{{border:1px solid var(--rule);background:var(--card);color:var(--muted);cursor:default}}
     .inline-form{{display:inline;margin:0;margin-left:auto}}
     .donow{{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px}}
-    .screamer{{position:relative;overflow:hidden;border-radius:16px;padding:16px 18px 16px 22px;background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(7,12,24,.96));border:1px solid rgba(255,59,48,.85);animation:beat 2.1s ease-in-out infinite;cursor:pointer}}
-    .screamer:after{{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:#FF3B30;box-shadow:0 0 24px rgba(255,59,48,.9)}}
-    .screamer .directive{{font-size:21px;color:#FF5247;margin:2px 0 12px}}
-    .beacon{{width:11px;height:11px;border-radius:100px;background:#FF3B30;box-shadow:0 0 14px rgba(255,59,48,1);display:inline-block;animation:dot 1.2s ease-in-out infinite}}
+    .screamer{{position:relative;overflow:hidden;border-radius:8px;padding:16px 18px 16px 22px;background:var(--card) !important;border:1px solid var(--rule);border-left:5px solid var(--p1);cursor:pointer;color:var(--ink)}}
+    .screamer:after{{display:none}}
+    .screamer .directive{{font-size:21px;color:var(--p1);margin:2px 0 12px}}
+    .beacon{{width:11px;height:11px;border-radius:100px;background:var(--p1);display:inline-block}}
     .po0{{animation-delay:0s}}.po1{{animation-delay:.7s}}.po2{{animation-delay:1.4s}}
-    @keyframes beat{{0%,100%{{box-shadow:0 0 0 1px rgba(255,59,48,.7),0 0 16px rgba(255,59,48,.5),inset 0 1px 0 rgba(255,255,255,.06);transform:scale(1)}}50%{{box-shadow:0 0 0 4px rgba(255,59,48,1),0 0 54px rgba(255,59,48,1),inset 0 1px 0 rgba(255,255,255,.12);transform:scale(1.018)}}}}
-    @keyframes dot{{0%,100%{{transform:scale(.8);opacity:.6}}50%{{transform:scale(1.55);opacity:1;box-shadow:0 0 20px rgba(255,59,48,1)}}}}
     .rows{{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px}}
-    .row{{position:relative;overflow:hidden;border-radius:13px;padding:12px 14px 12px 18px;background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(7,12,24,.96));border:1px solid rgba(var(--rgb),.55);box-shadow:inset 0 1px 0 rgba(255,255,255,.05);cursor:pointer}}
-    .row:after{{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:rgb(var(--rgb));box-shadow:0 0 16px rgba(var(--rgb),.5)}}
-    .row .directive{{font-size:15px;margin:0 0 9px;color:rgb(var(--rgb))}}
+    .row{{position:relative;overflow:hidden;border-radius:8px;padding:12px 14px 12px 18px;background:var(--card) !important;border:1px solid var(--rule);border-left:5px solid var(--section-color, var(--p3));cursor:pointer;color:var(--ink)}}
+    .row:after{{display:none}}
+    .row .directive{{font-size:15px;margin:0 0 9px;color:var(--section-color, var(--p3))}}
     .row .ro{{font-size:14px}}
-    .done-card{{cursor:default;opacity:.72;background:linear-gradient(180deg,rgba(15,23,42,.82),rgba(7,12,24,.76));border-color:rgba(34,197,94,.28)}}
-    .done-card:after{{opacity:.45;box-shadow:0 0 10px rgba(34,197,94,.24)}}
+    .done-card{{cursor:default;opacity:.82;background:var(--card) !important;border-color:var(--rule)}}
+    .done-card:after{{display:none}}
     .done-head{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}}
     .done-vehicle{{font-size:11px;color:#64748B;font-weight:700;margin-top:2px}}
-    .closed-pill{{border:1px solid rgba(34,197,94,.45);background:rgba(34,197,94,.10);color:#BBF7D0;border-radius:100px;padding:6px 10px;font-size:11.5px;font-weight:900;white-space:nowrap;text-transform:uppercase}}
-    .follow-box{{border:1px solid rgba(148,163,184,.18);background:rgba(2,6,23,.35);border-radius:11px;padding:10px;margin-top:8px}}
-    .follow-title{{font-size:12px;font-weight:900;color:#CBD5E1;text-transform:uppercase;letter-spacing:.08em}}
-    .follow-age{{font-size:11px;color:#94A3B8;margin-top:3px;margin-bottom:9px}}
+    .closed-pill{{border:1px solid var(--dvi-t);background:#ECFDF5;color:var(--dvi-t);border-radius:100px;padding:6px 10px;font-size:11.5px;font-weight:900;white-space:nowrap;text-transform:uppercase}}
+    .follow-box{{border:1px solid var(--rule);background:#FAFAF8;border-radius:8px;padding:10px;margin-top:8px}}
+    .follow-title{{font-size:12px;font-weight:900;color:var(--ink);text-transform:uppercase;letter-spacing:.08em}}
+    .follow-age{{font-size:11px;color:var(--muted);margin-top:3px;margin-bottom:9px}}
     .follow-form{{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center}}
-    .date-label{{grid-column:1/-1;display:grid;gap:4px;font-size:10px;font-weight:900;color:#64748B;text-transform:uppercase;letter-spacing:.06em}}
-    .date-label input{{height:31px;border-radius:8px;border:1px solid rgba(148,163,184,.26);background:#020617;color:#E2E8F0;padding:0 9px;font-family:inherit}}
-    .check-label{{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:800;color:#CBD5E1}}
+    .date-label{{grid-column:1/-1;display:grid;gap:4px;font-size:10px;font-weight:900;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}}
+    .date-label input{{height:31px;border-radius:8px;border:1px solid var(--rule);background:var(--card);color:var(--ink);padding:0 9px;font-family:inherit}}
+    .check-label{{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:800;color:var(--ink)}}
     .check-label input{{accent-color:#22C55E}}
-    .archive-btn{{grid-column:1/-1;min-height:31px;border-radius:8px;border:1px solid rgba(34,197,94,.48);background:rgba(34,197,94,.12);color:#86EFAC;font-size:11px;font-weight:900;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:.05em}}
-    .archive-btn:hover{{background:rgba(34,197,94,.2)}}
-    .empty-wide{{border:1px dashed rgba(148,163,184,.24);border-radius:13px;background:rgba(15,23,42,.55);color:#64748B;font-size:12px;font-weight:800;text-align:center;padding:18px}}
-    .legend{{margin-top:30px;padding-top:14px;border-top:1px solid var(--soft);font-size:11px;color:var(--faint);line-height:1.6}}
+    .archive-btn{{grid-column:1/-1;min-height:31px;border-radius:8px;border:1px solid var(--dvi-t);background:#ECFDF5;color:var(--dvi-t);font-size:11px;font-weight:900;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:.05em}}
+    .archive-btn:hover{{background:#D1FAE5}}
+    .empty-wide{{border:1px dashed var(--rule);border-radius:8px;background:var(--card) !important;color:var(--muted);font-size:12px;font-weight:800;text-align:center;padding:18px}}
+    .legend{{margin-top:30px;padding-top:14px;border-top:1px solid var(--rule);font-size:11px;color:var(--muted);line-height:1.6}}
     .legend b{{color:var(--txt2);font-weight:800}}
-    @keyframes failedPillPulse{{0%,100%{{box-shadow:0 0 0 1px rgba(255,59,48,.38),0 0 8px rgba(255,59,48,.24)}}50%{{box-shadow:0 0 0 3px rgba(255,59,48,.85),0 0 18px rgba(255,59,48,.55)}}}}
-    @media (prefers-reduced-motion:reduce){{.screamer,.beacon,.failed-pill{{animation:none}}}}
     @media(max-width:760px){{body{{padding:16px 14px 40px}}.dtitle{{font-size:12px;white-space:normal}}.divider{{gap:9px}}.screamer .directive{{font-size:18px}}}}
   </style>
 </head>
@@ -1537,11 +1557,11 @@ def render_dvi_page(demo: bool = False) -> str:
   <div class="top">
     <div class="title">DVI EXECUTION QUEUE<small>Powered by AdviseMe.ai · Generated {html.escape(generated_at)}</small></div>
     <div class="stats">
-      <div class="stat"><b style="color:#FF3B30">{rework_count}</b><span>Rework</span></div>
-      <div class="stat"><b style="color:#FFD400">{stale_count}</b><span>Stale 24h+</span></div>
-      <div class="stat"><b style="color:#00E5FF">{parts_held}</b><span>Parts Held</span></div>
-      <div class="stat"><b style="color:#3B82F6">{in_progress_count}</b><span>In Progress</span></div>
-      <div class="stat"><b style="color:#22C55E">{done_count}</b><span>Recently Done</span></div>
+      <div class="stat"><b style="color:var(--p1)">{rework_count}</b><span>Rework</span></div>
+      <div class="stat"><b style="color:var(--p1)">{stale_count}</b><span>Stale 24h+</span></div>
+      <div class="stat"><b style="color:var(--p3)">{parts_held}</b><span>Parts Held</span></div>
+      <div class="stat"><b style="color:var(--p3)">{in_progress_count}</b><span>In Progress</span></div>
+      <div class="stat"><b style="color:var(--dvi-t)">{done_count}</b><span>Recently Done</span></div>
     </div>
     <div class="ctrls">
       <a class="btn" href="/v2">Command Board</a>
@@ -1552,7 +1572,7 @@ def render_dvi_page(demo: bool = False) -> str:
     </div>
   </div>
 
-  {_render_divider("Do Now", len(do_now), "255,59,48")}
+  {_render_divider("Do Now", len(do_now), "var(--p1)")}
   {_render_do_now(do_now)}
   {stage_html}
   <div class="legend">
