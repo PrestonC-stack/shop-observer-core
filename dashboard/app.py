@@ -31,6 +31,11 @@ from overrides import record_job_override
 from scoring import build_bay_metrics, build_hermes_summary_payload
 from webhooks.github_deploy_webhook import github_deploy_webhook
 
+try:
+    from scripts.hermes_dvi_watcher import run_dvi_watch
+except ImportError:
+    run_dvi_watch = None
+
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(CURRENT_DIR)
 TEKMETRIC_EVENTS_LOG_PATH = os.path.join(REPO_ROOT, "state", "tekmetric_events.jsonl")
@@ -220,6 +225,24 @@ def _tekmetric_cors(response):
     return response
 
 
+def _sanitize_tekmetric_data(value, depth=0):
+    if depth > 3:
+        return str(value)[:300]
+    if isinstance(value, dict):
+        return {
+            str(key)[:80]: _sanitize_tekmetric_data(item, depth + 1)
+            for key, item in value.items()
+            if key not in (None, "")
+        }
+    if isinstance(value, list):
+        return [_sanitize_tekmetric_data(item, depth + 1) for item in value[:25]]
+    if isinstance(value, str):
+        return value.strip()[:500]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)[:300]
+
+
 @app.route("/ingest/tekmetric-event", methods=["POST", "OPTIONS"])
 def tekmetric_event():
     if request.method == "OPTIONS":
@@ -238,10 +261,16 @@ def tekmetric_event():
         "event_type": str(payload.get("event_type", "")).strip()[:80],
         "ro_number": str(payload.get("ro_number", "")).strip()[:40],
         "detail": str(payload.get("detail", "")).strip()[:500],
+        "data": _sanitize_tekmetric_data(payload.get("data", {})),
         "detected_at_iso": str(payload.get("detected_at_iso", "")).strip()[:80],
         "page_url": str(payload.get("page_url", "")).strip()[:500],
     }
     _append_jsonl(TEKMETRIC_EVENTS_LOG_PATH, event)
+    if run_dvi_watch is not None:
+        try:
+            run_dvi_watch()
+        except Exception:
+            pass
     return _tekmetric_cors(jsonify({"status": "ok"})), 200
 
 

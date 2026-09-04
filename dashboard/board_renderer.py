@@ -726,11 +726,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (!target) return;
             const recommendations = payload.scheduler_recommendations || payload.hermes_recommendations || {};
             const recommendationAlerts = Array.isArray(recommendations.alerts) ? recommendations.alerts : [];
+            const dviAlerts = Array.isArray(recommendations.dvi_alerts) ? recommendations.dvi_alerts : [];
             const conflictCount = Number(payload.conflict_count || ((payload.conflicts || []).length) || 0);
             const header = recommendations.summary || payload.shop_summary || payload.summary || "No summary available.";
             const details = [];
             recommendationAlerts.slice(0, 4).forEach((alert) => {
                 details.push("Hermes alert: " + alert);
+            });
+            dviAlerts.slice(0, 4).forEach((alert) => {
+                details.push("DVI/Estimate alert: " + (alert.message || alert.alert_type || "Review estimate alignment."));
             });
             if (payload.summary && payload.shop_summary && payload.summary !== payload.shop_summary) {
                 details.push(payload.summary);
