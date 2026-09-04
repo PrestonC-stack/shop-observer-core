@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "AdvizMe TekMetric Observer",
+  "version": "0.1.0",
+  "description": "Read-only observer for TekMetric workflow signals. Sends detected events to a local AdvizMe Flask endpoint.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.tekmetric.com/*",
+    "http://localhost:8080/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.tekmetric.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

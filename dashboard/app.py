@@ -32,6 +32,8 @@ from scoring import build_bay_metrics, build_hermes_summary_payload
 from webhooks.github_deploy_webhook import github_deploy_webhook
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(CURRENT_DIR)
+TEKMETRIC_EVENTS_LOG_PATH = os.path.join(REPO_ROOT, "state", "tekmetric_events.jsonl")
 app = Flask(__name__)
 app.register_blueprint(github_deploy_webhook)
 
@@ -209,6 +211,38 @@ def api_board_action():
             warning = "Hold up: your correction conflicts with live AutoFlow evidence. " + " ".join(conflict_lines) + " Fix the ticket in AutoFlow too, then refresh the board so the source truth and the board line up."
         return jsonify({"status": "received", "message": message, "warning": warning}), 200
     return jsonify({"status": "received", "message": message_map.get(entry["action_type"], "Support note saved.")}), 200
+
+
+def _tekmetric_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "http://localhost"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Advizme-Source"
+    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    return response
+
+
+@app.route("/ingest/tekmetric-event", methods=["POST", "OPTIONS"])
+def tekmetric_event():
+    if request.method == "OPTIONS":
+        return _tekmetric_cors(jsonify({"status": "ok"})), 200
+
+    if request.headers.get("X-Advizme-Source", "") != "chrome-extension":
+        return _tekmetric_cors(jsonify({"status": "forbidden"})), 403
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return _tekmetric_cors(jsonify({"status": "error", "message": "JSON object required"})), 400
+
+    event = {
+        "received_at": datetime.now().isoformat(),
+        "source": "chrome-extension",
+        "event_type": str(payload.get("event_type", "")).strip()[:80],
+        "ro_number": str(payload.get("ro_number", "")).strip()[:40],
+        "detail": str(payload.get("detail", "")).strip()[:500],
+        "detected_at_iso": str(payload.get("detected_at_iso", "")).strip()[:80],
+        "page_url": str(payload.get("page_url", "")).strip()[:500],
+    }
+    _append_jsonl(TEKMETRIC_EVENTS_LOG_PATH, event)
+    return _tekmetric_cors(jsonify({"status": "ok"})), 200
 
 
 @app.route("/api/hermes-feedback", methods=["POST"])
