@@ -42,10 +42,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           --card: #FFFFFF;
           --nav: #0F2035;
           --divider: #E8E4DC;
+          --rule: #E8E4DC;
           --ink: #1A1814;
           --text-primary: var(--ink);
           --text-secondary: #5C574F;
-          --text-muted: #9C9589;
+          --muted: #9C9589;
+          --text-muted: var(--muted);
           --p1: #B91C1C;
           --p2: #C2410C;
           --p3: #1D4E89;
@@ -81,11 +83,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .lane-p1 { --lane-color: var(--p1); }
         .lane-p2 { --lane-color: var(--p2); }
         .lane-p3 { --lane-color: var(--p3); }
-        .lane-p4 { --lane-color: var(--text-muted); }
+        .lane-p4 { --lane-color: var(--muted); }
+        .priority-lane-header { background: var(--card) !important; border: 1px solid var(--rule) !important; }
         .lane-header { color: var(--lane-color); font-family: 'Barlow Condensed', sans-serif; }
         .lane-count { background: color-mix(in srgb, var(--lane-color) 12%, transparent); color: var(--lane-color); border: 1px solid color-mix(in srgb, var(--lane-color) 35%, transparent); }
-        .card, .job-card, .board-card { position: relative; overflow: hidden; border: 1px solid var(--divider); background: var(--card); color: var(--ink); box-shadow: 0 12px 28px rgba(15,32,53,0.08); }
-        .job-card::before, .board-card .card-rail { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--rail-color, var(--text-muted)); }
+        .card { background: var(--card) !important; border: 1px solid var(--rule) !important; border-radius: 8px !important; border-left: 5px solid var(--p1) !important; color: var(--ink) !important; }
+        .job-card { position: relative; overflow: hidden; background: var(--card) !important; border: 1px solid var(--rule) !important; border-radius: 8px !important; border-left: 5px solid var(--rail-color, var(--p1)) !important; color: var(--ink) !important; box-shadow: 0 12px 28px rgba(15,32,53,0.08); }
+        .board-card { position: relative; overflow: hidden; border: 1px solid var(--divider); background: var(--card); color: var(--ink); box-shadow: 0 12px 28px rgba(15,32,53,0.08); }
+        .board-card .card-rail { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--rail-color, var(--text-muted)); }
         .card-ro { color: var(--text-primary); font-family: 'Barlow Condensed', sans-serif; font-variant-numeric: tabular-nums; }
         .card-secondary { color: var(--text-secondary); }
         .priority-pill { background: color-mix(in srgb, var(--rail-color) 12%, transparent); color: var(--rail-color); border: 1px solid color-mix(in srgb, var(--rail-color) 35%, transparent); }
@@ -360,7 +365,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         function priorityColor(lane) {
-            const map = { P1: "var(--p1)", P2: "var(--p2)", P3: "var(--p3)", P4: "var(--text-muted)" };
+            const map = { P1: "var(--p1)", P2: "var(--p2)", P3: "var(--p3)", P4: "var(--muted)" };
             return map[String(lane || "P4").toUpperCase()] || map.P4;
         }
 
@@ -589,7 +594,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
                 return (
                     '<section class="lane-card rounded-3xl p-4 ' + meta.cls + '" style="--lane-color: ' + priorityColor(lane) + ';">' +
-                        '<div class="rounded-2xl bg-black/20 p-4">' +
+                        '<div class="priority-lane-header rounded-2xl p-4">' +
                             '<div class="flex items-center justify-between gap-3">' +
                                 "<div>" +
                                     '<div class="lane-header text-4xl font-bold">' + escapeHtml(meta.title) + "</div>" +
