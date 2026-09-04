@@ -386,6 +386,42 @@ def api_hermes_summary():
         return jsonify({"summary": "Callie temporarily unavailable.", "timestamp": "--"})
 
 
+@app.route("/api/dvi-alerts")
+def api_dvi_alerts():
+    try:
+        from dashboard.dvi_page import _build_records
+    except ImportError:
+        from dvi_page import _build_records
+
+    alerts = []
+    for record in _build_records():
+        lane = str(record.get("lane") or "")
+        ro = str(record.get("ro") or "").strip()
+        if not ro:
+            continue
+        base = {
+            "ro_number": ro,
+            "customer": record.get("customer") or "",
+            "vehicle": record.get("vehicle") or "",
+            "resolved": bool(record.get("advisor_acknowledged")),
+            "generated_at": record.get("gate_ran_at") or record.get("updated_at") or "",
+        }
+        if lane == "tekmetric_ready":
+            alerts.append({
+                **base,
+                "alert_type": "ESTIMATE_READY",
+                "message": "DVI packet is current and ready for estimate build.",
+            })
+        elif lane == "needs_rework":
+            flag_count = int(record.get("flag_count") or 0)
+            alerts.append({
+                **base,
+                "alert_type": "GATE_RERUN",
+                "message": f"DVI gate needs rerun after rework correction ({flag_count} failed check{'s' if flag_count != 1 else ''}).",
+            })
+    return jsonify({"status": "ok", "alerts": alerts, "count": len(alerts)}), 200
+
+
 @app.route("/api/morning-briefing")
 def api_morning_briefing():
     board_state = _load_board_state()
@@ -610,7 +646,7 @@ def dvi_slip(ro):
         return slip_path.read_text(encoding="utf-8")
     return "Slip not found", 404
 
-@app.route("/dvi/acknowledge/<ro>")
+@app.route("/dvi/acknowledge/<ro>", methods=["GET", "POST"])
 def dvi_acknowledge(ro):
     from core.state.state_manager import load_dvi_review, save_dvi_review
     from core.timeline.job_timeline import log_advisor_acknowledged

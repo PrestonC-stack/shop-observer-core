@@ -36,31 +36,86 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <title>Country Club Advisor Command Board</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { font-family: system-ui, -apple-system, sans-serif; }
-        .lane-card { min-height: 24rem; }
-        .lane-p1 { border: 3px solid #dc2626; background: linear-gradient(180deg, rgba(127, 29, 29, 0.35), rgba(9, 9, 11, 1)); }
-        .lane-p2 { border: 3px solid #d97706; background: linear-gradient(180deg, rgba(120, 53, 15, 0.35), rgba(9, 9, 11, 1)); }
-        .lane-p3 { border: 3px solid #2563eb; background: linear-gradient(180deg, rgba(30, 64, 175, 0.30), rgba(9, 9, 11, 1)); }
-        .lane-p4 { border: 3px solid #16a34a; background: linear-gradient(180deg, rgba(20, 83, 45, 0.30), rgba(9, 9, 11, 1)); }
-        .job-card { border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(24, 24, 27, 0.92); }
-        .alert-action { border-left: 4px solid #dc2626; }
-        .alert-warning { border-left: 4px solid #f59e0b; }
-        .alert-info { border-left: 4px solid #3b82f6; }
-        .pill { border: 1px solid rgba(255,255,255,0.12); }
-        .role-tab.active, .top-tab.active { background: #18181b; color: #fafafa; border-color: #3f3f46; }
+        @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600&display=swap');
+        :root {
+          --canvas:  #F2F0EB;
+          --card:    #FFFFFF;
+          --nav:     #0F2035;
+          --divider: #E8E4DC;
+          --text-primary:   #1A1814;
+          --text-secondary: #5C574F;
+          --text-muted:     #9C9589;
+          --p1:   #B91C1C;
+          --p2:   #C2410C;
+          --p3:   #1D4E89;
+          --dvi-t: #0F766E;
+          --dvi-r: #6D28D9;
+          --adv:   #92400E;
+        }
+        body { background: var(--canvas); color: var(--text-primary); font-family: 'Inter', sans-serif; }
+        .brand-heading { font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.025em; }
+        .left-rail { background: var(--nav); color: #fff; }
+        .left-rail .kpi-number { font-family: 'Barlow Condensed', sans-serif; font-size: 32px; font-weight: 700; line-height: 0.95; font-variant-numeric: tabular-nums; }
+        .left-rail .kpi-label { color: rgba(255,255,255,0.72); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+        .kpi-p1 { color: #F87171; }
+        .kpi-dvi-ready { color: #2DD4BF; }
+        .kpi-gate-rerun { color: #C084FC; }
+        .kpi-ok { color: #4ADE80; }
+        .lane-card { min-height: 24rem; border: 1px solid var(--divider); background: rgba(255,255,255,0.35); }
+        .lane-p1 { --lane-color: var(--p1); }
+        .lane-p2 { --lane-color: var(--p2); }
+        .lane-p3 { --lane-color: var(--p3); }
+        .lane-p4 { --lane-color: var(--text-muted); }
+        .lane-header { color: var(--lane-color); font-family: 'Barlow Condensed', sans-serif; }
+        .lane-count { background: color-mix(in srgb, var(--lane-color) 12%, transparent); color: var(--lane-color); border: 1px solid color-mix(in srgb, var(--lane-color) 35%, transparent); }
+        .job-card, .board-card { position: relative; overflow: hidden; border: 1px solid var(--divider); background: var(--card); color: var(--text-primary); box-shadow: 0 12px 28px rgba(15,32,53,0.08); }
+        .job-card::before, .board-card .card-rail { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--rail-color, var(--text-muted)); }
+        .card-ro { color: var(--text-primary); font-family: 'Barlow Condensed', sans-serif; font-variant-numeric: tabular-nums; }
+        .card-secondary { color: var(--text-secondary); }
+        .priority-pill { background: color-mix(in srgb, var(--rail-color) 12%, transparent); color: var(--rail-color); border: 1px solid color-mix(in srgb, var(--rail-color) 35%, transparent); }
+        .dvi-lane-title { font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 700; }
+        .dvi-estimate-ready { --rail-color: var(--dvi-t); }
+        .dvi-gate-rerun { --rail-color: var(--dvi-r); }
+        .dvi-action-button { border: 1px solid color-mix(in srgb, var(--rail-color) 45%, transparent); background: color-mix(in srgb, var(--rail-color) 12%, transparent); color: var(--rail-color); }
+        .hermes-badge-warning { background: #FEF3C7; color: #78350F; }
+        .hermes-badge-info { background: #EFF6FF; color: #1E3A5F; }
+        .alert-action { border-left: 4px solid var(--p1); }
+        .alert-warning { border-left: 4px solid var(--p2); }
+        .alert-info { border-left: 4px solid var(--p3); }
+        .pill { border: 1px solid var(--divider); }
+        .role-tab.active, .top-tab.active { background: var(--card); color: var(--text-primary); border-color: var(--divider); }
         .pulse-card { animation: pulseBorder 1.1s infinite; }
         .blink-icon { animation: pulseBorder 0.9s infinite; }
+        @keyframes critPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(185,28,28,0); }
+          50%       { box-shadow: 0 0 12px 4px rgba(185,28,28,0.25); }
+        }
+        .card-p1-overdue { animation: critPulse 3s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .card-p1-overdue { animation: none; }
+        }
         .hidden-panel { display: none; }
         .chip-button { transition: transform 0.15s ease, opacity 0.15s ease; }
         .chip-button:hover { transform: translateY(-1px); opacity: 0.95; }
         .modal-shell { max-height: min(90vh, 980px); overflow-y: auto; width: min(100%, 1080px); }
         .modal-mode-active { background: rgba(16, 185, 129, 0.18); border-color: rgb(16 185 129 / 0.95); color: #ecfdf5; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.22); }
-        .metric-card { background: linear-gradient(180deg, rgba(24, 24, 27, 0.96), rgba(9, 9, 11, 0.96)); }
-        .panel-card { background: rgba(24, 24, 27, 0.92); }
+        .metric-card, .panel-card { background: var(--card); color: var(--text-primary); border-color: var(--divider); }
         @keyframes pulseBorder {
             0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.75), 0 0 18px rgba(245, 158, 11, 0.42); filter: brightness(1.05); }
             50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.18), 0 0 24px rgba(245, 158, 11, 0.52); filter: brightness(1.18); }
             100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.0), 0 0 8px rgba(245, 158, 11, 0.18); filter: brightness(1.00); }
+        }
+        @media (prefers-color-scheme: dark) {
+          :root:not([data-theme="light"]) {
+            --canvas: #0F1419;
+            --card:   #1A2535;
+            --divider: #2A3545;
+            --text-primary:   #E8E4DC;
+            --text-secondary: #94A3B8;
+            --text-muted:     #64748B;
+          }
+          body { background: var(--canvas); }
+          .job-card, .board-card, .metric-card, .panel-card { box-shadow: 0 12px 28px rgba(0,0,0,0.28); }
         }
     </style>
 </head>
@@ -68,46 +123,87 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <div class="max-w-screen-2xl mx-auto px-4 py-6 md:px-6">
         <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-                <h1 class="text-4xl font-black tracking-wide">Shop Command Board</h1>
-                <p class="mt-1 text-sm text-zinc-400">Supportive AI copilot for momentum, customer trust, and handoff clarity.</p>
+                <h1 class="brand-heading text-4xl font-bold tracking-wide">Shop Command Board</h1>
+                <p class="mt-1 text-sm" style="color: var(--text-secondary);">Supportive AI copilot for momentum, customer trust, and handoff clarity.</p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
-                <div class="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-300">
+                <div class="rounded-2xl border px-4 py-2 text-sm" style="border-color: var(--divider); background: var(--card); color: var(--text-secondary);">
                     Board Generated: <span id="board-updated-at">__TIMESTAMP__</span>
                 </div>
-                <div class="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-500">
+                <div class="rounded-2xl border px-4 py-2 text-sm" style="border-color: var(--divider); background: var(--card); color: var(--text-muted);">
                     Page Refreshed: <span id="board-refreshed-at">__TIMESTAMP__</span>
                 </div>
-                <button id="refresh-jobs" class="rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-zinc-800" type="button">Refresh Board</button>
+                <button id="refresh-jobs" class="rounded-2xl border px-4 py-2 text-sm font-semibold" style="border-color: var(--divider); background: var(--nav); color: #fff;" type="button">Refresh Board</button>
             </div>
         </div>
 
         <div id="board-panel" class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
-            <section class="lg:col-span-8">
+            <aside class="left-rail rounded-3xl p-5 lg:col-span-2">
+                <div class="brand-heading text-2xl font-bold">AdvizMe.ai</div>
+                <div class="mt-1 text-xs uppercase tracking-[0.2em]" style="color: rgba(255,255,255,0.58);">Live Shop Pulse</div>
+                <div class="mt-6 space-y-4">
+                    <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div id="kpi-p1" class="kpi-number kpi-p1">0</div>
+                        <div class="kpi-label">P1</div>
+                    </div>
+                    <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div id="kpi-dvi-ready" class="kpi-number kpi-dvi-ready">0</div>
+                        <div class="kpi-label">DVI Ready</div>
+                    </div>
+                    <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div id="kpi-gate-rerun" class="kpi-number kpi-gate-rerun">0</div>
+                        <div class="kpi-label">Gate Rerun</div>
+                    </div>
+                    <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div id="kpi-ok" class="kpi-number kpi-ok">0</div>
+                        <div class="kpi-label">OK</div>
+                    </div>
+                </div>
+            </aside>
+
+            <section class="space-y-4 lg:col-span-7">
+                <div class="dvi-lane-wrapper" hidden>
+                    <div class="rounded-3xl border p-4" style="border-color: color-mix(in srgb, var(--dvi-t) 35%, transparent); background: var(--card);">
+                        <div class="mb-3 flex items-center justify-between gap-3">
+                            <h2 class="dvi-lane-title" style="color: var(--dvi-t);">DVI - ESTIMATE READY</h2>
+                            <span id="dvi-estimate-count" class="rounded-full px-3 py-1 text-xs font-bold" style="background: color-mix(in srgb, var(--dvi-t) 12%, transparent); color: var(--dvi-t);">0</span>
+                        </div>
+                        <div id="dvi-estimate-lane" class="grid grid-cols-1 gap-3 xl:grid-cols-2"></div>
+                    </div>
+                </div>
+                <div class="dvi-lane-wrapper" hidden>
+                    <div class="rounded-3xl border p-4" style="border-color: color-mix(in srgb, var(--dvi-r) 35%, transparent); background: var(--card);">
+                        <div class="mb-3 flex items-center justify-between gap-3">
+                            <h2 class="dvi-lane-title" style="color: var(--dvi-r);">DVI - GATE RERUN</h2>
+                            <span id="dvi-rerun-count" class="rounded-full px-3 py-1 text-xs font-bold" style="background: color-mix(in srgb, var(--dvi-r) 12%, transparent); color: var(--dvi-r);">0</span>
+                        </div>
+                        <div id="dvi-rerun-lane" class="grid grid-cols-1 gap-3 xl:grid-cols-2"></div>
+                    </div>
+                </div>
                 <div id="lane-grid" class="grid grid-cols-1 gap-4 xl:grid-cols-4"></div>
             </section>
 
-            <section class="space-y-4 lg:col-span-4">
-                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+            <section class="space-y-4 lg:col-span-3">
+                <div class="rounded-3xl border p-5" style="border-color: var(--divider); background: var(--card); color: var(--text-primary);">
                     <div class="flex items-center justify-between">
-                        <h2 class="text-xl font-bold">Helper Snapshot</h2>
-                        <span class="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300">Support Mode</span>
+                        <h2 class="brand-heading text-xl font-bold">Helper Snapshot</h2>
+                        <span class="rounded-full px-3 py-1 text-xs font-semibold" style="background: #DCFCE7; color: #166534;">Support Mode</span>
                     </div>
-                    <div id="snapshot" class="mt-4 space-y-3 text-sm text-zinc-300"></div>
+                    <div id="snapshot" class="mt-4 space-y-3 text-sm" style="color: var(--text-secondary);"></div>
                 </div>
 
-                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
-                    <h2 class="text-xl font-bold">What Do I Do Next?</h2>
+                <div class="rounded-3xl border p-5" style="border-color: var(--divider); background: var(--card); color: var(--text-primary);">
+                    <h2 class="brand-heading text-xl font-bold">What Do I Do Next?</h2>
                     <div id="next-actions" class="mt-4 space-y-3"></div>
                 </div>
 
-                <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+                <div class="rounded-3xl border p-5" style="border-color: var(--divider); background: var(--card); color: var(--text-primary);">
                     <div class="flex items-center justify-between gap-3">
-                        <h2 class="text-xl font-bold">Callie Intelligence</h2>
-                        <button id="open-hermes-ask" class="rounded-2xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800">Ask Callie</button>
+                        <h2 class="brand-heading text-xl font-bold">Callie Intelligence</h2>
+                        <button id="open-hermes-ask" class="rounded-2xl border px-3 py-2 text-xs font-semibold" style="border-color: var(--divider); color: var(--adv);">Ask Callie</button>
                     </div>
-                    <div id="hermes-summary" class="mt-4 rounded-2xl bg-zinc-950 p-4 text-sm leading-relaxed text-zinc-200 min-h-[180px]">Loading Callie insights...</div>
-                    <div id="hermes-updated-at" class="mt-3 text-xs text-zinc-500"></div>
+                    <div id="hermes-summary" class="mt-4 rounded-2xl p-4 text-sm leading-relaxed min-h-[180px]" style="background: color-mix(in srgb, var(--adv) 8%, var(--card)); color: var(--text-primary);">Loading Callie insights...</div>
+                    <div id="hermes-updated-at" class="mt-3 text-xs" style="color: var(--text-muted);"></div>
                 </div>
             </section>
         </div>
@@ -259,6 +355,82 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             return STATUS_DISPLAY_MAP[lower] || STATUS_DISPLAY_MAP[spaced] || STATUS_DISPLAY_MAP[underscored] || raw;
         }
 
+        function priorityColor(lane) {
+            const map = { P1: "var(--p1)", P2: "var(--p2)", P3: "var(--p3)", P4: "var(--text-muted)" };
+            return map[String(lane || "P4").toUpperCase()] || map.P4;
+        }
+
+        function updateNavKpi(id, value) {
+            const target = document.getElementById(id);
+            if (target) target.textContent = String(value ?? 0);
+        }
+
+        function dviCardClass(type) {
+            return type === "ESTIMATE_READY" ? "dvi-estimate-ready" : "dvi-gate-rerun";
+        }
+
+        function renderDviLane(laneId, alerts, type) {
+            const lane = document.getElementById(laneId);
+            if (!lane) return;
+            const filtered = (Array.isArray(alerts) ? alerts : []).filter((alert) =>
+                alert && alert.alert_type === type && !alert.resolved
+            );
+            const wrapper = lane.closest(".dvi-lane-wrapper");
+            if (wrapper) wrapper.hidden = filtered.length === 0;
+            const countId = type === "ESTIMATE_READY" ? "dvi-estimate-count" : "dvi-rerun-count";
+            updateNavKpi(countId, filtered.length);
+            lane.innerHTML = filtered.map((alert) => {
+                const ro = String(alert.ro_number || alert.ro || "").replace(/^RO-?/i, "");
+                const actionType = type === "ESTIMATE_READY" ? "estimate_ready" : "gate_rerun";
+                const label = type === "ESTIMATE_READY" ? "✓ Estimate Built" : "✓ Gate Rerun Sent";
+                return `
+                    <div class="board-card ${dviCardClass(type)} rounded-2xl p-4 pl-5" data-ro="${escapeHtml(ro)}">
+                        <div class="card-rail"></div>
+                        <div class="card-body">
+                            <div class="card-ro text-2xl font-bold">RO-${escapeHtml(ro)}</div>
+                            <div class="card-secondary mt-1 text-sm">${escapeHtml(alert.customer || "")} &nbsp;-&nbsp; ${escapeHtml(alert.vehicle || "")}</div>
+                            <div class="card-secondary mt-3 text-sm">${escapeHtml(alert.message || "DVI alert needs advisor review.")}</div>
+                            <div class="card-actions mt-4">
+                                <button class="dvi-action-button rounded-full px-3 py-2 text-xs font-semibold" onclick="ackDvi('${escapeHtml(ro)}', '${actionType}')">${label}</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join("");
+        }
+
+        function ackDvi(ro, alertType) {
+            fetch(`/dvi/acknowledge/${encodeURIComponent(ro)}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ alert_type: alertType })
+            }).then(() => {
+                document.querySelector(`.dvi-lane-wrapper [data-ro="${CSS.escape(String(ro))}"]`)?.remove();
+                loadDviAlerts();
+            }).catch(() => {});
+        }
+
+        function loadDviAlerts() {
+            fetch("/api/dvi-alerts", { cache: "no-store" })
+                .then((response) => response.json())
+                .then((data) => {
+                    const alerts = Array.isArray(data.alerts) ? data.alerts : [];
+                    renderDviLane("dvi-estimate-lane", alerts, "ESTIMATE_READY");
+                    renderDviLane("dvi-rerun-lane", alerts, "GATE_RERUN");
+                    updateNavKpi("kpi-dvi-ready", alerts.filter((alert) => alert.alert_type === "ESTIMATE_READY" && !alert.resolved).length);
+                    updateNavKpi("kpi-gate-rerun", alerts.filter((alert) => alert.alert_type === "GATE_RERUN" && !alert.resolved).length);
+                })
+                .catch(() => {});
+        }
+
+        function renderHermesBadge(job) {
+            const text = String(job.hermes_recommendation || job.hermes_score_reason || job.hermes_alert || "").trim();
+            if (!text) return "";
+            const warning = /urgent|warning|risk|overdue|blocked|critical|p1/i.test(text);
+            const cls = warning ? "hermes-badge-warning" : "hermes-badge-info";
+            return '<div class="mt-3 max-w-full truncate rounded-full px-3 py-1 text-xs font-semibold ' + cls + '">' + escapeHtml(text) + "</div>";
+        }
+
         function laneMeta(lane) {
             const map = {
                 P1: { cls: "lane-p1", title: "P1", subtitle: "Critical - Action Now" },
@@ -355,31 +527,36 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const alerts = Array.isArray(job.alerts) ? job.alerts : [];
             const alertCodes = alerts.map((alert) => alert.code || "");
             const statusLabel = displayStatus(job.workflow_status || job.canonical_status || "unknown");
-            const pulse = (alertCodes.includes("verify_tech_clock_in") || alertCodes.includes("missing_tech_assignment")) ? " pulse-card" : "";
+            const overdue = Number(job.time_overdue || job.overdue_minutes || 0) > 0;
+            const pulse = String(job.priority_lane || "").toUpperCase() === "P1" && overdue ? " card-p1-overdue" : "";
             const incoming = job.incoming_soon && job.incoming_soon.active
-                ? '<div class="mt-3 rounded-xl bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">Incoming soon: ' +
+                ? '<div class="mt-3 rounded-xl px-3 py-2 text-xs" style="background:#DCFCE7;color:#166534;">Incoming soon: ' +
                     escapeHtml(job.incoming_soon.next_stage || job.incoming_soon.reason || "Next handoff approaching.") +
                   "</div>"
                 : "";
             const light = job.hermes_board_signal ? hermesSignalBadge(job) : riskLight(job.risk_level);
+            const lane = String(job.priority_lane || "P4").toUpperCase();
+            const railColor = priorityColor(lane);
 
             return (
-                '<article class="job-card rounded-2xl p-4 cursor-pointer' + pulse + '" data-ro="' + escapeHtml(job.ro || "") + '">' +
+                '<article class="job-card rounded-2xl p-4 pl-5 cursor-pointer' + pulse + '" style="--rail-color: ' + railColor + ';" data-ro="' + escapeHtml(job.ro || "") + '">' +
                     '<div class="flex items-start justify-between gap-3">' +
                         "<div>" +
-                            '<div class="text-lg font-black">' + escapeHtml(job.ro || "Unknown RO") + "</div>" +
-                            '<div class="text-sm font-semibold text-zinc-200">' + escapeHtml(job.customer || "Unknown Customer") + (job.dvi_review_status === 'REWORK_REQUIRED' ? ' <a href="/dvi" title="DVI: Rework Required"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#dc2626;margin-left:4px;vertical-align:middle;box-shadow:0 0 4px #dc2626;"></span></a>' : job.dvi_review_status === 'REVIEW' ? ' <a href="/dvi" title="DVI: Needs Review"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#d97706;margin-left:4px;vertical-align:middle;box-shadow:0 0 4px #d97706;"></span></a>' : job.dvi_review_status === 'PASS' ? ' <a href="/dvi" title="DVI: Clear"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#16a34a;margin-left:4px;vertical-align:middle;"></span></a>' : '') + "</div>" +
-                            '<div class="text-xs text-zinc-400">' + escapeHtml(job.vehicle || "Unknown Vehicle") + "</div>" +
+                            '<div class="priority-pill mb-2 inline-flex rounded-full px-2 py-1 text-[11px] font-bold">' + escapeHtml(lane) + "</div>" +
+                            '<div class="card-ro text-2xl font-bold">' + escapeHtml(job.ro || "Unknown RO") + "</div>" +
+                            '<div class="card-secondary text-sm font-semibold">' + escapeHtml(job.customer || "Unknown Customer") + (job.dvi_review_status === 'REWORK_REQUIRED' ? ' <a href="/dvi" title="DVI: Rework Required"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--p1);margin-left:4px;vertical-align:middle;box-shadow:0 0 4px var(--p1);"></span></a>' : job.dvi_review_status === 'REVIEW' ? ' <a href="/dvi" title="DVI: Needs Review"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--p2);margin-left:4px;vertical-align:middle;box-shadow:0 0 4px var(--p2);"></span></a>' : job.dvi_review_status === 'PASS' ? ' <a href="/dvi" title="DVI: Clear"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#4ADE80;margin-left:4px;vertical-align:middle;"></span></a>' : '') + "</div>" +
+                            '<div class="card-secondary text-xs">' + escapeHtml(job.vehicle || "Unknown Vehicle") + "</div>" +
                         "</div>" +
                         '<div class="space-y-1 text-right">' +
                             '<div class="rounded-full pill px-2 py-1 text-[11px] font-bold ' + light.cls + '">' + escapeHtml(light.label) + "</div>" +
-                            '<div class="text-[11px] text-zinc-400">Waiting on ' + escapeHtml(job.waiting_on || "Needs Review") + "</div>" +
+                            '<div class="card-secondary text-[11px]">Waiting on ' + escapeHtml(job.waiting_on || "Needs Review") + "</div>" +
                         "</div>" +
                     "</div>" +
-                    '<div class="mt-3 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Status:</span> ' + escapeHtml(statusLabel) + "</div>" +
-                    '<div class="mt-2 text-sm text-zinc-300"><span class="font-semibold text-zinc-100">Next move:</span> ' + escapeHtml(job.hermes_next_action || job.next_action || "Keep momentum moving.") + "</div>" +
+                    '<div class="card-secondary mt-3 text-sm"><span class="font-semibold" style="color: var(--text-primary);">Status:</span> ' + escapeHtml(statusLabel) + "</div>" +
+                    '<div class="card-secondary mt-2 text-sm"><span class="font-semibold" style="color: var(--text-primary);">Next move:</span> ' + escapeHtml(job.hermes_next_action || job.next_action || "Keep momentum moving.") + "</div>" +
                     actionIcons(job) +
                     formatAlert(job) +
+                    renderHermesBadge(job) +
                     incoming +
                 "</article>"
             );
@@ -407,14 +584,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const remaining = laneJobs.filter((job) => !actionNow.includes(job) && !incomingSoon.includes(job));
 
                 return (
-                    '<section class="lane-card rounded-3xl p-4 ' + meta.cls + '">' +
+                    '<section class="lane-card rounded-3xl p-4 ' + meta.cls + '" style="--lane-color: ' + priorityColor(lane) + ';">' +
                         '<div class="rounded-2xl bg-black/20 p-4">' +
                             '<div class="flex items-center justify-between gap-3">' +
                                 "<div>" +
-                                    '<div class="text-4xl font-black">' + escapeHtml(meta.title) + "</div>" +
-                                    '<div class="text-sm uppercase tracking-wide text-zinc-200">' + escapeHtml(meta.subtitle) + "</div>" +
+                                    '<div class="lane-header text-4xl font-bold">' + escapeHtml(meta.title) + "</div>" +
+                                    '<div class="card-secondary text-sm uppercase tracking-wide">' + escapeHtml(meta.subtitle) + "</div>" +
                                 "</div>" +
-                                '<div class="rounded-full bg-white/10 px-4 py-2 text-lg font-black text-white">' + laneJobs.length + "</div>" +
+                                '<div class="lane-count rounded-full px-4 py-2 text-lg font-bold">' + laneJobs.length + "</div>" +
                             "</div>" +
                         "</div>" +
                         '<div class="mt-4 space-y-4">' +
@@ -709,8 +886,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function renderBoardState(boardState) {
             latestBoardState = boardState;
             latestActionState = boardState.action_state || {};
+            const jobs = Array.isArray(boardState.jobs) ? boardState.jobs : [];
             document.getElementById("board-updated-at").textContent = boardState.generated_at || "__TIMESTAMP__";
             document.getElementById("board-refreshed-at").textContent = boardState.fetched_at || new Date().toLocaleString();
+            updateNavKpi("kpi-p1", jobs.filter((job) => job.priority_lane === "P1").length);
+            updateNavKpi("kpi-ok", jobs.filter((job) => !Array.isArray(job.alerts) || job.alerts.length === 0).length);
             renderLanes(boardState);
             renderSnapshot(boardState);
             renderNextActions(boardState);
@@ -785,6 +965,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function refreshBoard() {
             loadBoardState();
             loadHermesSummary();
+            loadDviAlerts();
         }
 
         function hardRefreshBoard() {

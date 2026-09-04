@@ -6,22 +6,42 @@
 <title>Drew - Callahan Command Board</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;900&family=DM+Mono:wght@400;500&display=swap');
-  body { font-family: 'DM Sans', system-ui, sans-serif; background: #09090b; color: #f4f4f5; }
-  .mono { font-family: 'DM Mono', monospace; }
-  .lane-urgent  { border: 2px solid #dc2626; background: linear-gradient(180deg, rgba(127,29,29,0.25), rgba(9,9,11,1)); }
-  .lane-warn    { border: 2px solid #d97706; background: linear-gradient(180deg, rgba(120,53,15,0.25), rgba(9,9,11,1)); }
-  .lane-calm    { border: 2px solid #27272a; background: rgba(24,24,27,0.6); }
-  .lane-done    { border: 2px solid #16a34a; background: linear-gradient(180deg, rgba(20,83,45,0.15), rgba(9,9,11,1)); }
-  .job-card     { border: 1px solid rgba(255,255,255,0.07); background: rgba(24,24,27,0.95); transition: background 0.15s; }
-  .job-card:hover { background: rgba(39,39,42,0.95); }
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600&display=swap');
+  :root {
+    --canvas:  #F2F0EB;
+    --card:    #FFFFFF;
+    --nav:     #0F2035;
+    --divider: #E8E4DC;
+    --text-primary:   #1A1814;
+    --text-secondary: #5C574F;
+    --text-muted:     #9C9589;
+    --p1:   #B91C1C;
+    --p2:   #C2410C;
+    --p3:   #1D4E89;
+    --dvi-t: #0F766E;
+    --dvi-r: #6D28D9;
+    --adv:   #92400E;
+  }
+  body { font-family: 'Inter', sans-serif; background: var(--canvas); color: var(--text-primary); }
+  .mono { font-family: 'Barlow Condensed', sans-serif; font-variant-numeric: tabular-nums; }
+  .lane-urgent  { --rail-color: var(--p1); border: 1px solid var(--divider); background: rgba(255,255,255,0.35); }
+  .lane-warn    { --rail-color: var(--p2); border: 1px solid var(--divider); background: rgba(255,255,255,0.35); }
+  .lane-calm    { --rail-color: var(--p3); border: 1px solid var(--divider); background: rgba(255,255,255,0.35); }
+  .lane-done    { --rail-color: #4ADE80; border: 1px solid var(--divider); background: rgba(255,255,255,0.35); }
+  .job-card     { position: relative; overflow: hidden; border: 1px solid var(--divider); background: var(--card); color: var(--text-primary); box-shadow: 0 12px 28px rgba(15,32,53,0.08); transition: transform 0.15s, box-shadow 0.15s; }
+  .job-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--rail-color, var(--text-muted)); }
+  .job-card:hover { transform: translateY(-1px); box-shadow: 0 16px 34px rgba(15,32,53,0.12); }
+  .job-card .text-zinc-100 { color: var(--text-primary) !important; }
+  .job-card .text-zinc-300, .job-card .text-zinc-400 { color: var(--text-secondary) !important; }
+  .job-card .text-zinc-500, .job-card .text-zinc-600 { color: var(--text-muted) !important; }
+  .job-card textarea, .job-card select { background: color-mix(in srgb, var(--canvas) 72%, var(--card)) !important; border-color: var(--divider) !important; color: var(--text-primary) !important; }
   .pulse-urgent { animation: pulseUrgent 1.2s ease-in-out infinite; }
   @keyframes pulseUrgent {
     0%,100% { border-color: #dc2626; box-shadow: 0 0 0 0 rgba(220,38,38,0); }
     50%      { border-color: #ef4444; box-shadow: 0 0 0 6px rgba(220,38,38,0.15); }
   }
   .callie-bubble { border-left: 3px solid #8b5cf6; background: rgba(139,92,246,0.07); }
-  .step-badge { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.1em; }
+  .step-badge { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; letter-spacing: 0.06em; }
   .confirm-btn {
     background: rgba(34,197,94,0.12);
     border: 1px solid #16a34a;
@@ -62,8 +82,8 @@
   .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; animation: livepulse 2s ease-in-out infinite; }
   @keyframes livepulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
   .callie-alert {
-    background: linear-gradient(135deg, rgba(139,92,246,0.15), rgba(109,40,217,0.08));
-    border: 1px solid rgba(139,92,246,0.3);
+    background: color-mix(in srgb, var(--adv) 8%, var(--card));
+    border: 1px solid color-mix(in srgb, var(--adv) 24%, var(--divider));
     border-radius: 12px;
     padding: 14px 18px;
     margin-bottom: 16px;
@@ -76,6 +96,17 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --canvas: #0F1419;
+      --card:   #1A2535;
+      --divider: #2A3545;
+      --text-primary:   #E8E4DC;
+      --text-secondary: #94A3B8;
+      --text-muted:     #64748B;
+    }
+    body { background: var(--canvas); }
   }
 </style>
 </head>
